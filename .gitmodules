@@ -1,0 +1,6 @@
+[submodule "tools/pcodec"]
+	path = tools/pcodec
+	url = https://github.com/pcodec/pcodec.git
+[submodule "tools/LCP"]
+	path = tools/LCP
+	url = https://github.com/hpdslab/LCP.git
