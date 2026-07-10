@@ -37,12 +37,10 @@ def maybe_clean_raw(work_dir: Path) -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     from src.cli import build_parser
-    parser = build_parser()
+    parser = build_parser(argv)
     args = parser.parse_args(argv)
     try:
         if args.command == "compress":
-            if not args.work_dir:
-                args.work_dir = str(default_work_dir_for_args(args))
             manifest, raw_paths, tools = preprocess(args)
             manifest = compress(args, manifest, raw_paths, tools)
             print(f"package_dir = {Path(args.work_dir).resolve()}")
@@ -52,22 +50,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if args.command == "decompress":
-            manifest = decompress(args)
+            tools = hp.ToolPaths(lcp=Path(args.lcp))
+            manifest = decompress(args, tools)
             if args.clean_raw:
                 maybe_clean_raw(Path(args.work_dir).resolve())
             print(f"reconstructed_h5 = {manifest['artifacts']['reconstructed_h5']}")
             return 0
 
         if args.command == "roundtrip":
-            if not args.work_dir:
-                args.work_dir = str(default_work_dir_for_args(args))
             manifest, raw_paths, tools = preprocess(args)
             manifest = compress(args, manifest, raw_paths, tools)
-            manifest = decompress(args)
+            manifest = decompress(args, tools)
             input_h5 = Path(args.input_h5).resolve()
             output_h5 = Path(manifest["artifacts"]["reconstructed_h5"]).resolve()
             metrics = hp.compute_metrics(input_h5, output_h5, manifest, args.chunk_size)
-            metrics_path = Path(args.metrics_json).resolve() if args.metrics_json else Path(args.work_dir).resolve() / "metrics.json"
+            metrics_path = Path(args.work_dir).resolve() / "metrics.json"
             hp.write_json(metrics_path, metrics, force=True)
             if args.clean_raw:
                 maybe_clean_raw(Path(args.work_dir).resolve())

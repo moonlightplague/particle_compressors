@@ -4,6 +4,7 @@ import subprocess
 import re
 import sys
 import math
+import shutil
 import h5py
 import numpy as np
 
@@ -40,6 +41,13 @@ def require_output_path(path: Path, force: bool) -> None:
     if path.exists() and not force:
         raise RuntimeError(f"{path} already exists. Use --force to overwrite pipeline outputs.")
     path.parent.mkdir(parents=True, exist_ok=True)
+
+def prepare_output_dir(path: Path, force: bool) -> None:
+    if path.exists():
+        if not force:
+            raise RuntimeError(f"{path} already exists. Use --force to overwrite pipeline outputs.")
+        shutil.rmtree(path)
+    path.mkdir(parents=True)
 
 def chunk_slices(count: int, chunk_size: int) -> Iterable[slice]:
     for start in range(0, count, chunk_size):

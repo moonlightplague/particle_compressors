@@ -451,7 +451,7 @@ def preprocess(args: argparse.Namespace):
         )
 
         selected_payload_bytes = sum(
-            int(np.dtype(dtype).itemsize * count) for logical in hp.LOGICAL_ORDER
+            int(np.dtype(h5[fields[logical]].dtype).itemsize * count) for logical in hp.LOGICAL_ORDER
         )
 
     manifest["artifacts"] = {
@@ -465,7 +465,7 @@ def preprocess(args: argparse.Namespace):
             "vz": str(cmp_dir / "vz.pyszparts"),
         },
     }
-    requested_part_size = args.part_size if args.part_size is not None else args.sz3_block_size
+    requested_part_size = args.part_size
     manifest["part_size"] = effective_part_size(manifest["count"], requested_part_size)
     manifest["order_dtype"] = "int32"
     manifest["compressed_segments"] = {}

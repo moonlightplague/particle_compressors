@@ -178,7 +178,7 @@ def decompress(args: argparse.Namespace,
     count = int(manifest["count"])
     dec_dir = work_dir / "decompressed"
     dec_dir.mkdir(parents=True, exist_ok=True)
-    output_h5 = Path(args.output_h5).resolve() if args.output_h5 else work_dir / "reconstructed.h5"
+    output_h5 = work_dir / "reconstructed.h5"
     hp.require_output_path(output_h5, args.force)
 
     t0 = time.perf_counter()
