@@ -1,0 +1,476 @@
+import argparse
+import os
+import shutil
+import h5py
+import time
+import math
+import importlib.metadata
+import numpy as np
+
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from pathlib import Path
+from dataclasses import dataclass
+
+import src.helpers as hp
+
+
+@dataclass(frozen=True)
+class PositionScale:
+    mode: str
+    value: float
+    attr: Optional[str] = None
+
+@dataclass(frozen=True)
+class ErrorBoundSelection:
+    mode: str
+    abs_by_field: Dict[str, float]
+    relative: Optional[float] = None
+    compressor_abs: Optional[float] = None
+
+
+def update_numeric_stats(stats: Dict[str, float], values: np.ndarray) -> None:
+    if values.size == 0:
+        return
+    values64 = values.astype(np.float64, copy=False)
+    stats["min"] = min(stats["min"], float(values64.min(initial=stats["min"])))
+    stats["max"] = max(stats["max"], float(values64.max(initial=stats["max"])))
+
+
+def finalize_numeric_stats(stats: Dict[str, float]) -> Dict[str, float]:
+    if math.isinf(stats["min"]) or math.isinf(stats["max"]):
+        raise RuntimeError("Cannot compute relative error bound for an empty field.")
+    value_range = float(stats["max"] - stats["min"])
+    return {"min": float(stats["min"]), "max": float(stats["max"]), "range": value_range}
+
+
+def resolve_fields(h5: h5py.File) -> Dict[str, str]:
+    available: Dict[str, str] = {}
+
+    def visit(name: str, obj: Any) -> None:
+        if isinstance(obj, h5py.Dataset):
+            available[name.split("/")[-1].lower()] = name
+
+    h5.visititems(visit)
+    resolved: Dict[str, str] = {}
+    for logical, aliases in hp.FIELD_ALIASES.items():
+        for alias in aliases:
+            if alias.lower() in available:
+                resolved[logical] = available[alias.lower()]
+                break
+        if logical not in resolved:
+            raise RuntimeError(
+                f"Could not find dataset for logical field {logical!r}; "
+                f"tried aliases {aliases}."
+            )
+    return resolved
+
+
+def resolve_position_scale(
+    h5: h5py.File,
+    mode: str,
+    attr_name: str,
+    explicit_value: Optional[float],
+    pos_dtype: np.dtype,
+) -> PositionScale:
+    if mode == "value":
+        if explicit_value is None:
+            raise RuntimeError("--position-scale value requires --position-scale-value.")
+        return PositionScale(mode="value", value=float(explicit_value))
+
+    if mode == "attr":
+        if attr_name not in h5.attrs:
+            raise RuntimeError(f"--position-scale attr requested, but root attr {attr_name!r} is missing.")
+        return PositionScale(mode="attr", value=float(np.asarray(h5.attrs[attr_name]).item()), attr=attr_name)
+
+    if mode == "raw":
+        return PositionScale(mode="raw", value=1.0)
+
+    if mode != "auto":
+        raise RuntimeError(f"Unsupported position scale mode: {mode}")
+
+    if np.issubdtype(pos_dtype, np.integer) and attr_name in h5.attrs:
+        value = float(np.asarray(h5.attrs[attr_name]).item())
+        if value > 0:
+            return PositionScale(mode="auto_attr", value=value, attr=attr_name)
+    return PositionScale(mode="auto_raw", value=1.0)
+
+
+def get_selected_count(h5: h5py.File, fields: Mapping[str, str], limit: Optional[int]) -> int:
+    sizes = {logical: int(h5[path].shape[0]) for logical, path in fields.items()}
+    unique_sizes = set(sizes.values())
+    if len(unique_sizes) != 1:
+        raise RuntimeError(f"Particle fields do not have the same length: {sizes}")
+    count = unique_sizes.pop()
+    if limit is not None:
+        if limit <= 0:
+            raise RuntimeError("--limit must be positive.")
+        count = min(count, limit)
+    return count
+
+
+def export_positions_for_lcp(
+    h5: h5py.File,
+    fields: Mapping[str, str],
+    out_dir: Path,
+    count: int,
+    chunk_size: int,
+    scale: PositionScale,
+    force: bool,
+) -> Tuple[Dict[str, str], Dict[str, Dict[str, float]]]:
+    out_paths: Dict[str, str] = {}
+    stats: Dict[str, Dict[str, float]] = {}
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for logical in hp.POSITION_FIELDS:
+        dataset = h5[fields[logical]]
+        out_path = out_dir / f"{logical}.f32.raw"
+        hp.require_output_path(out_path, force)
+        max_cast_abs = 0.0
+        max_cast_fixed = 0.0
+        range_stats = {"min": math.inf, "max": -math.inf}
+        with out_path.open("wb") as out:
+            for slc in hp.chunk_slices(count, chunk_size):
+                source = dataset[slc]
+                source64 = source.astype(np.float64, copy=False)
+                scaled64 = source64 / scale.value
+                scaled32 = scaled64.astype(np.float32)
+                scaled32.tofile(out)
+                update_numeric_stats(range_stats, scaled64)
+                if source.size:
+                    cast_abs = np.abs(scaled32.astype(np.float64) - scaled64)
+                    local_max = float(cast_abs.max(initial=0.0))
+                    max_cast_abs = max(max_cast_abs, local_max)
+                    max_cast_fixed = max(max_cast_fixed, local_max * scale.value)
+        out_paths[logical] = str(out_path)
+        field_stats = finalize_numeric_stats(range_stats)
+        stats[logical] = {
+            "scale": scale.value,
+            "preprocess_cast_max_abs_in_lcp_units": max_cast_abs,
+            "preprocess_cast_max_abs_in_original_fixed_point_units": max_cast_fixed,
+            "min_in_lcp_units": field_stats["min"],
+            "max_in_lcp_units": field_stats["max"],
+            "range_in_lcp_units": field_stats["range"],
+        }
+    return out_paths, stats
+
+def export_float_for_pysz(
+    h5: h5py.File,
+    dataset_path: str,
+    out_path: Path,
+    count: int,
+    chunk_size: int,
+    force: bool,
+) -> Tuple[str, Dict[str, float]]:
+    hp.require_output_path(out_path, force)
+    dtype = np.dtype(h5[dataset_path].dtype)
+    if dtype not in (np.dtype("float32"), np.dtype("float64")):
+        raise RuntimeError(f"pysz velocity export expected float32/float64, got {dtype} for {dataset_path}.")
+    range_stats = {"min": math.inf, "max": -math.inf}
+    with out_path.open("wb") as out:
+        for slc in hp.chunk_slices(count, chunk_size):
+            source = h5[dataset_path][slc].astype(dtype, copy=False)
+            source.tofile(out)
+            update_numeric_stats(range_stats, source)
+    field_stats = finalize_numeric_stats(range_stats)
+    return str(out_path), field_stats
+
+
+def export_id_for_pcodec(
+    h5: h5py.File,
+    dataset_path: str,
+    out_path: Path,
+    count: int,
+    chunk_size: int,
+    force: bool,
+) -> Tuple[str, Dict[str, Any]]:
+    hp.require_output_path(out_path, force)
+    dataset = h5[dataset_path]
+    source_dtype = np.dtype(dataset.dtype)
+    if not np.issubdtype(source_dtype, np.integer):
+        raise RuntimeError(f"pcodec id export expected an integer dtype, got {source_dtype} for {dataset_path}.")
+    min_id: Optional[int] = None
+    max_id: Optional[int] = None
+    with out_path.open("wb") as out:
+        for slc in hp.chunk_slices(count, chunk_size):
+            source = dataset[slc]
+            local_min = int(source.min()) if source.size else 0
+            local_max = int(source.max()) if source.size else 0
+            min_id = local_min if min_id is None else min(min_id, local_min)
+            max_id = local_max if max_id is None else max(max_id, local_max)
+            source.astype(source_dtype, copy=False).tofile(out)
+    return str(out_path), {"source_dtype": str(source_dtype), "min": min_id, "max": max_id, "pcodec_dtype": str(source_dtype)}
+
+
+def validate_error_bound(value: float, label: str) -> float:
+    value = float(value)
+    if value < 0.0:
+        raise RuntimeError(f"{label} must be non-negative.")
+    return value
+
+
+def select_relative_or_absolute(
+    args: argparse.Namespace,
+    prefix: str,
+    fields: Iterable[str],
+    ranges: Mapping[str, float],
+    default_abs: float,
+    compressor_abs: Optional[float] = None,
+) -> ErrorBoundSelection:
+    specific_rel = getattr(args, f"{prefix}_rel_eb")
+    specific_abs = getattr(args, f"{prefix}_abs_eb")
+    if specific_rel is not None and specific_abs is not None:
+        raise RuntimeError(f"--{prefix.replace('_', '-')}-rel-eb and --{prefix.replace('_', '-')}-abs-eb cannot both be set.")
+
+    if specific_rel is not None:
+        rel = validate_error_bound(specific_rel, f"--{prefix.replace('_', '-')}-rel-eb")
+        abs_by_field = {field: rel * float(ranges[field]) for field in fields}
+        return ErrorBoundSelection("relative", abs_by_field, relative=rel, compressor_abs=compressor_abs)
+
+    if specific_abs is not None:
+        abs_eb = validate_error_bound(specific_abs, f"--{prefix.replace('_', '-')}-abs-eb")
+        return ErrorBoundSelection("absolute", {field: abs_eb for field in fields}, compressor_abs=compressor_abs)
+
+    if args.rel_eb is not None:
+        rel = validate_error_bound(args.rel_eb, "--rel-eb")
+        abs_by_field = {field: rel * float(ranges[field]) for field in fields}
+        return ErrorBoundSelection("relative", abs_by_field, relative=rel, compressor_abs=compressor_abs)
+
+    abs_eb = validate_error_bound(default_abs, "--abs-eb")
+    return ErrorBoundSelection("absolute", {field: abs_eb for field in fields}, compressor_abs=compressor_abs)
+
+
+def serialize_error_bound_selection(
+    selection: ErrorBoundSelection,
+    fields: Iterable[str],
+    ranges: Mapping[str, float],
+    range_units: str,
+) -> Dict[str, Dict[str, Any]]:
+    return {
+        field: {
+            "mode": selection.mode,
+            "abs": float(selection.abs_by_field[field]),
+            "relative": selection.relative,
+            "range": float(ranges[field]),
+            "range_units": range_units,
+            "compressor_abs": float(
+                selection.compressor_abs if selection.compressor_abs is not None else selection.abs_by_field[field]
+            ),
+        }
+        for field in fields
+    }
+
+
+def as_jsonable_attr(value: Any) -> Dict[str, Any]:
+    arr = np.asarray(value)
+    if arr.shape == ():
+        payload: Any = arr.item()
+    else:
+        payload = arr.tolist()
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8", errors="surrogateescape")
+    return {"dtype": str(arr.dtype), "shape": list(arr.shape), "value": payload}
+
+
+def collect_attrs(obj: Any) -> Dict[str, Dict[str, Any]]:
+    return {name: as_jsonable_attr(obj.attrs[name]) for name in obj.attrs.keys()}
+
+
+def package_version(name: str) -> Optional[str]:
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def make_manifest(
+    input_h5: Path,
+    h5: h5py.File,
+    fields: Mapping[str, str],
+    count: int,
+    limit: Optional[int],
+    pos_scale: PositionScale,
+    pos_eb: float,
+    vel_eb: float,
+    id_eb: float,
+    field_error_bounds: Mapping[str, Mapping[str, Any]],
+    tools: hp.ToolPaths,
+) -> Dict[str, Any]:
+    datasets: Dict[str, Dict[str, Any]] = {}
+    for logical, h5_path in fields.items():
+        dset = h5[h5_path]
+        datasets[logical] = {
+            "h5_path": h5_path,
+            "dtype": str(dset.dtype),
+            "shape": list(dset.shape),
+            "selected_shape": [count],
+            "attrs": collect_attrs(dset),
+        }
+    attrs = collect_attrs(h5)
+    if limit is not None and "npart" in attrs:
+        attrs["npart"] = as_jsonable_attr(np.asarray(count, dtype=np.asarray(h5.attrs["npart"]).dtype))
+    return {
+        "format_version": 1,
+        "input_h5": str(input_h5),
+        "input_h5_file_bytes": input_h5.stat().st_size,
+        "count": count,
+        "limit": limit,
+        "fields": datasets,
+        "root_attrs": attrs,
+        "position_scale": {"mode": pos_scale.mode, "value": pos_scale.value, "attr": pos_scale.attr},
+        "error_bounds": {
+            "positions_lcp_abs": pos_eb,
+            "velocities_sz3_abs": vel_eb,
+            "id_sz3_abs": id_eb,
+        },
+        "field_error_bounds": field_error_bounds,
+        "tools": {
+            "lcp": str(tools.lcp),
+            "pcodec": package_version("pcodec"),
+            "pysz": package_version("pysz"),
+        },
+    }
+
+
+def effective_part_size(count: int, requested: int) -> int:
+    if requested < 0:
+        raise RuntimeError("Part size must be non-negative.")
+    if requested == 0:
+        return count
+    return max(1, requested)
+
+
+def preprocess(args: argparse.Namespace):
+    input_h5 = Path(args.input_h5).resolve()
+    if not input_h5.is_file():
+        raise RuntimeError(f"Input HDF5 file does not exist: {input_h5}")
+    tools = hp.ToolPaths(
+        lcp=Path(args.lcp),
+    )
+    work_dir = Path(args.work_dir).resolve()
+    pre_dir = work_dir / "preprocessed"
+    cmp_dir = work_dir / "compressed"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    if args.force and cmp_dir.exists():
+        shutil.rmtree(cmp_dir)
+    pre_dir.mkdir(parents=True, exist_ok=True)
+    cmp_dir.mkdir(parents=True, exist_ok=True)
+
+    t0 = time.perf_counter()
+    preprocess_stats: Dict[str, Any] = {}
+    raw_paths: Dict[str, str] = {}
+
+    with h5py.File(input_h5, "r") as h5:
+        fields = resolve_fields(h5)
+        count = get_selected_count(h5, fields, args.limit)
+        first_pos_dtype = np.dtype(h5[fields["x"]].dtype)
+        pos_scale = resolve_position_scale(
+            h5,
+            args.position_scale,
+            args.position_scale_attr,
+            args.position_scale_value,
+            first_pos_dtype,
+        )
+
+        pos_paths, pos_stats = export_positions_for_lcp(
+            h5, fields, pre_dir, count, args.chunk_size, pos_scale, args.force
+        )
+        raw_paths.update(pos_paths)
+        preprocess_stats["positions"] = pos_stats
+
+        id_dtype = np.dtype(h5[fields["id"]].dtype)
+        id_path, id_stats = export_id_for_pcodec(
+            h5, fields["id"], pre_dir / f"id.{id_dtype.name}.raw", count, args.chunk_size, args.force
+        )
+        raw_paths["id"] = id_path
+        preprocess_stats["id"] = id_stats
+
+        velocity_stats: Dict[str, Dict[str, float]] = {}
+        for logical in hp.VELOCITY_FIELDS:
+            source_dtype = str(np.dtype(h5[fields[logical]].dtype))
+            out_path = pre_dir / f"{logical}.{source_dtype}.raw"
+            raw_paths[logical], velocity_stats[logical] = export_float_for_pysz(
+                h5, fields[logical], out_path, count, args.chunk_size, args.force
+            )
+        preprocess_stats["velocities"] = velocity_stats
+
+        position_ranges = {logical: pos_stats[logical]["range_in_lcp_units"] for logical in hp.POSITION_FIELDS}
+        velocity_ranges = {logical: velocity_stats[logical]["range"] for logical in hp.VELOCITY_FIELDS}
+
+        pos_selection_base = select_relative_or_absolute(
+            args, "pos", hp.POSITION_FIELDS, position_ranges, args.abs_eb
+        )
+        if pos_selection_base.mode == "relative":
+            pos_compressor_bounds: List[float] = []
+            for logical in hp.POSITION_FIELDS:
+                dtype = np.dtype(h5[fields[logical]].dtype)
+                rounding = 0.5 / pos_scale.value if np.issubdtype(dtype, np.integer) else 0.0
+                cast = float(pos_stats[logical]["preprocess_cast_max_abs_in_lcp_units"])
+                pos_compressor_bounds.append(max(0.0, pos_selection_base.abs_by_field[logical] - cast - rounding))
+            pos_eb = float(min(pos_compressor_bounds))
+        else:
+            pos_eb = float(min(pos_selection_base.abs_by_field.values()))
+        pos_selection = ErrorBoundSelection(
+            pos_selection_base.mode,
+            pos_selection_base.abs_by_field,
+            relative=pos_selection_base.relative,
+            compressor_abs=pos_eb,
+        )
+        vel_selection = select_relative_or_absolute(
+            args, "vel", hp.VELOCITY_FIELDS, velocity_ranges, args.abs_eb
+        )
+        vel_eb = float(max(vel_selection.abs_by_field.values()))
+        id_eb = validate_error_bound(args.id_abs_eb, "--id-abs-eb")
+
+        field_error_bounds = serialize_error_bound_selection(
+            pos_selection, hp.POSITION_FIELDS, position_ranges, "lcp_units"
+        )
+        field_error_bounds.update(
+            serialize_error_bound_selection(vel_selection, hp.VELOCITY_FIELDS, velocity_ranges, "source_units")
+        )
+        field_error_bounds["id"] = {
+            "mode": "lossless",
+            "abs": id_eb,
+            "relative": None,
+            "range": float(id_stats["max"] - id_stats["min"]) if id_stats["min"] is not None else None,
+            "range_units": "source_units",
+            "compressor_abs": 0.0,
+        }
+
+        manifest = make_manifest(
+            input_h5,
+            h5,
+            fields,
+            count,
+            args.limit,
+            pos_scale,
+            pos_eb,
+            vel_eb,
+            id_eb,
+            field_error_bounds,
+            tools,
+        )
+
+        selected_payload_bytes = sum(
+            int(np.dtype(dtype).itemsize * count) for logical in hp.LOGICAL_ORDER
+        )
+
+    manifest["artifacts"] = {
+        "preprocessed": raw_paths,
+        "compressed": {
+            "positions": str(cmp_dir / "positions.lcp"),
+            "order": str(cmp_dir / "order.pcodecparts"),
+            "id": str(cmp_dir / "id.pcodecparts"),
+            "vx": str(cmp_dir / "vx.pyszparts"),
+            "vy": str(cmp_dir / "vy.pyszparts"),
+            "vz": str(cmp_dir / "vz.pyszparts"),
+        },
+    }
+    requested_part_size = args.part_size if args.part_size is not None else args.sz3_block_size
+    manifest["part_size"] = effective_part_size(manifest["count"], requested_part_size)
+    manifest["order_dtype"] = "int32"
+    manifest["compressed_segments"] = {}
+    manifest["preprocess"] = preprocess_stats
+    manifest["sizes"] = {"selected_original_payload_bytes": selected_payload_bytes}
+    hp.write_json(work_dir / "manifest.json", manifest, force=True)
+
+    return manifest, raw_paths, tools

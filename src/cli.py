@@ -1,7 +1,7 @@
 import argparse
 
 def add_common_tool_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--lcp", help="Path to the LCP executable.")
+    parser.add_argument("--lcp", type=str, default="/home/moonlightplague/projects/particle_compressors/tools/LCP/build/bin/lcp", help="Path to the LCP executable.")
     parser.add_argument("--sz3", help=argparse.SUPPRESS)
     parser.add_argument("--chunk-size", type=int, default=4_000_000, help="HDF5/raw streaming chunk length.")
     parser.add_argument(
@@ -17,6 +17,7 @@ def add_common_tool_args(parser: argparse.ArgumentParser) -> None:
         help="Deprecated alias for --part-size.",
     )
     parser.add_argument("--force", action="store_true", help="Overwrite pipeline outputs in the work directory.")
+
 
 def add_compression_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("input_h5", help="Input HDF5 particle file.")
@@ -56,6 +57,7 @@ def add_compression_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--position-scale-attr", default="bitwidth", help="Root attribute used by --position-scale attr.")
     parser.add_argument("--position-scale-value", type=float, help="Scale used by --position-scale value.")
+    
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
