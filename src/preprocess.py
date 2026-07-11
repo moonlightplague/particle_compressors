@@ -5,7 +5,7 @@ import math
 import importlib.metadata
 import numpy as np
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -147,6 +147,33 @@ def export_positions_for_lcp(
         }
     return out_paths, stats
 
+
+def export_positions_for_xnyzip(
+    position_paths: Mapping[str, str],
+    out_path: Path,
+    count: int,
+    force: bool,
+) -> Tuple[str, Dict[str, Any]]:
+    hp.require_output_path(out_path, force)
+    interleaved = np.memmap(out_path, dtype=np.float32, mode="w+", shape=(count, 3))
+    for axis, logical in enumerate(hp.POSITION_FIELDS):
+        values = np.memmap(position_paths[logical], dtype=np.float32, mode="r")
+        if values.size != count:
+            raise RuntimeError(
+                f"XnYZip position export expected {count} values in {position_paths[logical]}, "
+                f"got {values.size}."
+            )
+        interleaved[:, axis] = values
+    interleaved.flush()
+    del interleaved
+    return str(out_path), {
+        "dtype": "float32",
+        "shape": [count, 3],
+        "layout": "xyz_interleaved",
+        "file_bytes": count * 3 * np.dtype(np.float32).itemsize,
+    }
+
+
 def export_float_for_pysz(
     h5: h5py.File,
     dataset_path: str,
@@ -274,6 +301,7 @@ def make_manifest(
     limit: Optional[int],
     pos_scale: PositionScale,
     pos_eb: float,
+    xnyzip_eb: float,
     vel_eb: float,
     id_eb: float,
     field_error_bounds: Mapping[str, Mapping[str, Any]],
@@ -303,6 +331,7 @@ def make_manifest(
         "position_scale": {"mode": pos_scale.mode, "value": pos_scale.value, "attr": pos_scale.attr},
         "error_bounds": {
             "positions_lcp_abs": pos_eb,
+            "positions_xnyzip_abs": xnyzip_eb,
             "velocities_sz3_abs": vel_eb,
             "id_sz3_abs": id_eb,
         },
@@ -352,6 +381,12 @@ def preprocess(args: argparse.Namespace):
         raw_paths.update(pos_paths)
         preprocess_stats["positions"] = pos_stats
 
+        xnyzip_path, xnyzip_stats = export_positions_for_xnyzip(
+            pos_paths, pre_dir / "positions.xnyzip.bin", count, args.force
+        )
+        raw_paths["positions_xnyzip"] = xnyzip_path
+        preprocess_stats["positions_xnyzip"] = xnyzip_stats
+
         id_dtype = np.dtype(h5[fields["id"]].dtype)
         id_path, id_stats = export_id_for_pcodec(
             h5, fields["id"], pre_dir / f"id.{id_dtype.name}.raw", count, args.force
@@ -370,20 +405,33 @@ def preprocess(args: argparse.Namespace):
 
         position_ranges = {logical: pos_stats[logical]["range_in_lcp_units"] for logical in hp.POSITION_FIELDS}
         velocity_ranges = {logical: velocity_stats[logical]["range"] for logical in hp.VELOCITY_FIELDS}
+        position_diagonal = math.sqrt(sum(value * value for value in position_ranges.values()))
 
         pos_selection_base = select_relative_or_absolute(
             args, "pos", hp.POSITION_FIELDS, position_ranges, args.abs_eb
         )
+        position_preprocess_errors: Dict[str, float] = {}
+        for logical in hp.POSITION_FIELDS:
+            dtype = np.dtype(h5[fields[logical]].dtype)
+            rounding = 0.5 / pos_scale.value if np.issubdtype(dtype, np.integer) else 0.0
+            cast = float(pos_stats[logical]["preprocess_cast_max_abs_in_lcp_units"])
+            position_preprocess_errors[logical] = cast + rounding
         if pos_selection_base.mode == "relative":
-            pos_compressor_bounds: List[float] = []
-            for logical in hp.POSITION_FIELDS:
-                dtype = np.dtype(h5[fields[logical]].dtype)
-                rounding = 0.5 / pos_scale.value if np.issubdtype(dtype, np.integer) else 0.0
-                cast = float(pos_stats[logical]["preprocess_cast_max_abs_in_lcp_units"])
-                pos_compressor_bounds.append(max(0.0, pos_selection_base.abs_by_field[logical] - cast - rounding))
+            pos_compressor_bounds = [
+                max(0.0, pos_selection_base.abs_by_field[logical] - position_preprocess_errors[logical])
+                for logical in hp.POSITION_FIELDS
+            ]
             pos_eb = float(min(pos_compressor_bounds))
+            xnyzip_requested_eb = float(pos_selection_base.relative * position_diagonal)
+            xnyzip_preprocess_error = math.sqrt(
+                sum(value * value for value in position_preprocess_errors.values())
+            )
+            xnyzip_eb = max(0.0, xnyzip_requested_eb - xnyzip_preprocess_error)
         else:
             pos_eb = float(min(pos_selection_base.abs_by_field.values()))
+            xnyzip_requested_eb = pos_eb
+            xnyzip_preprocess_error = 0.0
+            xnyzip_eb = pos_eb
         pos_selection = ErrorBoundSelection(
             pos_selection_base.mode,
             pos_selection_base.abs_by_field,
@@ -399,6 +447,15 @@ def preprocess(args: argparse.Namespace):
         field_error_bounds = serialize_error_bound_selection(
             pos_selection, hp.POSITION_FIELDS, position_ranges, "lcp_units"
         )
+        field_error_bounds["positions_xnyzip"] = {
+            "mode": pos_selection_base.mode,
+            "abs": xnyzip_requested_eb,
+            "relative": pos_selection_base.relative,
+            "range": position_diagonal,
+            "range_units": "lcp_units_bbox_diagonal",
+            "compressor_abs": xnyzip_eb,
+            "preprocess_l2_max_abs": xnyzip_preprocess_error,
+        }
         field_error_bounds.update(
             serialize_error_bound_selection(vel_selection, hp.VELOCITY_FIELDS, velocity_ranges, "source_units")
         )
@@ -419,6 +476,7 @@ def preprocess(args: argparse.Namespace):
             args.limit,
             pos_scale,
             pos_eb,
+            xnyzip_eb,
             vel_eb,
             id_eb,
             field_error_bounds,
