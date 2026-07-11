@@ -13,16 +13,14 @@ def decompress_pcodec_raw(
     field: Mapping[str, Any],
     out_path: str,
     force: bool,
-) -> Dict[str, Any]:
+):
     standalone, _ = hp.load_pcodec()
     dt = np.dtype(field["dtype"])
     count = int(field["count"])
     out = Path(out_path)
     hp.require_output_path(out, force)
     payload = Path(field["path"]).read_bytes()
-    start_time = time.perf_counter()
     data = standalone.simple_decompress(payload)
-    elapsed = time.perf_counter() - start_time
     if data is None:
         raise RuntimeError(f"pcodec decompression for {field['field']} returned no data.")
     data = np.asarray(data)
@@ -35,21 +33,13 @@ def decompress_pcodec_raw(
             f"pcodec decompression for {field['field']} returned dtype {data.dtype}, expected {dt}."
         )
     data.tofile(out)
-    return {
-        "api": "pcodec.standalone.simple_decompress",
-        "field": field["field"],
-        "count": int(data.size),
-        "input_bytes": len(payload),
-        "output_bytes": int(data.nbytes),
-        "wall_seconds": elapsed,
-    }
 
 
 def decompress_pysz_raw(
     field: Mapping[str, Any],
     out_path: str,
     force: bool,
-) -> Dict[str, Any]:
+):
     PyszSZ, _, _ = hp.load_pysz()
     dt = np.dtype(field["dtype"])
     count = int(field["count"])
@@ -57,27 +47,16 @@ def decompress_pysz_raw(
     out = Path(out_path)
     hp.require_output_path(out, force)
     compressed = np.fromfile(field["path"], dtype=np.uint8)
-    start_time = time.perf_counter()
     try:
         data, _ = PyszSZ.decompress(compressed, dt, (encoded_count,))
     except Exception as exc:
         raise RuntimeError(f"pysz decompression failed for {field['field']}.") from exc
-    elapsed = time.perf_counter() - start_time
     data = np.asarray(data, dtype=dt)
     if data.size < count:
         raise RuntimeError(
             f"pysz decompression for {field['field']} returned {data.size} values, expected at least {count}."
         )
     data[:count].tofile(out)
-    return {
-        "api": "pysz.sz.decompress",
-        "field": field["field"],
-        "count": count,
-        "encoded_count": encoded_count,
-        "input_bytes": int(compressed.size),
-        "output_bytes": int(count * dt.itemsize),
-        "wall_seconds": elapsed,
-    }
 
 
 def restore_attr(payload: Mapping[str, Any]) -> Any:
@@ -158,7 +137,6 @@ def decompress(args: argparse.Namespace,
     hp.require_output_path(output_h5, args.force)
 
     t0 = time.perf_counter()
-    commands: Dict[str, Any] = {}
     order_dtype = hp.order_dtype_from_manifest(manifest)
     dec_paths = {
         "x": str(dec_dir / "x.f32.raw"),
@@ -174,7 +152,7 @@ def decompress(args: argparse.Namespace,
         hp.require_output_path(Path(path), args.force)
 
     artifacts = manifest["artifacts"]["compressed"]
-    commands["lcp_decompress_positions"] = hp.run_command(
+    hp.run_command(
         [
             str(tools.lcp),
             "-z",
@@ -193,14 +171,14 @@ def decompress(args: argparse.Namespace,
     fields = manifest.get("compressed_fields")
     if not fields:
         raise RuntimeError("Manifest does not contain compressed_fields for the Python compressor pipeline.")
-    commands["pcodec_decompress_lcp_order"] = decompress_pcodec_raw(
+    decompress_pcodec_raw(
         fields["order"], dec_paths["order"], args.force
     )
-    commands["pcodec_decompress_id"] = decompress_pcodec_raw(
+    decompress_pcodec_raw(
         fields["id"], dec_paths["id"], args.force
     )
     for logical in hp.VELOCITY_FIELDS:
-        commands[f"pysz_decompress_{logical}"] = decompress_pysz_raw(
+        decompress_pysz_raw(
             fields[logical], dec_paths[logical], args.force
         )
 
@@ -208,7 +186,6 @@ def decompress(args: argparse.Namespace,
     recombine_h5(manifest, dec_paths, output_h5)
     recombine_seconds = time.perf_counter() - recombine_start
 
-    manifest.setdefault("commands", {})["decompress"] = commands
     manifest.setdefault("timing", {})["decompress_and_recombine_wall_seconds"] = time.perf_counter() - t0
     manifest["timing"]["recombine_h5_wall_seconds"] = recombine_seconds
     manifest["artifacts"]["decompressed"] = dec_paths

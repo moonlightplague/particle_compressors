@@ -3,11 +3,16 @@ advanced:
   lcp: ./tools/LCP/build/bin/lcp
 
   # Optional field-specific bounds override --abs-eb/--rel-eb when set.
+  abs_eb: null
+  rel_eb: 1e-3
   pos_abs_eb: null
   pos_rel_eb: null
   vel_abs_eb: null
   vel_rel_eb: null
   id_abs_eb: 0.0
+  pos_compressor: lcp
+  vel_compressor: sz3
+  lossless: pcodec
 
   # Integer position conversion used before LCP compression.
   position_scale: auto

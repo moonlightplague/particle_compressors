@@ -76,20 +76,10 @@ accepted by this format.
 
 ## Error Bounds
 
-The default `--abs-eb 1e-3` applies to positions and velocities. A relative
-bound can be calculated independently from each selected field's value range:
-
-```bash
-python main.py roundtrip INPUT.h5 \
-  --work-dir RUN_DIR \
-  --rel-eb 1e-5
-```
-
+The default `--rel-eb 1e-3` applies to positions and velocities. 
 Position- and velocity-specific bounds can be supplied through
 `--pos-abs-eb`, `--pos-rel-eb`, `--vel-abs-eb`, and `--vel-rel-eb`. A
 field-class-specific value takes precedence over the global `--abs-eb` or
 `--rel-eb`. Do not set both absolute and relative bounds for the same field
-class.
-
-IDs are always compressed losslessly. `id_abs_eb` only defines the expected ID
+class. IDs are always compressed losslessly. `id_abs_eb` only defines the expected ID
 error used by metrics and defaults to zero.

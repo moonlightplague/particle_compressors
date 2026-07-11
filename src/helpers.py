@@ -65,18 +65,9 @@ def parse_tool_stdout(stdout: str) -> Dict[str, Any]:
             parsed[key] = float(match.group(1))
     return parsed
 
-def run_command(argv: List[str]) -> Dict[str, Any]:
+def run_command(argv: List[str]):
     start = time.perf_counter()
     proc = subprocess.run(argv, text=True, capture_output=True)
-    elapsed = time.perf_counter() - start
-    record: Dict[str, Any] = {
-        "argv": argv,
-        "wall_seconds": elapsed,
-        "returncode": proc.returncode,
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-    }
-    record.update(parse_tool_stdout(proc.stdout))
     if proc.returncode != 0:
         raise RuntimeError(
             "Command failed with exit code "
@@ -84,7 +75,6 @@ def run_command(argv: List[str]) -> Dict[str, Any]:
             f"stdout:\n{proc.stdout}\n"
             f"stderr:\n{proc.stderr}"
         )
-    return record
 
 
 def load_pcodec() -> Tuple[Any, Any]:

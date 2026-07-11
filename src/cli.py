@@ -1,7 +1,7 @@
 import argparse
 
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, List
 
 import yaml
 
@@ -9,6 +9,8 @@ import yaml
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lcp": str(DEFAULT_CONFIG_PATH.parent / "tools" / "LCP" / "build" / "bin" / "lcp"),
+    "abs_eb": None,
+    "rel_eb": 1e-3,
     "pos_abs_eb": None,
     "pos_rel_eb": None,
     "vel_abs_eb": None,
@@ -17,6 +19,14 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "position_scale": "auto",
     "position_scale_attr": "bitwidth",
     "position_scale_value": None,
+    "pos_compressor": "lcp",
+    "vel_compressor": "sz3",
+    "lossless": "pcodec"
+}
+AVAILABLE_COMPRESSORS: Dict[str, List[str]] = {
+    "pos_compressor": ["lcp", "sz3"],
+    "vel_compressor": ["sz3"], 
+    "lossless": ["pcodec", "zstd"]
 }
 
 
@@ -97,10 +107,11 @@ def add_common_tool_args(parser: argparse.ArgumentParser, defaults: Mapping[str,
 def add_compression_args(parser: argparse.ArgumentParser, defaults: Mapping[str, Any]) -> None:
     parser.add_argument("input_h5", help="Input HDF5 particle file.")
     parser.add_argument("--work-dir", default="particle_pipeline_runs", help="Pipeline work/package directory containing manifest.json.")
-    parser.add_argument("--abs-eb", type=float, default=1e-3, help="Default absolute error bound.")
+    parser.add_argument("--abs-eb", type=float, default=defaults["abs_eb"], help="Default absolute error bound.")
     parser.add_argument(
         "--rel-eb",
         type=float,
+        default=defaults["rel_eb"],
         help=(
             "Default relative error bound for lossy fields. It is converted to per-field absolute "
             "bounds from the selected data range unless a class-specific absolute/relative bound is set."
@@ -157,6 +168,22 @@ def add_compression_args(parser: argparse.ArgumentParser, defaults: Mapping[str,
         default=defaults["position_scale_value"],
         help="Scale used by --position-scale value.",
     )
+    parser.add_argument(
+        "--pos-compressor",
+        type=str,
+        default=defaults["pos_compressor"]
+    )
+    parser.add_argument(
+        "--vel-compressor",
+        type=str,
+        default=defaults["vel_compressor"]
+    )
+    parser.add_argument(
+        "--lossless",
+        type=str,
+        default=defaults["lossless"]
+    )
+
 
 
 def build_parser(argv: Optional[Sequence[str]] = None) -> argparse.ArgumentParser:
