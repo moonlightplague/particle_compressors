@@ -172,6 +172,11 @@ def build_parser(argv: Optional[Sequence[str]] = None) -> argparse.ArgumentParse
     add_config_arg(parser, str(config_path))
     sub = parser.add_subparsers(dest="command", required=True)
 
+    preprocess = sub.add_parser("preprocess", help="Preprocess an HDF5 particle file, output the preprocessed data files and calculated manifest")
+    add_config_arg(preprocess, argparse.SUPPRESS)
+    add_common_tool_args(preprocess, defaults)
+    add_compression_args(preprocess, defaults)
+
     compress = sub.add_parser("compress", help="Preprocess and compress an HDF5 particle file.")
     add_config_arg(compress, argparse.SUPPRESS)
     add_common_tool_args(compress, defaults)

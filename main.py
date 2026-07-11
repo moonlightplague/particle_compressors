@@ -40,6 +40,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser(argv)
     args = parser.parse_args(argv)
     try:
+        if args.command == "preprocess":
+            manifest, raw_paths, tools = preprocess(args)
+            print(f"package_dir = {Path(args.work_dir).resolve()}")
+            print(f"manifest = {Path(args.work_dir).resolve() / 'manifest.json'}")
+            return 0
+        
         if args.command == "compress":
             manifest, raw_paths, tools = preprocess(args)
             manifest = compress(args, manifest, raw_paths, tools)
