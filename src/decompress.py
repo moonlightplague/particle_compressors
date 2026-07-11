@@ -4,99 +4,80 @@ import numpy as np
 import h5py
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping
 
 import src.helpers as hp
 
 
-def decompress_pcodec_raw_parts(
-    segment: Mapping[str, Any],
+def decompress_pcodec_raw(
+    field: Mapping[str, Any],
     out_path: str,
     force: bool,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     standalone, _ = hp.load_pcodec()
-    dt = np.dtype(segment["dtype"])
-    records: List[Dict[str, Any]] = []
+    dt = np.dtype(field["dtype"])
+    count = int(field["count"])
     out = Path(out_path)
     hp.require_output_path(out, force)
-    with out.open("wb") as out_file:
-        for part in segment["parts"]:
-            part_index = int(part["index"])
-            part_count = int(part["count"])
-            payload = Path(part["path"]).read_bytes()
-            start_time = time.perf_counter()
-            data = standalone.simple_decompress(payload)
-            elapsed = time.perf_counter() - start_time
-            if data is None:
-                raise RuntimeError(f"pcodec part decompression for {segment['field']} part {part_index} returned no data.")
-            data = np.asarray(data)
-            if data.size != part_count:
-                raise RuntimeError(
-                    f"pcodec part decompression for {segment['field']} part {part_index} "
-                    f"returned {data.size} values, expected {part_count}."
-                )
-            if np.dtype(data.dtype) != dt:
-                raise RuntimeError(
-                    f"pcodec part decompression for {segment['field']} part {part_index} "
-                    f"returned dtype {data.dtype}, expected {dt}."
-                )
-            data.tofile(out_file)
-            records.append(
-                {
-                    "api": "pcodec.standalone.simple_decompress",
-                    "field": segment["field"],
-                    "part": part_index,
-                    "count": int(data.size),
-                    "input_bytes": len(payload),
-                    "output_bytes": int(data.nbytes),
-                    "wall_seconds": elapsed,
-                }
-            )
-    return records
+    payload = Path(field["path"]).read_bytes()
+    start_time = time.perf_counter()
+    data = standalone.simple_decompress(payload)
+    elapsed = time.perf_counter() - start_time
+    if data is None:
+        raise RuntimeError(f"pcodec decompression for {field['field']} returned no data.")
+    data = np.asarray(data)
+    if data.size != count:
+        raise RuntimeError(
+            f"pcodec decompression for {field['field']} returned {data.size} values, expected {count}."
+        )
+    if np.dtype(data.dtype) != dt:
+        raise RuntimeError(
+            f"pcodec decompression for {field['field']} returned dtype {data.dtype}, expected {dt}."
+        )
+    data.tofile(out)
+    return {
+        "api": "pcodec.standalone.simple_decompress",
+        "field": field["field"],
+        "count": int(data.size),
+        "input_bytes": len(payload),
+        "output_bytes": int(data.nbytes),
+        "wall_seconds": elapsed,
+    }
 
 
-def decompress_pysz_raw_parts(
-    segment: Mapping[str, Any],
+def decompress_pysz_raw(
+    field: Mapping[str, Any],
     out_path: str,
     force: bool,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     PyszSZ, _, _ = hp.load_pysz()
-    dt = np.dtype(segment["dtype"])
-    records: List[Dict[str, Any]] = []
+    dt = np.dtype(field["dtype"])
+    count = int(field["count"])
+    encoded_count = int(field.get("encoded_count", count))
     out = Path(out_path)
     hp.require_output_path(out, force)
-    with out.open("wb") as out_file:
-        for part in segment["parts"]:
-            part_index = int(part["index"])
-            part_count = int(part["count"])
-            encoded_count = int(part.get("encoded_count", part_count))
-            compressed = np.fromfile(part["path"], dtype=np.uint8)
-            start_time = time.perf_counter()
-            try:
-                data, _ = PyszSZ.decompress(compressed, dt, (encoded_count,))
-            except Exception as exc:
-                raise RuntimeError(f"pysz decompression failed for {segment['field']} part {part_index}.") from exc
-            elapsed = time.perf_counter() - start_time
-            data = np.asarray(data, dtype=dt)
-            if data.size < part_count:
-                raise RuntimeError(
-                    f"pysz part decompression for {segment['field']} part {part_index} "
-                    f"returned {data.size} values, expected at least {part_count}."
-                )
-            data[:part_count].tofile(out_file)
-            records.append(
-                {
-                    "api": "pysz.sz.decompress",
-                    "field": segment["field"],
-                    "part": part_index,
-                    "count": part_count,
-                    "encoded_count": encoded_count,
-                    "input_bytes": int(compressed.size),
-                    "output_bytes": int(part_count * dt.itemsize),
-                    "wall_seconds": elapsed,
-                }
-            )
-    return records
+    compressed = np.fromfile(field["path"], dtype=np.uint8)
+    start_time = time.perf_counter()
+    try:
+        data, _ = PyszSZ.decompress(compressed, dt, (encoded_count,))
+    except Exception as exc:
+        raise RuntimeError(f"pysz decompression failed for {field['field']}.") from exc
+    elapsed = time.perf_counter() - start_time
+    data = np.asarray(data, dtype=dt)
+    if data.size < count:
+        raise RuntimeError(
+            f"pysz decompression for {field['field']} returned {data.size} values, expected at least {count}."
+        )
+    data[:count].tofile(out)
+    return {
+        "api": "pysz.sz.decompress",
+        "field": field["field"],
+        "count": count,
+        "encoded_count": encoded_count,
+        "input_bytes": int(compressed.size),
+        "output_bytes": int(count * dt.itemsize),
+        "wall_seconds": elapsed,
+    }
 
 
 def restore_attr(payload: Mapping[str, Any]) -> Any:
@@ -121,7 +102,7 @@ def create_dataset(h5: h5py.File, path: str, dtype: np.dtype, count: int) -> h5p
         group = h5.require_group(parent_path)
     return group.create_dataset(name, shape=(count,), dtype=dtype)
 
-def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], output_h5: Path, chunk_size: int) -> None:
+def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], output_h5: Path) -> None:
     count = int(manifest["count"])
     scale = float(manifest["position_scale"]["value"])
     order_dtype = hp.order_dtype_from_manifest(manifest)
@@ -141,11 +122,8 @@ def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], outp
             dset = create_dataset(out, field["h5_path"], target_dtype, count)
             apply_attrs(dset, field.get("attrs", {}))
 
-            offset = 0
             if logical == "id":
-                for chunk in hp.raw_chunk_reader(dec_paths[logical], target_dtype, count, chunk_size):
-                    dset[offset : offset + chunk.size] = chunk
-                    offset += chunk.size
+                dset[:] = hp.read_raw(dec_paths[logical], target_dtype, count)
             elif logical in hp.POSITION_FIELDS:
                 info = np.iinfo(target_dtype) if np.issubdtype(target_dtype, np.integer) else None
                 decoded = np.fromfile(dec_paths[logical], dtype=np.float32, count=count)
@@ -162,9 +140,7 @@ def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], outp
                 restored[order_index] = converted
                 dset[:] = restored
             else:
-                for chunk in hp.raw_chunk_reader(dec_paths[logical], target_dtype, count, chunk_size):
-                    dset[offset : offset + chunk.size] = chunk
-                    offset += chunk.size
+                dset[:] = hp.read_raw(dec_paths[logical], target_dtype, count)
 
 
 def decompress(args: argparse.Namespace, 
@@ -214,22 +190,22 @@ def decompress(args: argparse.Namespace,
         ]
     )
 
-    segments = manifest.get("compressed_segments")
-    if not segments:
-        raise RuntimeError("Manifest does not contain compressed_segments for the Python compressor pipeline.")
-    commands["pcodec_decompress_lcp_order"] = decompress_pcodec_raw_parts(
-        segments["order"], dec_paths["order"], args.force
+    fields = manifest.get("compressed_fields")
+    if not fields:
+        raise RuntimeError("Manifest does not contain compressed_fields for the Python compressor pipeline.")
+    commands["pcodec_decompress_lcp_order"] = decompress_pcodec_raw(
+        fields["order"], dec_paths["order"], args.force
     )
-    commands["pcodec_decompress_id"] = decompress_pcodec_raw_parts(
-        segments["id"], dec_paths["id"], args.force
+    commands["pcodec_decompress_id"] = decompress_pcodec_raw(
+        fields["id"], dec_paths["id"], args.force
     )
     for logical in hp.VELOCITY_FIELDS:
-        commands[f"pysz_decompress_{logical}"] = decompress_pysz_raw_parts(
-            segments[logical], dec_paths[logical], args.force
+        commands[f"pysz_decompress_{logical}"] = decompress_pysz_raw(
+            fields[logical], dec_paths[logical], args.force
         )
 
     recombine_start = time.perf_counter()
-    recombine_h5(manifest, dec_paths, output_h5, args.chunk_size)
+    recombine_h5(manifest, dec_paths, output_h5)
     recombine_seconds = time.perf_counter() - recombine_start
 
     manifest.setdefault("commands", {})["decompress"] = commands

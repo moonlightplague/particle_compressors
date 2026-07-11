@@ -4,13 +4,12 @@ import subprocess
 import re
 import sys
 import math
-import shutil
 import h5py
 import numpy as np
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 
 FIELD_ALIASES = {
@@ -41,17 +40,6 @@ def require_output_path(path: Path, force: bool) -> None:
     if path.exists() and not force:
         raise RuntimeError(f"{path} already exists. Use --force to overwrite pipeline outputs.")
     path.parent.mkdir(parents=True, exist_ok=True)
-
-def prepare_output_dir(path: Path, force: bool) -> None:
-    if path.exists():
-        if not force:
-            raise RuntimeError(f"{path} already exists. Use --force to overwrite pipeline outputs.")
-        shutil.rmtree(path)
-    path.mkdir(parents=True)
-
-def chunk_slices(count: int, chunk_size: int) -> Iterable[slice]:
-    for start in range(0, count, chunk_size):
-        yield slice(start, min(start + chunk_size, count))
 
 def write_json(path: Path, payload: Mapping[str, Any], force: bool = True) -> None:
     require_output_path(path, force)
@@ -127,16 +115,11 @@ def load_pysz() -> Tuple[Any, Any, Any]:
         raise RuntimeError("Could not import pysz. Install it with `python -m pip install pysz`.") from exc
         
 
-def raw_chunk_reader(path: str, dtype: np.dtype, count: int, chunk_size: int) -> Iterable[np.ndarray]:
-    with Path(path).open("rb") as f:
-        remaining = count
-        while remaining:
-            n = min(chunk_size, remaining)
-            data = np.fromfile(f, dtype=dtype, count=n)
-            if data.size != n:
-                raise RuntimeError(f"Unexpected EOF reading {path}; expected {n}, got {data.size}.")
-            yield data
-            remaining -= n
+def read_raw(path: str, dtype: np.dtype, count: int) -> np.ndarray:
+    data = np.fromfile(path, dtype=dtype, count=count)
+    if data.size != count:
+        raise RuntimeError(f"Unexpected EOF reading {path}; expected {count}, got {data.size}.")
+    return data
 
 
 def compressed_sizes(work_dir: Path) -> Dict[str, int]:
@@ -171,8 +154,8 @@ def update_compressed_size_metrics(manifest: Dict[str, Any], work_dir: Path) -> 
         components["manifest.json"] = manifest_bytes
 
 def order_dtype_from_manifest(manifest: Mapping[str, Any]) -> np.dtype:
-    segment = manifest.get("compressed_segments", {}).get("order", {})
-    dtype = segment.get("dtype", manifest.get("order_dtype", "int64"))
+    field = manifest.get("compressed_fields", {}).get("order", {})
+    dtype = field.get("dtype", manifest.get("order_dtype", "int64"))
     dt = np.dtype(dtype)
     if dt not in (np.dtype("int32"), np.dtype("int64")):
         raise RuntimeError(f"Unsupported LCP order dtype in manifest: {dt}.")
@@ -351,7 +334,6 @@ def compute_metrics(
     original_h5: Path,
     reconstructed_h5: Path,
     manifest: Mapping[str, Any],
-    chunk_size: int,
 ) -> Dict[str, Any]:
     count = int(manifest["count"])
     scale = float(manifest["position_scale"]["value"])
@@ -372,18 +354,17 @@ def compute_metrics(
             fixed_acc = empty_metric_acc() if logical in POSITION_FIELDS and np.issubdtype(original_dset.dtype, np.integer) else None
             exact = True
 
-            for slc in chunk_slices(count, chunk_size):
-                orig = original_dset[slc]
-                dec = recon_dset[slc]
-                if logical == "id":
-                    exact = exact and bool(np.array_equal(orig, dec))
-                    update_metric_acc(acc, orig, dec)
-                elif logical in POSITION_FIELDS:
-                    if fixed_acc is not None:
-                        update_metric_acc(fixed_acc, orig, dec)
-                    update_metric_acc(acc, orig.astype(np.float64) / scale, dec.astype(np.float64) / scale)
-                else:
-                    update_metric_acc(acc, orig, dec)
+            orig = original_dset[:count]
+            dec = recon_dset[:count]
+            if logical == "id":
+                exact = bool(np.array_equal(orig, dec))
+                update_metric_acc(acc, orig, dec)
+            elif logical in POSITION_FIELDS:
+                if fixed_acc is not None:
+                    update_metric_acc(fixed_acc, orig, dec)
+                update_metric_acc(acc, orig.astype(np.float64) / scale, dec.astype(np.float64) / scale)
+            else:
+                update_metric_acc(acc, orig, dec)
 
             field_metrics = finalize_metric_acc(acc)
             field_metrics["original_dtype"] = str(original_dset.dtype)

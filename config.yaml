@@ -2,12 +2,6 @@ advanced:
   # Relative paths are resolved from this config file's directory.
   lcp: ./tools/LCP/build/bin/lcp
 
-  # Number of values processed per HDF5/raw streaming chunk.
-  chunk_size: 4000000
-
-  # Maximum values per pcodec/pysz part; 0 uses one part per field.
-  part_size: 0
-
   # Optional field-specific bounds override --abs-eb/--rel-eb when set.
   pos_abs_eb: null
   pos_rel_eb: null
@@ -19,4 +13,3 @@ advanced:
   position_scale: auto
   position_scale_attr: bitwidth
   position_scale_value: null
-

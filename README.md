@@ -66,6 +66,13 @@ python main.py roundtrip data/sample.h5 \
 Use a distinct work directory for each input/error-bound combination. Existing
 outputs are rejected unless `--force` is supplied.
 
+Each compressed field is stored as one file. The compressed directory contains
+`positions.lcp`, `order.pco`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`; the
+pipeline does not split fields into parts. As a result, preprocessing,
+compression, decompression, reconstruction, and metrics load a complete field
+into memory at once. Manifests produced by the older part-based format are not
+accepted by this format.
+
 
 ## Error Bounds
 

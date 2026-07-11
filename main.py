@@ -63,7 +63,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             manifest = decompress(args, tools)
             input_h5 = Path(args.input_h5).resolve()
             output_h5 = Path(manifest["artifacts"]["reconstructed_h5"]).resolve()
-            metrics = hp.compute_metrics(input_h5, output_h5, manifest, args.chunk_size)
+            metrics = hp.compute_metrics(input_h5, output_h5, manifest)
             metrics_path = Path(args.work_dir).resolve() / "metrics.json"
             hp.write_json(metrics_path, metrics, force=True)
             if args.clean_raw:

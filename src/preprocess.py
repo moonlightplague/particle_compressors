@@ -1,8 +1,6 @@
 import argparse
-import os
 import shutil
 import h5py
-import time
 import math
 import importlib.metadata
 import numpy as np
@@ -113,7 +111,6 @@ def export_positions_for_lcp(
     fields: Mapping[str, str],
     out_dir: Path,
     count: int,
-    chunk_size: int,
     scale: PositionScale,
     force: bool,
 ) -> Tuple[Dict[str, str], Dict[str, Dict[str, float]]]:
@@ -128,19 +125,16 @@ def export_positions_for_lcp(
         max_cast_abs = 0.0
         max_cast_fixed = 0.0
         range_stats = {"min": math.inf, "max": -math.inf}
-        with out_path.open("wb") as out:
-            for slc in hp.chunk_slices(count, chunk_size):
-                source = dataset[slc]
-                source64 = source.astype(np.float64, copy=False)
-                scaled64 = source64 / scale.value
-                scaled32 = scaled64.astype(np.float32)
-                scaled32.tofile(out)
-                update_numeric_stats(range_stats, scaled64)
-                if source.size:
-                    cast_abs = np.abs(scaled32.astype(np.float64) - scaled64)
-                    local_max = float(cast_abs.max(initial=0.0))
-                    max_cast_abs = max(max_cast_abs, local_max)
-                    max_cast_fixed = max(max_cast_fixed, local_max * scale.value)
+        source = dataset[:count]
+        source64 = source.astype(np.float64, copy=False)
+        scaled64 = source64 / scale.value
+        scaled32 = scaled64.astype(np.float32)
+        scaled32.tofile(out_path)
+        update_numeric_stats(range_stats, scaled64)
+        if source.size:
+            cast_abs = np.abs(scaled32.astype(np.float64) - scaled64)
+            max_cast_abs = float(cast_abs.max(initial=0.0))
+            max_cast_fixed = max_cast_abs * scale.value
         out_paths[logical] = str(out_path)
         field_stats = finalize_numeric_stats(range_stats)
         stats[logical] = {
@@ -158,7 +152,6 @@ def export_float_for_pysz(
     dataset_path: str,
     out_path: Path,
     count: int,
-    chunk_size: int,
     force: bool,
 ) -> Tuple[str, Dict[str, float]]:
     hp.require_output_path(out_path, force)
@@ -166,11 +159,9 @@ def export_float_for_pysz(
     if dtype not in (np.dtype("float32"), np.dtype("float64")):
         raise RuntimeError(f"pysz velocity export expected float32/float64, got {dtype} for {dataset_path}.")
     range_stats = {"min": math.inf, "max": -math.inf}
-    with out_path.open("wb") as out:
-        for slc in hp.chunk_slices(count, chunk_size):
-            source = h5[dataset_path][slc].astype(dtype, copy=False)
-            source.tofile(out)
-            update_numeric_stats(range_stats, source)
+    source = h5[dataset_path][:count].astype(dtype, copy=False)
+    source.tofile(out_path)
+    update_numeric_stats(range_stats, source)
     field_stats = finalize_numeric_stats(range_stats)
     return str(out_path), field_stats
 
@@ -180,7 +171,6 @@ def export_id_for_pcodec(
     dataset_path: str,
     out_path: Path,
     count: int,
-    chunk_size: int,
     force: bool,
 ) -> Tuple[str, Dict[str, Any]]:
     hp.require_output_path(out_path, force)
@@ -188,16 +178,10 @@ def export_id_for_pcodec(
     source_dtype = np.dtype(dataset.dtype)
     if not np.issubdtype(source_dtype, np.integer):
         raise RuntimeError(f"pcodec id export expected an integer dtype, got {source_dtype} for {dataset_path}.")
-    min_id: Optional[int] = None
-    max_id: Optional[int] = None
-    with out_path.open("wb") as out:
-        for slc in hp.chunk_slices(count, chunk_size):
-            source = dataset[slc]
-            local_min = int(source.min()) if source.size else 0
-            local_max = int(source.max()) if source.size else 0
-            min_id = local_min if min_id is None else min(min_id, local_min)
-            max_id = local_max if max_id is None else max(max_id, local_max)
-            source.astype(source_dtype, copy=False).tofile(out)
+    source = dataset[:count]
+    min_id = int(source.min()) if source.size else None
+    max_id = int(source.max()) if source.size else None
+    source.astype(source_dtype, copy=False).tofile(out_path)
     return str(out_path), {"source_dtype": str(source_dtype), "min": min_id, "max": max_id, "pcodec_dtype": str(source_dtype)}
 
 
@@ -309,7 +293,7 @@ def make_manifest(
     if limit is not None and "npart" in attrs:
         attrs["npart"] = as_jsonable_attr(np.asarray(count, dtype=np.asarray(h5.attrs["npart"]).dtype))
     return {
-        "format_version": 1,
+        "format_version": 2,
         "input_h5": str(input_h5),
         "input_h5_file_bytes": input_h5.stat().st_size,
         "count": count,
@@ -331,14 +315,6 @@ def make_manifest(
     }
 
 
-def effective_part_size(count: int, requested: int) -> int:
-    if requested < 0:
-        raise RuntimeError("Part size must be non-negative.")
-    if requested == 0:
-        return count
-    return max(1, requested)
-
-
 def preprocess(args: argparse.Namespace):
     input_h5 = Path(args.input_h5).resolve()
     if not input_h5.is_file():
@@ -355,7 +331,6 @@ def preprocess(args: argparse.Namespace):
     pre_dir.mkdir(parents=True, exist_ok=True)
     cmp_dir.mkdir(parents=True, exist_ok=True)
 
-    t0 = time.perf_counter()
     preprocess_stats: Dict[str, Any] = {}
     raw_paths: Dict[str, str] = {}
 
@@ -372,14 +347,14 @@ def preprocess(args: argparse.Namespace):
         )
 
         pos_paths, pos_stats = export_positions_for_lcp(
-            h5, fields, pre_dir, count, args.chunk_size, pos_scale, args.force
+            h5, fields, pre_dir, count, pos_scale, args.force
         )
         raw_paths.update(pos_paths)
         preprocess_stats["positions"] = pos_stats
 
         id_dtype = np.dtype(h5[fields["id"]].dtype)
         id_path, id_stats = export_id_for_pcodec(
-            h5, fields["id"], pre_dir / f"id.{id_dtype.name}.raw", count, args.chunk_size, args.force
+            h5, fields["id"], pre_dir / f"id.{id_dtype.name}.raw", count, args.force
         )
         raw_paths["id"] = id_path
         preprocess_stats["id"] = id_stats
@@ -389,7 +364,7 @@ def preprocess(args: argparse.Namespace):
             source_dtype = str(np.dtype(h5[fields[logical]].dtype))
             out_path = pre_dir / f"{logical}.{source_dtype}.raw"
             raw_paths[logical], velocity_stats[logical] = export_float_for_pysz(
-                h5, fields[logical], out_path, count, args.chunk_size, args.force
+                h5, fields[logical], out_path, count, args.force
             )
         preprocess_stats["velocities"] = velocity_stats
 
@@ -458,17 +433,15 @@ def preprocess(args: argparse.Namespace):
         "preprocessed": raw_paths,
         "compressed": {
             "positions": str(cmp_dir / "positions.lcp"),
-            "order": str(cmp_dir / "order.pcodecparts"),
-            "id": str(cmp_dir / "id.pcodecparts"),
-            "vx": str(cmp_dir / "vx.pyszparts"),
-            "vy": str(cmp_dir / "vy.pyszparts"),
-            "vz": str(cmp_dir / "vz.pyszparts"),
+            "order": str(cmp_dir / "order.pco"),
+            "id": str(cmp_dir / "id.pco"),
+            "vx": str(cmp_dir / "vx.psz"),
+            "vy": str(cmp_dir / "vy.psz"),
+            "vz": str(cmp_dir / "vz.psz"),
         },
     }
-    requested_part_size = args.part_size
-    manifest["part_size"] = effective_part_size(manifest["count"], requested_part_size)
     manifest["order_dtype"] = "int32"
-    manifest["compressed_segments"] = {}
+    manifest["compressed_fields"] = {}
     manifest["preprocess"] = preprocess_stats
     manifest["sizes"] = {"selected_original_payload_bytes": selected_payload_bytes}
     hp.write_json(work_dir / "manifest.json", manifest, force=True)

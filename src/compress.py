@@ -4,164 +4,109 @@ import time
 import math
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import src.helpers as hp
 
 
-def compress_pcodec_raw_parts(
+def compress_pcodec_raw(
     raw_path: str,
     dtype: str,
-    cmp_dir: Path,
+    compressed_path: str,
     field_name: str,
     count: int,
-    part_size: int,
     force: bool,
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     standalone, ChunkConfig = hp.load_pcodec()
-    part_dir = cmp_dir / f"{field_name}.pcodecparts"
-    hp.prepare_output_dir(part_dir, force)
     dt = np.dtype(dtype)
-    records: List[Dict[str, Any]] = []
-    parts: List[Dict[str, Any]] = []
-    start = 0
-    for part_index, chunk in enumerate(hp.raw_chunk_reader(raw_path, dt, count, part_size)):
-        part_cmp = part_dir / f"part{part_index:06d}.pco"
-        hp.require_output_path(part_cmp, force)
-        contiguous = np.ascontiguousarray(chunk)
-        start_time = time.perf_counter()
-        payload = standalone.simple_compress(contiguous, ChunkConfig())
-        elapsed = time.perf_counter() - start_time
-        part_cmp.write_bytes(payload)
-        compressed_bytes = len(payload)
-        parts.append(
-            {
-                "index": part_index,
-                "start": start,
-                "count": int(chunk.size),
-                "path": str(part_cmp),
-                "bytes": compressed_bytes,
-            }
-        )
-        records.append(
-            {
-                "api": "pcodec.standalone.simple_compress",
-                "field": field_name,
-                "part": part_index,
-                "count": int(chunk.size),
-                "input_bytes": int(chunk.nbytes),
-                "output_bytes": compressed_bytes,
-                "reported_compression_ratio": chunk.nbytes / compressed_bytes if compressed_bytes else math.inf,
-                "wall_seconds": elapsed,
-            }
-        )
-        start += int(chunk.size)
+    output = Path(compressed_path)
+    hp.require_output_path(output, force)
+    values = np.ascontiguousarray(hp.read_raw(raw_path, dt, count))
+    start_time = time.perf_counter()
+    payload = standalone.simple_compress(values, ChunkConfig())
+    elapsed = time.perf_counter() - start_time
+    output.write_bytes(payload)
+    compressed_bytes = len(payload)
+    return {
+        "field": field_name,
+        "codec": "pcodec",
+        "dtype": str(dt),
+        "count": count,
+        "path": str(output),
+        "bytes": compressed_bytes,
+    }, {
+        "api": "pcodec.standalone.simple_compress",
+        "field": field_name,
+        "count": count,
+        "input_bytes": int(values.nbytes),
+        "output_bytes": compressed_bytes,
+        "reported_compression_ratio": values.nbytes / compressed_bytes if compressed_bytes else math.inf,
+        "wall_seconds": elapsed,
+    }
 
-    if start != count:
-        raise RuntimeError(f"pcodec part compression for {field_name} saw {start} values, expected {count}.")
-
-    return (
-        {
-            "field": field_name,
-            "codec": "pcodec",
-            "dtype": str(dt),
-            "part_size": part_size,
-            "parts_dir": str(part_dir),
-            "parts": parts,
-        },
-        records,
-    )
-
-def pysz_encoded_chunk(chunk: np.ndarray) -> Tuple[np.ndarray, int]:
-    if chunk.size >= hp.PYSZ_MIN_VALUES:
-        return np.ascontiguousarray(chunk), int(chunk.size)
+def pysz_encoded_values(values: np.ndarray) -> Tuple[np.ndarray, int]:
+    if values.size >= hp.PYSZ_MIN_VALUES:
+        return np.ascontiguousarray(values), int(values.size)
     encoded_count = hp.PYSZ_MIN_VALUES
-    padded = np.empty(encoded_count, dtype=chunk.dtype)
-    padded[: chunk.size] = chunk
-    fill_value = chunk[-1] if chunk.size else np.asarray(0, dtype=chunk.dtype)
-    padded[chunk.size :] = fill_value
+    padded = np.empty(encoded_count, dtype=values.dtype)
+    padded[: values.size] = values
+    fill_value = values[-1] if values.size else np.asarray(0, dtype=values.dtype)
+    padded[values.size :] = fill_value
     return padded, encoded_count
 
-def compress_pysz_raw_parts(
+def compress_pysz_raw(
     raw_path: str,
     dtype: str,
-    cmp_dir: Path,
+    compressed_path: str,
     field_name: str,
     count: int,
     abs_eb: float,
-    part_size: int,
     force: bool,
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     PyszSZ, PyszConfig, PyszErrorBoundMode = hp.load_pysz()
-    part_dir = cmp_dir / f"{field_name}.pyszparts"
-    hp.prepare_output_dir(part_dir, force)
     dt = np.dtype(dtype)
     if dt not in (np.dtype("float32"), np.dtype("float64")):
         raise RuntimeError(f"pysz velocity compression expected float32/float64, got {dt} for {field_name}.")
-    records: List[Dict[str, Any]] = []
-    parts: List[Dict[str, Any]] = []
-    start = 0
-    for part_index, chunk in enumerate(hp.raw_chunk_reader(raw_path, dt, count, part_size)):
-        part_cmp = part_dir / f"part{part_index:06d}.psz"
-        hp.require_output_path(part_cmp, force)
-        encoded, encoded_count = pysz_encoded_chunk(chunk)
-        config = PyszConfig(encoded.shape)
-        config.errorBoundMode = PyszErrorBoundMode.ABS
-        config.absErrorBound = float(abs_eb)
-        start_time = time.perf_counter()
-        try:
-            compressed, reported_ratio = PyszSZ.compress(encoded, config)
-        except Exception as exc:
-            raise RuntimeError(
-                f"pysz compression failed for {field_name} part {part_index} "
-                f"with {chunk.size} values encoded as {encoded_count} values."
-            ) from exc
-        elapsed = time.perf_counter() - start_time
-        compressed = np.ascontiguousarray(compressed, dtype=np.uint8)
-        compressed.tofile(part_cmp)
-        compressed_bytes = int(compressed.size)
-        parts.append(
-            {
-                "index": part_index,
-                "start": start,
-                "count": int(chunk.size),
-                "encoded_count": encoded_count,
-                "path": str(part_cmp),
-                "bytes": compressed_bytes,
-            }
-        )
-        records.append(
-            {
-                "api": "pysz.sz.compress",
-                "field": field_name,
-                "part": part_index,
-                "count": int(chunk.size),
-                "encoded_count": encoded_count,
-                "input_bytes": int(chunk.nbytes),
-                "encoded_input_bytes": int(encoded.nbytes),
-                "output_bytes": compressed_bytes,
-                "reported_compression_ratio": float(reported_ratio),
-                "effective_compression_ratio": chunk.nbytes / compressed_bytes if compressed_bytes else math.inf,
-                "wall_seconds": elapsed,
-            }
-        )
-        start += int(chunk.size)
-
-    if start != count:
-        raise RuntimeError(f"pysz part compression for {field_name} saw {start} values, expected {count}.")
-
-    return (
-        {
-            "field": field_name,
-            "codec": "pysz",
-            "dtype": str(dt),
-            "abs_error_bound": abs_eb,
-            "part_size": part_size,
-            "parts_dir": str(part_dir),
-            "parts": parts,
-        },
-        records,
-    )
+    output = Path(compressed_path)
+    hp.require_output_path(output, force)
+    values = hp.read_raw(raw_path, dt, count)
+    encoded, encoded_count = pysz_encoded_values(values)
+    config = PyszConfig(encoded.shape)
+    config.errorBoundMode = PyszErrorBoundMode.ABS
+    config.absErrorBound = float(abs_eb)
+    start_time = time.perf_counter()
+    try:
+        compressed, reported_ratio = PyszSZ.compress(encoded, config)
+    except Exception as exc:
+        raise RuntimeError(
+            f"pysz compression failed for {field_name} with {count} values "
+            f"encoded as {encoded_count} values."
+        ) from exc
+    elapsed = time.perf_counter() - start_time
+    compressed = np.ascontiguousarray(compressed, dtype=np.uint8)
+    compressed.tofile(output)
+    compressed_bytes = int(compressed.size)
+    return {
+        "field": field_name,
+        "codec": "pysz",
+        "dtype": str(dt),
+        "abs_error_bound": abs_eb,
+        "count": count,
+        "encoded_count": encoded_count,
+        "path": str(output),
+        "bytes": compressed_bytes,
+    }, {
+        "api": "pysz.sz.compress",
+        "field": field_name,
+        "count": count,
+        "encoded_count": encoded_count,
+        "input_bytes": int(values.nbytes),
+        "encoded_input_bytes": int(encoded.nbytes),
+        "output_bytes": compressed_bytes,
+        "reported_compression_ratio": float(reported_ratio),
+        "effective_compression_ratio": values.nbytes / compressed_bytes if compressed_bytes else math.inf,
+        "wall_seconds": elapsed,
+    }
 
 def compress(args: argparse.Namespace, 
              manifest: Dict[str, Any], 
@@ -196,37 +141,34 @@ def compress(args: argparse.Namespace,
         ]
     )
 
-    part_size = int(manifest["part_size"])
-    manifest["compressed_segments"]["order"], commands["pcodec_compress_lcp_order"] = compress_pcodec_raw_parts(
+    artifacts = manifest["artifacts"]["compressed"]
+    manifest["compressed_fields"]["order"], commands["pcodec_compress_lcp_order"] = compress_pcodec_raw(
         str(order_raw),
         "int32",
-        cmp_dir,
+        artifacts["order"],
         "order",
         manifest["count"],
-        part_size,
         args.force,
     )
 
-    manifest["compressed_segments"]["id"], commands["pcodec_compress_id"] = compress_pcodec_raw_parts(
+    manifest["compressed_fields"]["id"], commands["pcodec_compress_id"] = compress_pcodec_raw(
         raw_paths["id"],
         manifest["fields"]["id"]["dtype"],
-        cmp_dir,
+        artifacts["id"],
         "id",
         manifest["count"],
-        part_size,
         args.force,
     )
 
     for logical in hp.VELOCITY_FIELDS:
         dtype = manifest["fields"][logical]["dtype"]
-        manifest["compressed_segments"][logical], commands[f"pysz_compress_{logical}"] = compress_pysz_raw_parts(
+        manifest["compressed_fields"][logical], commands[f"pysz_compress_{logical}"] = compress_pysz_raw(
             raw_paths[logical],
             dtype,
-            cmp_dir,
+            artifacts[logical],
             logical,
             manifest["count"],
             manifest["field_error_bounds"][logical]["abs"],
-            part_size,
             args.force,
         )
 

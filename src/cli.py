@@ -9,8 +9,6 @@ import yaml
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lcp": str(DEFAULT_CONFIG_PATH.parent / "tools" / "LCP" / "build" / "bin" / "lcp"),
-    "chunk_size": 4_000_000,
-    "part_size": 0,
     "pos_abs_eb": None,
     "pos_rel_eb": None,
     "vel_abs_eb": None,
@@ -37,15 +35,6 @@ def _validated_advanced_config(config: Mapping[str, Any], config_path: Path) -> 
 
     defaults = dict(BUILTIN_ADVANCED_DEFAULTS)
     defaults.update(config)
-
-    for key in ("chunk_size", "part_size"):
-        value = defaults[key]
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise RuntimeError(f"config value advanced.{key} must be an integer.")
-    if defaults["chunk_size"] <= 0:
-        raise RuntimeError("config value advanced.chunk_size must be positive.")
-    if defaults["part_size"] < 0:
-        raise RuntimeError("config value advanced.part_size must be non-negative.")
 
     for key in ("pos_abs_eb", "pos_rel_eb", "vel_abs_eb", "vel_rel_eb", "position_scale_value"):
         defaults[key] = _number_or_none(defaults[key], key)
@@ -101,18 +90,6 @@ def add_config_arg(parser: argparse.ArgumentParser, default: Any) -> None:
 
 def add_common_tool_args(parser: argparse.ArgumentParser, defaults: Mapping[str, Any]) -> None:
     parser.add_argument("--lcp", type=str, default=defaults["lcp"], help="Path to the LCP executable.")
-    parser.add_argument(
-        "--chunk-size",
-        type=int,
-        default=defaults["chunk_size"],
-        help="HDF5/raw streaming chunk length.",
-    )
-    parser.add_argument(
-        "--part-size",
-        type=int,
-        default=defaults["part_size"],
-        help="Maximum values per pcodec/pysz compressed part; 0 disables part chunking.",
-    )
     parser.add_argument("--clean-raw", action="store_true", help="Remove raw preprocessed/decompressed files.")
     parser.add_argument("--force", action="store_true", help="Overwrite pipeline outputs in the work directory.")
 
