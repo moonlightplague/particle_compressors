@@ -26,19 +26,32 @@ class ErrorBoundSelection:
     compressor_abs: Optional[float] = None
 
 
-def update_numeric_stats(stats: Dict[str, float], values: np.ndarray) -> None:
+def update_numeric_stats(stats: Dict[str, Any], values: np.ndarray) -> None:
     if values.size == 0:
-        return
+        raise RuntimeError("Not a valid input array.")
     values64 = values.astype(np.float64, copy=False)
-    stats["min"] = min(stats["min"], float(values64.min(initial=stats["min"])))
-    stats["max"] = max(stats["max"], float(values64.max(initial=stats["max"])))
+    stats["float_min"] = min(stats["float_min"], float(values64.min(initial=stats["float_min"])))
+    stats["float_max"] = max(stats["float_max"], float(values64.max(initial=stats["float_max"])))
+
+def update_numeric_stats_int(stats: Dict[str, Any], values: np.ndarray) -> None:
+    if values.size == 0:
+        raise RuntimeError("Not a valid input array.")
+    values32 = values.astype(np.int32, copy=False)
+    stats["int_min"] = min(stats["int_min"], int(np.min(values32)))
+    stats["int_max"] = max(stats["int_max"], int(np.max(values32)))
 
 
 def finalize_numeric_stats(stats: Dict[str, float]) -> Dict[str, float]:
-    if math.isinf(stats["min"]) or math.isinf(stats["max"]):
+    if math.isinf(stats["float_min"]) or math.isinf(stats["float_max"]):
         raise RuntimeError("Cannot compute relative error bound for an empty field.")
-    value_range = float(stats["max"] - stats["min"])
-    return {"min": float(stats["min"]), "max": float(stats["max"]), "range": value_range}
+    value_range_float = float(stats["float_max"] - stats["float_min"])
+    if "int_min" not in stats or "int_max" not in stats:
+        return {"float_min": float(stats["float_min"]), "float_max": float(stats["float_max"]), "float_range": value_range_float}
+    if math.isinf(stats["int_min"]) or math.isinf(stats["int_max"]):
+        raise RuntimeError("Cannot compute relative error bound for an empty field.")
+    value_range_int = float(stats["int_max"] - stats["int_min"])
+    return {"float_min": float(stats["float_min"]), "float_max": float(stats["float_max"]), "float_range": value_range_float,
+            "int_min": float(stats["int_min"]), "int_max": float(stats["int_max"]), "int_range": value_range_int}
 
 
 def resolve_fields(h5: h5py.File) -> Dict[str, str]:
@@ -121,29 +134,37 @@ def export_positions_for_lcp(
     for logical in hp.POSITION_FIELDS:
         dataset = h5[fields[logical]]
         out_path = out_dir / f"{logical}.f32.raw"
+        out_path_int = out_dir / f"{logical}.i32.raw"
         hp.require_output_path(out_path, force)
         max_cast_abs = 0.0
         max_cast_fixed = 0.0
-        range_stats = {"min": math.inf, "max": -math.inf}
+        range_stats = {"float_min": math.inf, "float_max": -math.inf,
+                       "int_min": math.inf, "int_max": -math.inf}
         source = dataset[:count]
+        source.tofile(out_path_int)
         source64 = source.astype(np.float64, copy=False)
         scaled64 = source64 / scale.value
         scaled32 = scaled64.astype(np.float32)
         scaled32.tofile(out_path)
         update_numeric_stats(range_stats, scaled64)
+        update_numeric_stats_int(range_stats, source)
         if source.size:
             cast_abs = np.abs(scaled32.astype(np.float64) - scaled64)
             max_cast_abs = float(cast_abs.max(initial=0.0))
             max_cast_fixed = max_cast_abs * scale.value
         out_paths[logical] = str(out_path)
+        out_paths[f"{logical}_int"]=str(out_path_int)
         field_stats = finalize_numeric_stats(range_stats)
         stats[logical] = {
             "scale": scale.value,
             "preprocess_cast_max_abs_in_lcp_units": max_cast_abs,
             "preprocess_cast_max_abs_in_original_fixed_point_units": max_cast_fixed,
-            "min_in_lcp_units": field_stats["min"],
-            "max_in_lcp_units": field_stats["max"],
-            "range_in_lcp_units": field_stats["range"],
+            "min_in_lcp_units": field_stats["float_min"],
+            "max_in_lcp_units": field_stats["float_max"],
+            "range_in_lcp_units": field_stats["float_range"],
+            "min_in_int_units": field_stats["int_min"],
+            "max_in_int_units": field_stats["int_max"],
+            "range_in_int_units": field_stats["int_range"],
         }
     return out_paths, stats
 
@@ -185,7 +206,7 @@ def export_float_for_pysz(
     dtype = np.dtype(h5[dataset_path].dtype)
     if dtype not in (np.dtype("float32"), np.dtype("float64")):
         raise RuntimeError(f"pysz velocity export expected float32/float64, got {dtype} for {dataset_path}.")
-    range_stats = {"min": math.inf, "max": -math.inf}
+    range_stats = {"float_min": math.inf, "float_max": -math.inf}
     source = h5[dataset_path][:count].astype(dtype, copy=False)
     source.tofile(out_path)
     update_numeric_stats(range_stats, source)
@@ -404,7 +425,7 @@ def preprocess(args: argparse.Namespace):
         preprocess_stats["velocities"] = velocity_stats
 
         position_ranges = {logical: pos_stats[logical]["range_in_lcp_units"] for logical in hp.POSITION_FIELDS}
-        velocity_ranges = {logical: velocity_stats[logical]["range"] for logical in hp.VELOCITY_FIELDS}
+        velocity_ranges = {logical: velocity_stats[logical]["float_range"] for logical in hp.VELOCITY_FIELDS}
         position_diagonal = math.sqrt(sum(value * value for value in position_ranges.values()))
 
         pos_selection_base = select_relative_or_absolute(
