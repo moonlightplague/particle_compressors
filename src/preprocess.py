@@ -568,17 +568,23 @@ def preprocess(args: argparse.Namespace):
         )
 
     lossless_extension = "szo" if args.lossless == "szo" else "pco"
-    compressed_artifacts = {
-        "positions": str(cmp_dir / "positions.lcp"),
-        "id": str(cmp_dir / f"id.{lossless_extension}"),
-    }
-    if args.vel_compressor == "lcp":
+    compressed_artifacts = {"id": str(cmp_dir / f"id.{lossless_extension}")}
+    if args.pos_compressor == "lcp":
+        compressed_artifacts["positions"] = str(cmp_dir / "positions.lcp")
+    else:
         compressed_artifacts.update(
             {
-                "velocities": str(cmp_dir / "velocities.lcp"),
-                "velocity_order": str(cmp_dir / f"velocity_order.{lossless_extension}"),
+                "x": str(cmp_dir / "x.psz"),
+                "y": str(cmp_dir / "y.psz"),
+                "z": str(cmp_dir / "z.psz"),
             }
         )
+    if args.vel_compressor == "lcp":
+        compressed_artifacts["velocities"] = str(cmp_dir / "velocities.lcp")
+        if args.pos_compressor == "lcp":
+            compressed_artifacts["velocity_order"] = str(
+                cmp_dir / f"velocity_order.{lossless_extension}"
+            )
     else:
         compressed_artifacts.update(
             {

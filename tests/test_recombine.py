@@ -11,7 +11,11 @@ from src.cli import AVAILABLE_COMPRESSORS, build_parser
 from src.compress import compress as compress_pipeline
 from src.compress import compress_szo_raw, reorder_raw
 from src.decompress import decompress_szo_raw
-from src.decompress import recombine_h5, velocity_compressor_from_manifest
+from src.decompress import (
+    position_compressor_from_manifest,
+    recombine_h5,
+    velocity_compressor_from_manifest,
+)
 
 
 FIELDS = {
@@ -21,6 +25,100 @@ FIELDS = {
 
 
 class RecombineTests(unittest.TestCase):
+    def test_velocity_lcp_reorders_id_and_sz3_positions_and_omits_velocity_order(self) -> None:
+        count = 5
+        velocity_order = np.array([1, 4, 0, 3, 2], dtype=np.int32)
+        source = {
+            "x": np.array([10, 20, 30, 40, 50], dtype=np.float32),
+            "y": np.array([11, 21, 31, 41, 51], dtype=np.float32),
+            "z": np.array([12, 22, 32, 42, 52], dtype=np.float32),
+            "id": np.array([901, 117, 502, 330, 774], dtype=np.uint64),
+            "vx": np.array([1, 2, 3, 4, 5], dtype=np.float32),
+            "vy": np.array([6, 7, 8, 9, 10], dtype=np.float32),
+            "vz": np.array([11, 12, 13, 14, 15], dtype=np.float32),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            preprocessed = root / "preprocessed"
+            compressed = root / "compressed"
+            preprocessed.mkdir()
+            compressed.mkdir()
+            raw_paths = {}
+            for logical, values in source.items():
+                path = preprocessed / f"{logical}.raw"
+                values.tofile(path)
+                raw_paths[logical] = str(path)
+                if logical in ("vx", "vy", "vz"):
+                    raw_paths[f"{logical}_lcp"] = str(path)
+
+            artifacts = {
+                "x": str(compressed / "x.psz"),
+                "y": str(compressed / "y.psz"),
+                "z": str(compressed / "z.psz"),
+                "id": str(compressed / "id.pco"),
+                "velocities": str(compressed / "velocities.lcp"),
+            }
+            manifest = {
+                "count": count,
+                "fields": {
+                    logical: {"dtype": str(values.dtype)}
+                    for logical, values in source.items()
+                },
+                "error_bounds": {"velocities_lcp_abs": 0.01},
+                "field_error_bounds": {
+                    logical: {"abs": 0.01, "compressor_abs": 0.01}
+                    for logical in ("x", "y", "z")
+                },
+                "artifacts": {
+                    "preprocessed": raw_paths,
+                    "compressed": artifacts,
+                },
+                "compressed_fields": {},
+                "sizes": {"selected_original_payload_bytes": 160},
+            }
+            args = SimpleNamespace(
+                work_dir=str(root),
+                force=False,
+                lossless="pcodec",
+                pos_compressor="sz3",
+                vel_compressor="lcp",
+                szo_abs_eb=0.5,
+            )
+            captured = {}
+
+            def fake_run_command(argv):
+                Path(argv[argv.index("-z") + 1]).write_bytes(b"lcp")
+                velocity_order.tofile(argv[-1])
+
+            def fake_integer(codec, raw_path, dtype, compressed_path, field_name, *unused):
+                captured[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
+                Path(compressed_path).write_bytes(b"integer")
+                return {"field": field_name, "codec": codec, "dtype": dtype, "count": count}
+
+            def fake_position(raw_path, dtype, compressed_path, field_name, *unused):
+                captured[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
+                Path(compressed_path).write_bytes(b"position")
+                return {"field": field_name, "codec": "pysz", "dtype": dtype, "count": count}
+
+            with patch("src.compress.hp.run_command", side_effect=fake_run_command), patch(
+                "src.compress.compress_integer_raw", side_effect=fake_integer
+            ), patch("src.compress.compress_pysz_raw", side_effect=fake_position), patch(
+                "src.compress.hp.update_compressed_size_metrics"
+            ):
+                result = compress_pipeline(
+                    args,
+                    manifest,
+                    raw_paths,
+                    SimpleNamespace(lcp=Path("lcp")),
+                )
+
+            self.assertNotIn("velocity_order", result["compressed_fields"])
+            self.assertNotIn("velocity_order", result["artifacts"]["compressed"])
+            self.assertFalse(result["ordering"]["reconstructed_rows"]["velocity_permutation_stored"])
+            for logical in ("id", "x", "y", "z"):
+                np.testing.assert_array_equal(captured[logical], source[logical][velocity_order])
+
     def test_compress_reorders_id_and_sz3_velocities_and_omits_position_order(self) -> None:
         count = 5
         position_order = np.array([2, 0, 4, 1, 3], dtype=np.int32)
@@ -183,6 +281,50 @@ class RecombineTests(unittest.TestCase):
                 for logical, values in original.items():
                     np.testing.assert_array_equal(h5[logical][:], values[position_order])
 
+    def test_recombine_accepts_shared_lcp_velocity_order_without_sidecar(self) -> None:
+        count = 5
+        velocity_order = np.array([1, 4, 0, 3, 2], dtype=np.intp)
+        original = {
+            "id": np.array([901, 117, 502, 330, 774], dtype=np.uint64),
+            "x": np.array([10, 20, 30, 40, 50], dtype=np.float32),
+            "y": np.array([11, 21, 31, 41, 51], dtype=np.float32),
+            "z": np.array([12, 22, 32, 42, 52], dtype=np.float32),
+            "vx": np.array([1, 2, 3, 4, 5], dtype=np.float32),
+            "vy": np.array([6, 7, 8, 9, 10], dtype=np.float32),
+            "vz": np.array([11, 12, 13, 14, 15], dtype=np.float32),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dec_paths = {}
+            for logical, values in original.items():
+                path = root / f"{logical}.raw"
+                values[velocity_order].tofile(path)
+                dec_paths[logical] = str(path)
+
+            manifest = {
+                "count": count,
+                "position_scale": {"value": 1.0},
+                "fields": FIELDS,
+                "compressors": {"positions": "sz3", "velocities": "lcp"},
+                "compressed_fields": {
+                    "velocities": {"codec": "lcp", "dtype": "float32"},
+                },
+                "ordering": {
+                    "reconstructed_rows": {
+                        "mapping": "lcp_velocity_sorted",
+                        "original_row_order_restored": False,
+                        "velocity_permutation_stored": False,
+                    }
+                },
+            }
+            output = root / "reconstructed.h5"
+            recombine_h5(manifest, dec_paths, output)
+
+            with h5py.File(output, "r") as h5:
+                for logical, values in original.items():
+                    np.testing.assert_array_equal(h5[logical][:], values[velocity_order])
+
     def test_cli_accepts_szo_lossless_compressor(self) -> None:
         argv = ["roundtrip", "input.h5", "--lossless", "szo", "--szo-abs-eb", "0.5"]
         args = build_parser(argv).parse_args(argv)
@@ -286,6 +428,20 @@ class RecombineTests(unittest.TestCase):
 
     def test_manifest_without_compressor_metadata_defaults_to_sz3(self) -> None:
         self.assertEqual(velocity_compressor_from_manifest({}), "sz3")
+        self.assertEqual(position_compressor_from_manifest({}), "lcp")
+        self.assertEqual(
+            position_compressor_from_manifest({"compressors": {"positions": "sz3"}}),
+            "sz3",
+        )
+        self.assertEqual(
+            position_compressor_from_manifest(
+                {
+                    "compressors": {"positions": "sz3"},
+                    "artifacts": {"compressed": {"positions": "positions.lcp"}},
+                }
+            ),
+            "lcp",
+        )
 
 
 if __name__ == "__main__":

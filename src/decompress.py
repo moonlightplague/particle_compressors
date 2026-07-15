@@ -139,6 +139,22 @@ def velocity_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
     return "sz3"
 
 
+def position_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
+    if manifest.get("compressed_fields", {}).get("positions", {}).get("codec") == "lcp":
+        return "lcp"
+    if all(
+        manifest.get("compressed_fields", {}).get(logical, {}).get("codec") == "pysz"
+        for logical in hp.POSITION_FIELDS
+    ):
+        return "sz3"
+    if "positions" in manifest.get("artifacts", {}).get("compressed", {}):
+        return "lcp"
+    configured = manifest.get("compressors", {}).get("positions")
+    if configured:
+        return str(configured)
+    return "lcp"
+
+
 def read_lcp_order(path: str, dtype: np.dtype, count: int, label: str) -> np.ndarray:
     order = np.fromfile(path, dtype=dtype, count=count)
     if order.size != count:
@@ -170,6 +186,7 @@ def run_lcp_decompress(
         ]
     )
 
+
 def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], output_h5: Path) -> None:
     count = int(manifest["count"])
     scale = float(manifest["position_scale"]["value"])
@@ -183,7 +200,7 @@ def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], outp
         )
     velocity_compressor = velocity_compressor_from_manifest(manifest)
     velocity_order_index = None
-    if velocity_compressor == "lcp":
+    if velocity_compressor == "lcp" and "velocity_order" in dec_paths:
         velocity_order_index = read_lcp_order(
             dec_paths["velocity_order"],
             np.dtype(manifest["compressed_fields"]["velocity_order"]["dtype"]),
@@ -247,6 +264,8 @@ def decompress(args: argparse.Namespace,
     if not fields:
         raise RuntimeError("Manifest does not contain compressed_fields for the Python compressor pipeline.")
     has_position_order = "order" in fields
+    has_velocity_order = "velocity_order" in fields
+    position_compressor = position_compressor_from_manifest(manifest)
     velocity_compressor = velocity_compressor_from_manifest(manifest)
     dec_dir = work_dir / "decompressed"
     dec_dir.mkdir(parents=True, exist_ok=True)
@@ -270,6 +289,7 @@ def decompress(args: argparse.Namespace,
         dec_paths["vx"] = str(dec_dir / "vx.f32.raw")
         dec_paths["vy"] = str(dec_dir / "vy.f32.raw")
         dec_paths["vz"] = str(dec_dir / "vz.f32.raw")
+    if has_velocity_order:
         velocity_order_dtype = np.dtype(manifest["compressed_fields"]["velocity_order"]["dtype"])
         dec_paths["velocity_order"] = str(
             dec_dir / f"velocity_order.{velocity_order_dtype.name}.raw"
@@ -278,14 +298,20 @@ def decompress(args: argparse.Namespace,
         hp.require_output_path(Path(path), args.force)
 
     artifacts = manifest["artifacts"]["compressed"]
-    run_lcp_decompress(
-        tools,
-        artifacts["positions"],
-        dec_paths,
-        hp.POSITION_FIELDS,
-        count,
-        float(manifest["error_bounds"]["positions_lcp_abs"]),
-    )
+    if position_compressor == "lcp":
+        run_lcp_decompress(
+            tools,
+            artifacts["positions"],
+            dec_paths,
+            hp.POSITION_FIELDS,
+            count,
+            float(manifest["error_bounds"]["positions_lcp_abs"]),
+        )
+    else:
+        for logical in hp.POSITION_FIELDS:
+            decompress_pysz_raw(
+                fields[logical], dec_paths[logical], args.force
+            )
 
     if has_position_order:
         decompress_integer_raw(
@@ -303,9 +329,10 @@ def decompress(args: argparse.Namespace,
             count,
             float(manifest["error_bounds"]["velocities_lcp_abs"]),
         )
-        decompress_integer_raw(
-            fields["velocity_order"], dec_paths["velocity_order"], args.force
-        )
+        if has_velocity_order:
+            decompress_integer_raw(
+                fields["velocity_order"], dec_paths["velocity_order"], args.force
+            )
     else:
         for logical in hp.VELOCITY_FIELDS:
             decompress_pysz_raw(

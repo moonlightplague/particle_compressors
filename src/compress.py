@@ -131,7 +131,7 @@ def compress_pysz_raw(
     PyszSZ, PyszConfig, PyszErrorBoundMode = hp.load_pysz()
     dt = np.dtype(dtype)
     if dt not in (np.dtype("float32"), np.dtype("float64")):
-        raise RuntimeError(f"pysz velocity compression expected float32/float64, got {dt} for {field_name}.")
+        raise RuntimeError(f"pysz compression expected float32/float64, got {dt} for {field_name}.")
     output = Path(compressed_path)
     hp.require_output_path(output, force)
     values = hp.read_raw(raw_path, dt, count)
@@ -164,9 +164,9 @@ def compress_pysz_raw(
 def read_lcp_permutation(order_path: str, count: int) -> np.ndarray:
     order = hp.read_raw(order_path, np.dtype("int32"), count)
     if count and (int(order.min()) < 0 or int(order.max()) >= count):
-        raise RuntimeError("LCP position order is not a valid index range for this particle count.")
+        raise RuntimeError("LCP order is not a valid index range for this particle count.")
     if np.unique(order).size != count:
-        raise RuntimeError("LCP position order is not a permutation of the particle rows.")
+        raise RuntimeError("LCP order is not a permutation of the particle rows.")
     return order.astype(np.intp, copy=False)
 
 
@@ -183,86 +183,127 @@ def reorder_raw(
     np.ascontiguousarray(values[order]).tofile(output_path)
     return str(output_path)
 
-def compress(args: argparse.Namespace, 
-             manifest: Dict[str, Any], 
-             raw_paths: Dict[str, str],
-             tools: hp.ToolPaths) -> Dict[str, Any]:
-    
-    work_dir = Path(args.work_dir).resolve()
-    order_raw = work_dir / "preprocessed" / "order.i32.raw"
-    hp.require_output_path(order_raw, args.force)
-    raw_paths["position_order"] = str(order_raw)
 
-    cmp_dir = work_dir / "compressed"
-    lcp_cmp = cmp_dir / "positions.lcp"
-    hp.require_output_path(lcp_cmp, args.force)
+def compress_lcp_triplet(
+    tools: hp.ToolPaths,
+    input_paths: Tuple[str, str, str],
+    compressed_path: str,
+    count: int,
+    abs_error_bound: float,
+    order_path: Path,
+    force: bool,
+) -> None:
+    hp.require_output_path(Path(compressed_path), force)
+    hp.require_output_path(order_path, force)
     hp.run_command(
         [
             str(tools.lcp),
             "-i",
-            raw_paths["x"],
-            raw_paths["y"],
-            raw_paths["z"],
+            *input_paths,
             "-z",
-            str(lcp_cmp),
+            compressed_path,
             "-1",
-            str(manifest["count"]),
+            str(count),
             "-eb",
-            str(manifest["error_bounds"]["positions_lcp_abs"]),
+            str(abs_error_bound),
             "-ord",
             "32",
-            str(order_raw),
+            str(order_path),
         ]
     )
 
+
+def compress(args: argparse.Namespace,
+             manifest: Dict[str, Any],
+             raw_paths: Dict[str, str],
+             tools: hp.ToolPaths) -> Dict[str, Any]:
+    work_dir = Path(args.work_dir).resolve()
+    pre_dir = work_dir / "preprocessed"
     artifacts = manifest["artifacts"]["compressed"]
     count = int(manifest["count"])
-    position_order = read_lcp_permutation(str(order_raw), count)
+    position_compressor = getattr(args, "pos_compressor", "lcp")
+    velocity_compressor = args.vel_compressor
+    canonical_order = None
+    canonical_mapping = "original_row"
+    canonical_field = None
+    canonical_order_artifact = None
 
-    id_dtype = manifest["fields"]["id"]["dtype"]
-    ordered_id_path = reorder_raw(
-        raw_paths["id"],
-        id_dtype,
-        work_dir / "preprocessed" / f"id.position_ordered.{np.dtype(id_dtype).name}.raw",
-        count,
-        position_order,
-        args.force,
-    )
-    raw_paths["id_position_ordered"] = ordered_id_path
-
-    ordered_velocity_paths: Dict[str, str] = {}
-    for logical in hp.VELOCITY_FIELDS:
-        if args.vel_compressor == "lcp":
-            source_path = raw_paths[f"{logical}_lcp"]
-            source_dtype = "float32"
-        else:
-            source_path = raw_paths[logical]
-            source_dtype = manifest["fields"][logical]["dtype"]
-        ordered_path = reorder_raw(
-            source_path,
-            source_dtype,
-            work_dir / "preprocessed" / f"{logical}.position_ordered.{np.dtype(source_dtype).name}.raw",
+    if position_compressor == "lcp":
+        position_order_raw = pre_dir / "order.i32.raw"
+        raw_paths["position_order"] = str(position_order_raw)
+        compress_lcp_triplet(
+            tools,
+            tuple(raw_paths[logical] for logical in hp.POSITION_FIELDS),
+            artifacts["positions"],
             count,
-            position_order,
+            float(manifest["error_bounds"]["positions_lcp_abs"]),
+            position_order_raw,
             args.force,
         )
-        ordered_velocity_paths[logical] = ordered_path
-        raw_paths[f"{logical}_position_ordered"] = ordered_path
+        canonical_order = read_lcp_permutation(str(position_order_raw), count)
+        canonical_mapping = "lcp_position_sorted"
+        canonical_field = "positions"
+        canonical_order_artifact = "position_order"
+        position_lcp = Path(artifacts["positions"])
+        manifest["compressed_fields"]["positions"] = {
+            "field": "positions",
+            "codec": "lcp",
+            "dtype": "float32",
+            "source_dtypes": {
+                logical: manifest["fields"][logical]["dtype"]
+                for logical in hp.POSITION_FIELDS
+            },
+            "count": count,
+            "abs_error_bound": manifest["error_bounds"]["positions_lcp_abs"],
+            "path": str(position_lcp),
+            "bytes": position_lcp.stat().st_size,
+        }
+    elif velocity_compressor == "lcp":
+        velocity_order_raw = pre_dir / "velocity_order.i32.raw"
+        raw_paths["velocity_order"] = str(velocity_order_raw)
+        compress_lcp_triplet(
+            tools,
+            tuple(raw_paths[f"{logical}_lcp"] for logical in hp.VELOCITY_FIELDS),
+            artifacts["velocities"],
+            count,
+            float(manifest["error_bounds"]["velocities_lcp_abs"]),
+            velocity_order_raw,
+            args.force,
+        )
+        canonical_order = read_lcp_permutation(str(velocity_order_raw), count)
+        canonical_mapping = "lcp_velocity_sorted"
+        canonical_field = "velocities"
+        canonical_order_artifact = "velocity_order"
+
+    id_dtype = manifest["fields"]["id"]["dtype"]
+    ordered_id_path = raw_paths["id"]
+    if canonical_order is not None:
+        ordered_id_path = reorder_raw(
+            raw_paths["id"],
+            id_dtype,
+            pre_dir / f"id.{canonical_mapping}.{np.dtype(id_dtype).name}.raw",
+            count,
+            canonical_order,
+            args.force,
+        )
+        raw_paths["id_canonical_ordered"] = ordered_id_path
 
     manifest["ordering"] = {
         "reconstructed_rows": {
-            "mapping": "lcp_position_sorted",
-            "original_row_order_restored": False,
-            "position_permutation_stored": False,
+            "mapping": canonical_mapping,
+            "original_row_order_restored": canonical_order is None,
+            "canonical_lcp_field": canonical_field,
+            "lcp_permutation_stored": False,
+            "temporary_permutation_artifact": canonical_order_artifact,
         },
-        "positions": {
-            "mapping": "lcp_position_sorted",
-        },
-        "id": {
-            "mapping": "lcp_position_sorted",
-            "replaces_lcp_position_order": True,
-        },
+        "id": {"mapping": canonical_mapping},
     }
+    if canonical_field == "positions":
+        manifest["ordering"]["reconstructed_rows"]["position_permutation_stored"] = False
+        manifest["ordering"]["id"]["replaces_lcp_position_order"] = True
+    elif canonical_field == "velocities":
+        manifest["ordering"]["reconstructed_rows"]["velocity_permutation_stored"] = False
+        manifest["ordering"]["id"]["replaces_lcp_velocity_order"] = True
     manifest["format_version"] = 3
 
     manifest["compressed_fields"]["id"] = compress_integer_raw(
@@ -271,43 +312,75 @@ def compress(args: argparse.Namespace,
         id_dtype,
         artifacts["id"],
         "id",
-        manifest["count"],
+        count,
         args.szo_abs_eb,
         args.force,
     )
 
-    if args.vel_compressor == "lcp":
-        velocity_order_raw = work_dir / "preprocessed" / "velocity_order.i32.raw"
-        hp.require_output_path(velocity_order_raw, args.force)
-        raw_paths["velocity_order"] = str(velocity_order_raw)
-        velocity_lcp = Path(artifacts["velocities"])
-        hp.require_output_path(velocity_lcp, args.force)
-        hp.run_command(
-            [
-                str(tools.lcp),
-                "-i",
-                *(ordered_velocity_paths[logical] for logical in hp.VELOCITY_FIELDS),
-                "-z",
-                str(velocity_lcp),
-                "-1",
-                str(manifest["count"]),
-                "-eb",
-                str(manifest["error_bounds"]["velocities_lcp_abs"]),
-                "-ord",
-                "32",
+    if position_compressor == "lcp":
+        manifest["ordering"]["positions"] = {"mapping": canonical_mapping}
+    else:
+        for logical in hp.POSITION_FIELDS:
+            position_path = raw_paths[logical]
+            if canonical_order is not None:
+                position_path = reorder_raw(
+                    position_path,
+                    "float32",
+                    pre_dir / f"{logical}.{canonical_mapping}.float32.raw",
+                    count,
+                    canonical_order,
+                    args.force,
+                )
+                raw_paths[f"{logical}_canonical_ordered"] = position_path
+            manifest["compressed_fields"][logical] = compress_pysz_raw(
+                position_path,
+                "float32",
+                artifacts[logical],
+                logical,
+                count,
+                float(manifest["field_error_bounds"][logical]["compressor_abs"]),
+                args.force,
+            )
+        manifest["ordering"]["positions"] = {"mapping": canonical_mapping}
+
+    if velocity_compressor == "lcp":
+        if position_compressor == "lcp":
+            ordered_velocity_paths: Dict[str, str] = {}
+            for logical in hp.VELOCITY_FIELDS:
+                ordered_path = reorder_raw(
+                    raw_paths[f"{logical}_lcp"],
+                    "float32",
+                    pre_dir / f"{logical}.{canonical_mapping}.float32.raw",
+                    count,
+                    canonical_order,
+                    args.force,
+                )
+                ordered_velocity_paths[logical] = ordered_path
+                raw_paths[f"{logical}_canonical_ordered"] = ordered_path
+
+            velocity_order_raw = pre_dir / "velocity_order.i32.raw"
+            raw_paths["velocity_order"] = str(velocity_order_raw)
+            compress_lcp_triplet(
+                tools,
+                tuple(ordered_velocity_paths[logical] for logical in hp.VELOCITY_FIELDS),
+                artifacts["velocities"],
+                count,
+                float(manifest["error_bounds"]["velocities_lcp_abs"]),
+                velocity_order_raw,
+                args.force,
+            )
+            manifest["compressed_fields"]["velocity_order"] = compress_integer_raw(
+                args.lossless,
                 str(velocity_order_raw),
-            ]
-        )
-        manifest["compressed_fields"]["velocity_order"] = compress_integer_raw(
-            args.lossless,
-            str(velocity_order_raw),
-            "int32",
-            artifacts["velocity_order"],
-            "velocity_order",
-            manifest["count"],
-            args.szo_abs_eb,
-            args.force,
-        )
+                "int32",
+                artifacts["velocity_order"],
+                "velocity_order",
+                count,
+                args.szo_abs_eb,
+                args.force,
+            )
+
+        velocity_lcp = Path(artifacts["velocities"])
         manifest["compressed_fields"]["velocities"] = {
             "field": "velocities",
             "codec": "lcp",
@@ -316,28 +389,42 @@ def compress(args: argparse.Namespace,
                 logical: manifest["fields"][logical]["dtype"]
                 for logical in hp.VELOCITY_FIELDS
             },
-            "count": manifest["count"],
+            "count": count,
             "abs_error_bound": manifest["error_bounds"]["velocities_lcp_abs"],
             "path": str(velocity_lcp),
             "bytes": velocity_lcp.stat().st_size,
         }
-        manifest["ordering"]["velocities"] = {
-            "mapping": "lcp_velocity_sorted_index_to_lcp_position_sorted_row",
-            "field": "velocity_order",
-        }
+        if position_compressor == "lcp":
+            manifest["ordering"]["velocities"] = {
+                "mapping": "lcp_velocity_sorted_index_to_lcp_position_sorted_row",
+                "field": "velocity_order",
+            }
+        else:
+            manifest["ordering"]["velocities"] = {"mapping": canonical_mapping}
     else:
         for logical in hp.VELOCITY_FIELDS:
             dtype = manifest["fields"][logical]["dtype"]
-            manifest["compressed_fields"][logical]= compress_pysz_raw(
-                ordered_velocity_paths[logical],
+            velocity_path = raw_paths[logical]
+            if canonical_order is not None:
+                velocity_path = reorder_raw(
+                    velocity_path,
+                    dtype,
+                    pre_dir / f"{logical}.{canonical_mapping}.{np.dtype(dtype).name}.raw",
+                    count,
+                    canonical_order,
+                    args.force,
+                )
+                raw_paths[f"{logical}_canonical_ordered"] = velocity_path
+            manifest["compressed_fields"][logical] = compress_pysz_raw(
+                velocity_path,
                 dtype,
                 artifacts[logical],
                 logical,
-                manifest["count"],
+                count,
                 manifest["field_error_bounds"][logical]["abs"],
                 args.force,
             )
-        manifest["ordering"]["velocities"] = {"mapping": "lcp_position_sorted"}
+        manifest["ordering"]["velocities"] = {"mapping": canonical_mapping}
 
     hp.update_compressed_size_metrics(manifest, work_dir)
     hp.write_json(work_dir / "manifest.json", manifest, force=True)

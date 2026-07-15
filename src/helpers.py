@@ -250,8 +250,13 @@ def compression_ratio(original_bytes: int, compressed_bytes: int) -> float:
 
 def component_compression_ratios(report: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
     components = report.get("sizes", {}).get("compressed_components_bytes", {})
-    xyz_compressed = int(components.get("compressed/positions.lcp", 0)) + compressed_bytes_with_prefixes(
-        components, ("compressed/order.",)
+    xyz_compressed = (
+        int(components.get("compressed/positions.lcp", 0))
+        + compressed_bytes_with_prefixes(components, ("compressed/order.",))
+        + compressed_bytes_with_prefixes(
+            components,
+            ("compressed/x.", "compressed/y.", "compressed/z."),
+        )
     )
     velocity_lcp_compressed = int(components.get("compressed/velocities.lcp", 0))
     velocity_order_compressed = compressed_bytes_with_prefixes(
@@ -304,7 +309,9 @@ def print_component_summary(report: Mapping[str, Any]) -> None:
         names.append("order")
     names.append("id")
     if velocity_lcp:
-        names.extend(("vxyz", "velocity_order"))
+        names.append("vxyz")
+        if ratios["velocity_order"]["compressed_bytes"] > 0:
+            names.append("velocity_order")
     else:
         names.extend(("vx", "vy", "vz"))
     for name in names:
@@ -374,10 +381,12 @@ def update_metric_acc(acc: Dict[str, Any], orig: np.ndarray, recon: np.ndarray) 
 
 def manifest_path_from_manifest(manifest: Mapping[str, Any]) -> str:
     compressed = manifest.get("artifacts", {}).get("compressed", {})
-    positions = compressed.get("positions")
-    if not positions:
+    artifact_path = compressed.get("positions")
+    if not artifact_path:
+        artifact_path = next(iter(compressed.values()), None)
+    if not artifact_path:
         return "."
-    return str(Path(positions).resolve().parents[1])
+    return str(Path(artifact_path).resolve().parents[1])
 
 def finalize_metric_acc(acc: Mapping[str, Any]) -> Dict[str, Any]:
     count = int(acc["count"])
@@ -418,18 +427,19 @@ def comparison_order_for_reconstructed_rows(
     if row_order.get("original_row_order_restored", True):
         return None, "original_row"
 
+    order_artifact = row_order.get("temporary_permutation_artifact") or "position_order"
     raw_order_path = (
         manifest.get("artifacts", {})
         .get("preprocessed", {})
-        .get("position_order")
+        .get(order_artifact)
     )
     if raw_order_path and Path(raw_order_path).is_file():
         order = read_raw(raw_order_path, np.dtype("int32"), count).astype(np.intp, copy=False)
         if count and (int(order.min()) < 0 or int(order.max()) >= count):
-            raise RuntimeError("Temporary LCP position order is outside the original row range.")
+            raise RuntimeError("Temporary LCP canonical order is outside the original row range.")
         if np.unique(order).size != count:
-            raise RuntimeError("Temporary LCP position order is not a permutation.")
-        return order, "temporary_lcp_position_order"
+            raise RuntimeError("Temporary LCP canonical order is not a permutation.")
+        return order, f"temporary_{order_artifact}"
 
     id_path = manifest["fields"]["id"]["h5_path"]
     original_ids = original[id_path][:count]
