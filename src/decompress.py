@@ -1,5 +1,6 @@
 import argparse
 import time
+import tempfile
 import numpy as np
 import h5py
 
@@ -155,13 +156,36 @@ def position_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
     return "lcp"
 
 
-def read_lcp_order(path: str, dtype: np.dtype, count: int, label: str) -> np.ndarray:
+def read_lcp_order(
+    path: str,
+    dtype: np.dtype,
+    count: int,
+    label: str,
+    chunk_size: int = 0,
+) -> np.ndarray:
     order = np.fromfile(path, dtype=dtype, count=count)
     if order.size != count:
         raise RuntimeError(f"Unexpected EOF reading {path}; expected {count}, got {order.size}.")
-    if count and (int(order.min()) < 0 or int(order.max()) >= count):
-        raise RuntimeError(f"{label} is not a valid index range for this particle count.")
-    return order.astype(np.intp, copy=False)
+    if chunk_size < 0:
+        raise RuntimeError(f"{label} has an invalid negative chunk size.")
+    if not chunk_size:
+        if count and (int(order.min()) < 0 or int(order.max()) >= count):
+            raise RuntimeError(f"{label} is not a valid index range for this particle count.")
+        if np.unique(order).size != count:
+            raise RuntimeError(f"{label} is not a permutation of the particle rows.")
+        return order.astype(np.intp, copy=False)
+
+    expanded = np.empty(count, dtype=np.intp)
+    for start in range(0, count, chunk_size):
+        end = min(start + chunk_size, count)
+        local = order[start:end]
+        local_count = end - start
+        if local_count and (int(local.min()) < 0 or int(local.max()) >= local_count):
+            raise RuntimeError(f"{label} contains an index outside its velocity chunk.")
+        if np.unique(local).size != local_count:
+            raise RuntimeError(f"{label} contains a chunk that is not a local permutation.")
+        expanded[start:end] = start + local.astype(np.intp, copy=False)
+    return expanded
 
 
 def run_lcp_decompress(
@@ -187,6 +211,122 @@ def run_lcp_decompress(
     )
 
 
+def run_lcp_decompress_batch(
+    tools: hp.ToolPaths,
+    compressed_path: str,
+    output_paths: Mapping[str, str],
+    fields: tuple[str, str, str],
+    chunks: int,
+    chunk_size: int,
+    abs_error_bound: float,
+) -> None:
+    hp.run_command(
+        [
+            str(tools.lcp),
+            "-z",
+            compressed_path,
+            "-o",
+            *(output_paths[field] for field in fields),
+            "-2",
+            str(chunks),
+            str(chunk_size),
+            "-bt",
+            "0",
+            "-eb",
+            str(abs_error_bound),
+        ]
+    )
+
+
+def run_chunked_lcp_decompress(
+    tools: hp.ToolPaths,
+    compressed_path: str,
+    output_paths: Mapping[str, str],
+    fields: tuple[str, str, str],
+    count: int,
+    chunk_size: int,
+    abs_error_bound: float,
+) -> None:
+    if chunk_size <= 0:
+        raise RuntimeError("Chunked LCP decompression requires a positive chunk size.")
+    sinks = {
+        field: np.memmap(output_paths[field], dtype=np.float32, mode="w+", shape=(count,))
+        for field in fields
+    }
+
+    temp_parent = Path(output_paths[fields[0]]).parent
+    with tempfile.TemporaryDirectory(prefix="velocity_lcp_chunks_", dir=temp_parent) as temp:
+        temp_dir = Path(temp)
+        chunk_archive = temp_dir / "chunk.lcp"
+        chunk_outputs = {
+            field: str(temp_dir / f"{field}.f32.raw")
+            for field in fields
+        }
+        with Path(compressed_path).open("rb") as archive:
+            header = archive.read(hp.LCP_CHUNK_HEADER.size)
+            if len(header) != hp.LCP_CHUNK_HEADER.size:
+                raise RuntimeError("Truncated chunked LCP velocity header.")
+            magic, stored_count, stored_chunk_size, stored_segment_count = (
+                hp.LCP_CHUNK_HEADER.unpack(header)
+            )
+            if magic != hp.LCP_CHUNK_MAGIC:
+                raise RuntimeError("Invalid chunked LCP velocity archive magic.")
+            if stored_count != count or stored_chunk_size != chunk_size:
+                raise RuntimeError(
+                    "Chunked LCP velocity archive metadata does not match the manifest."
+                )
+            start = 0
+            for _ in range(stored_segment_count):
+                entry = archive.read(hp.LCP_CHUNK_ENTRY.size)
+                if len(entry) != hp.LCP_CHUNK_ENTRY.size:
+                    raise RuntimeError("Truncated chunked LCP velocity entry.")
+                segment_values, payload_size = hp.LCP_CHUNK_ENTRY.unpack(entry)
+                if not segment_values or segment_values > count - start:
+                    raise RuntimeError("Chunked LCP velocity archive has an invalid segment size.")
+                end = start + segment_values
+                payload = archive.read(payload_size)
+                if len(payload) != payload_size:
+                    raise RuntimeError("Truncated chunked LCP velocity payload.")
+                chunk_archive.write_bytes(payload)
+                if segment_values > chunk_size:
+                    if segment_values % chunk_size:
+                        raise RuntimeError(
+                            "Chunked LCP velocity batch is not aligned to the configured chunk size."
+                        )
+                    run_lcp_decompress_batch(
+                        tools,
+                        str(chunk_archive),
+                        chunk_outputs,
+                        fields,
+                        segment_values // chunk_size,
+                        chunk_size,
+                        abs_error_bound,
+                    )
+                else:
+                    run_lcp_decompress(
+                        tools,
+                        str(chunk_archive),
+                        chunk_outputs,
+                        fields,
+                        segment_values,
+                        abs_error_bound,
+                    )
+                for field in fields:
+                    sinks[field][start:end] = hp.read_raw(
+                        chunk_outputs[field], np.dtype("float32"), segment_values
+                    )
+                start = end
+
+            if start != count:
+                raise RuntimeError("Chunked LCP velocity archive does not cover every particle.")
+
+            if archive.read(1):
+                raise RuntimeError("Chunked LCP velocity archive contains trailing data.")
+
+    for sink in sinks.values():
+        sink.flush()
+
+
 def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], output_h5: Path) -> None:
     count = int(manifest["count"])
     scale = float(manifest["position_scale"]["value"])
@@ -201,11 +341,13 @@ def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], outp
     velocity_compressor = velocity_compressor_from_manifest(manifest)
     velocity_order_index = None
     if velocity_compressor == "lcp" and "velocity_order" in dec_paths:
+        velocity_order_field = manifest["compressed_fields"]["velocity_order"]
         velocity_order_index = read_lcp_order(
             dec_paths["velocity_order"],
-            np.dtype(manifest["compressed_fields"]["velocity_order"]["dtype"]),
+            np.dtype(velocity_order_field["dtype"]),
             count,
             "LCP velocity order sidecar",
+            int(velocity_order_field.get("chunk_size", 0)),
         )
 
     with h5py.File(output_h5, "w") as out:
@@ -321,14 +463,26 @@ def decompress(args: argparse.Namespace,
         fields["id"], dec_paths["id"], args.force
     )
     if velocity_compressor == "lcp":
-        run_lcp_decompress(
-            tools,
-            artifacts["velocities"],
-            dec_paths,
-            hp.VELOCITY_FIELDS,
-            count,
-            float(manifest["error_bounds"]["velocities_lcp_abs"]),
-        )
+        velocity_chunk_size = int(fields["velocities"].get("chunk_size", 0))
+        if velocity_chunk_size:
+            run_chunked_lcp_decompress(
+                tools,
+                artifacts["velocities"],
+                dec_paths,
+                hp.VELOCITY_FIELDS,
+                count,
+                velocity_chunk_size,
+                float(manifest["error_bounds"]["velocities_lcp_abs"]),
+            )
+        else:
+            run_lcp_decompress(
+                tools,
+                artifacts["velocities"],
+                dec_paths,
+                hp.VELOCITY_FIELDS,
+                count,
+                float(manifest["error_bounds"]["velocities_lcp_abs"]),
+            )
         if has_velocity_order:
             decompress_integer_raw(
                 fields["velocity_order"], dec_paths["velocity_order"], args.force

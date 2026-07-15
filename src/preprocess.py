@@ -387,6 +387,18 @@ def make_manifest(
 def preprocess(args: argparse.Namespace):
     if args.lossless == "szo" and not 0.0 <= float(args.szo_abs_eb) < 1.0:
         raise RuntimeError("--szo-abs-eb must be at least 0 and less than 1.")
+    velocity_chunk_size = int(getattr(args, "vel_chunk_size", 0))
+    if velocity_chunk_size < 0:
+        raise RuntimeError("--vel-chunk-size must be non-negative.")
+    if velocity_chunk_size > 2**31:
+        raise RuntimeError("--vel-chunk-size cannot exceed 2^31 when using int32 order indices.")
+    if velocity_chunk_size and not (
+        args.pos_compressor == "lcp" and args.vel_compressor == "lcp"
+    ):
+        raise RuntimeError(
+            "--vel-chunk-size is only supported when both --pos-compressor and "
+            "--vel-compressor are lcp."
+        )
     input_h5 = Path(args.input_h5).resolve()
     if not input_h5.is_file():
         raise RuntimeError(f"Input HDF5 file does not exist: {input_h5}")
@@ -557,6 +569,10 @@ def preprocess(args: argparse.Namespace):
             "positions": args.pos_compressor,
             "velocities": args.vel_compressor,
             "lossless": args.lossless,
+        }
+        manifest["velocity_chunking"] = {
+            "chunk_size": velocity_chunk_size,
+            "enabled": bool(velocity_chunk_size),
         }
         if args.vel_compressor == "lcp":
             manifest["error_bounds"]["velocities_lcp_abs"] = vel_eb

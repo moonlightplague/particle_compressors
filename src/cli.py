@@ -15,6 +15,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "pos_rel_eb": None,
     "vel_abs_eb": None,
     "vel_rel_eb": None,
+    "vel_chunk_size": 0,
     "id_abs_eb": 0.0,
     "szo_abs_eb": 0.5,
     "position_scale": "auto",
@@ -22,7 +23,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "position_scale_value": None,
     "pos_compressor": "lcp",
     "vel_compressor": "sz3",
-    "lossless": "szo"
+    "lossless": "szo",
 }
 AVAILABLE_COMPRESSORS: Dict[str, List[str]] = {
     "pos_compressor": ["lcp", "sz3"],
@@ -55,6 +56,12 @@ def _validated_advanced_config(config: Mapping[str, Any], config_path: Path) -> 
     defaults["szo_abs_eb"] = _number_or_none(defaults["szo_abs_eb"], "szo_abs_eb")
     if defaults["szo_abs_eb"] is None or not 0.0 <= defaults["szo_abs_eb"] < 1.0:
         raise RuntimeError("config value advanced.szo_abs_eb must be at least 0 and less than 1.")
+    if isinstance(defaults["vel_chunk_size"], bool) or not isinstance(
+        defaults["vel_chunk_size"], int
+    ):
+        raise RuntimeError("config value advanced.vel_chunk_size must be a non-negative integer.")
+    if defaults["vel_chunk_size"] < 0:
+        raise RuntimeError("config value advanced.vel_chunk_size must be a non-negative integer.")
 
     position_scale = defaults["position_scale"]
     if position_scale not in ("auto", "raw", "attr", "value"):
@@ -152,6 +159,15 @@ def add_compression_args(parser: argparse.ArgumentParser, defaults: Mapping[str,
         type=float,
         default=defaults["vel_rel_eb"],
         help="Relative error bound for vx/vy/vz passed to the selected velocity compressor.",
+    )
+    parser.add_argument(
+        "--vel-chunk-size",
+        type=int,
+        default=defaults["vel_chunk_size"],
+        help=(
+            "Number of position-ordered particles per independent velocity LCP chunk; "
+            "0 disables chunking (default: %(default)s)."
+        ),
     )
     parser.add_argument(
         "--id-abs-eb",

@@ -9,8 +9,8 @@ import numpy as np
 
 from src.cli import AVAILABLE_COMPRESSORS, build_parser
 from src.compress import compress as compress_pipeline
-from src.compress import compress_szo_raw, reorder_raw
-from src.decompress import decompress_szo_raw
+from src.compress import compress_pcodec_raw, compress_szo_raw, reorder_raw
+from src.decompress import decompress_pcodec_raw, decompress_szo_raw
 from src.decompress import (
     position_compressor_from_manifest,
     recombine_h5,
@@ -372,9 +372,202 @@ class RecombineTests(unittest.TestCase):
                 decompress_szo_raw(corrupted_metadata, str(root / "corrupt.raw"), False)
 
     def test_cli_accepts_lcp_velocity_compressor(self) -> None:
-        argv = ["roundtrip", "input.h5", "--vel-compressor", "lcp"]
+        argv = [
+            "roundtrip",
+            "input.h5",
+            "--pos-compressor",
+            "lcp",
+            "--vel-compressor",
+            "lcp",
+            "--vel-chunk-size",
+            "32768",
+        ]
         args = build_parser(argv).parse_args(argv)
         self.assertEqual(args.vel_compressor, "lcp")
+        self.assertEqual(args.vel_chunk_size, 32768)
+
+    def test_all_lcp_chunking_uses_position_order_and_chunk_local_velocity_orders(self) -> None:
+        count = 5
+        position_order = np.array([2, 0, 4, 1, 3], dtype=np.int32)
+        local_orders = (
+            np.array([2, 0, 1], dtype=np.int32),
+            np.array([1, 0], dtype=np.int32),
+        )
+        source = {
+            "x": np.array([10, 20, 30, 40, 50], dtype=np.float32),
+            "y": np.array([11, 21, 31, 41, 51], dtype=np.float32),
+            "z": np.array([12, 22, 32, 42, 52], dtype=np.float32),
+            "id": np.array([901, 117, 502, 330, 774], dtype=np.uint64),
+            "vx": np.array([1, 2, 3, 4, 5], dtype=np.float32),
+            "vy": np.array([6, 7, 8, 9, 10], dtype=np.float32),
+            "vz": np.array([11, 12, 13, 14, 15], dtype=np.float32),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            preprocessed = root / "preprocessed"
+            compressed = root / "compressed"
+            preprocessed.mkdir()
+            compressed.mkdir()
+            raw_paths = {}
+            for logical, values in source.items():
+                path = preprocessed / f"{logical}.raw"
+                values.tofile(path)
+                raw_paths[logical] = str(path)
+                if logical in ("vx", "vy", "vz"):
+                    raw_paths[f"{logical}_lcp"] = str(path)
+
+            artifacts = {
+                "positions": str(compressed / "positions.lcp"),
+                "id": str(compressed / "id.pco"),
+                "velocities": str(compressed / "velocities.lcp"),
+                "velocity_order": str(compressed / "velocity_order.pco"),
+            }
+            manifest = {
+                "count": count,
+                "fields": {
+                    logical: {"dtype": str(values.dtype)}
+                    for logical, values in source.items()
+                },
+                "error_bounds": {
+                    "positions_lcp_abs": 0.01,
+                    "velocities_lcp_abs": 0.01,
+                },
+                "artifacts": {
+                    "preprocessed": raw_paths,
+                    "compressed": artifacts,
+                },
+                "compressed_fields": {},
+                "sizes": {"selected_original_payload_bytes": 160},
+            }
+            args = SimpleNamespace(
+                work_dir=str(root),
+                force=False,
+                lossless="pcodec",
+                pos_compressor="lcp",
+                vel_compressor="lcp",
+                vel_chunk_size=3,
+                szo_abs_eb=0.5,
+            )
+            captured_integer = {}
+            captured_velocity_chunks = []
+
+            def fake_run_command(argv):
+                compressed_path = Path(argv[argv.index("-z") + 1])
+                order_path = Path(argv[-1])
+                chunk_count = int(argv[argv.index("-1") + 1])
+                if compressed_path == Path(artifacts["positions"]):
+                    compressed_path.write_bytes(b"positions")
+                    position_order.tofile(order_path)
+                    return
+
+                input_index = argv.index("-i") + 1
+                inputs = tuple(
+                    np.fromfile(argv[input_index + axis], dtype=np.float32, count=chunk_count)
+                    for axis in range(3)
+                )
+                chunk_index = len(captured_velocity_chunks)
+                captured_velocity_chunks.append(inputs)
+                compressed_path.write_bytes(f"chunk-{chunk_index}".encode())
+                local_orders[chunk_index].tofile(order_path)
+
+            def fake_integer(codec, raw_path, dtype, compressed_path, field_name, *unused):
+                captured_integer[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
+                payload = b"integer"
+                Path(compressed_path).write_bytes(payload)
+                return {
+                    "field": field_name,
+                    "codec": codec,
+                    "dtype": dtype,
+                    "count": count,
+                    "path": compressed_path,
+                    "bytes": len(payload),
+                }
+
+            with patch("src.compress.hp.run_command", side_effect=fake_run_command), patch(
+                "src.compress.compress_integer_raw", side_effect=fake_integer
+            ), patch("src.compress.hp.update_compressed_size_metrics"):
+                result = compress_pipeline(
+                    args,
+                    manifest,
+                    raw_paths,
+                    SimpleNamespace(lcp=Path("lcp")),
+                )
+
+            np.testing.assert_array_equal(captured_integer["id"], source["id"][position_order])
+            np.testing.assert_array_equal(
+                captured_integer["velocity_order"], np.concatenate(local_orders)
+            )
+            for axis, logical in enumerate(("vx", "vy", "vz")):
+                expected = source[logical][position_order]
+                np.testing.assert_array_equal(captured_velocity_chunks[0][axis], expected[:3])
+                np.testing.assert_array_equal(captured_velocity_chunks[1][axis], expected[3:])
+            self.assertEqual(result["compressed_fields"]["velocity_order"]["index_scope"], "chunk_local")
+            self.assertEqual(result["compressed_fields"]["velocity_order"]["order_bits_per_particle"], 2)
+            self.assertEqual(result["compressed_fields"]["velocities"]["container"], "chunked_lcp_v2")
+            self.assertEqual(result["format_version"], 4)
+
+    def test_chunk_local_velocity_order_recombines_each_particle_correspondence(self) -> None:
+        count = 5
+        chunk_size = 3
+        local_order = np.array([2, 0, 1, 1, 0], dtype=np.int32)
+        global_order = np.array([2, 0, 1, 4, 3], dtype=np.intp)
+        canonical = {
+            "id": np.array([901, 117, 502, 330, 774], dtype=np.uint64),
+            "x": np.array([10, 20, 30, 40, 50], dtype=np.float32),
+            "y": np.array([11, 21, 31, 41, 51], dtype=np.float32),
+            "z": np.array([12, 22, 32, 42, 52], dtype=np.float32),
+            "vx": np.array([1, 2, 3, 4, 5], dtype=np.float32),
+            "vy": np.array([6, 7, 8, 9, 10], dtype=np.float32),
+            "vz": np.array([11, 12, 13, 14, 15], dtype=np.float32),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dec_paths = {}
+            for logical, values in canonical.items():
+                path = root / f"{logical}.raw"
+                encoded = values[global_order] if logical in ("vx", "vy", "vz") else values
+                encoded.tofile(path)
+                dec_paths[logical] = str(path)
+            order_path = root / "velocity_order.raw"
+            local_order.tofile(order_path)
+            dec_paths["velocity_order"] = str(order_path)
+
+            manifest = {
+                "count": count,
+                "position_scale": {"value": 1.0},
+                "fields": FIELDS,
+                "compressors": {"positions": "lcp", "velocities": "lcp"},
+                "compressed_fields": {
+                    "velocities": {"codec": "lcp", "dtype": "float32"},
+                    "velocity_order": {"dtype": "int32", "chunk_size": chunk_size},
+                },
+            }
+            output = root / "reconstructed.h5"
+            recombine_h5(manifest, dec_paths, output)
+
+            with h5py.File(output, "r") as h5:
+                for logical, expected in canonical.items():
+                    np.testing.assert_array_equal(h5[logical][:], expected)
+
+    def test_pcodec_bitpacks_int32_chunk_order_to_theoretical_width(self) -> None:
+        count = 1 << 15
+        order = np.random.default_rng(1234).permutation(count).astype(np.int32)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw = root / "order.i32.raw"
+            compressed = root / "order.pco"
+            restored = root / "order.restored.raw"
+            order.tofile(raw)
+            field = compress_pcodec_raw(
+                str(raw), "int32", str(compressed), "velocity_order", count, False
+            )
+            decompress_pcodec_raw(field, str(restored), False)
+
+            theoretical_bytes = count * 15 // 8
+            self.assertLessEqual(field["bytes"], theoretical_bytes + 128)
+            np.testing.assert_array_equal(np.fromfile(restored, dtype=np.int32), order)
 
     def test_lcp_velocity_uses_its_own_permutation(self) -> None:
         self.assertIn("lcp", AVAILABLE_COMPRESSORS["vel_compressor"])

@@ -1,7 +1,6 @@
 import argparse
 import numpy as np
-import time
-import math
+import tempfile
 
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -213,6 +212,164 @@ def compress_lcp_triplet(
     )
 
 
+def compress_lcp_triplet_batch(
+    tools: hp.ToolPaths,
+    input_paths: Tuple[str, str, str],
+    compressed_path: str,
+    chunks: int,
+    chunk_size: int,
+    abs_error_bound: float,
+    order_path: Path,
+    force: bool,
+) -> None:
+    if chunks <= 1:
+        raise RuntimeError("Batched LCP compression requires at least two chunks.")
+    hp.require_output_path(Path(compressed_path), force)
+    hp.require_output_path(order_path, force)
+    hp.run_command(
+        [
+            str(tools.lcp),
+            "-i",
+            *input_paths,
+            "-z",
+            compressed_path,
+            "-2",
+            str(chunks),
+            str(chunk_size),
+            "-bt",
+            "0",
+            "-eb",
+            str(abs_error_bound),
+            "-ord",
+            "32",
+            str(order_path),
+        ]
+    )
+
+
+def velocity_order_bits(chunk_size: int) -> int:
+    if chunk_size < 0:
+        raise RuntimeError("Velocity chunk size must be non-negative.")
+    return max(0, (chunk_size - 1).bit_length())
+
+
+def compress_chunked_lcp_triplet(
+    tools: hp.ToolPaths,
+    input_paths: Tuple[str, str, str],
+    compressed_path: str,
+    count: int,
+    chunk_size: int,
+    abs_error_bound: float,
+    order_path: Path,
+    force: bool,
+) -> Dict[str, int]:
+    if chunk_size <= 0:
+        raise RuntimeError("Chunked LCP compression requires a positive chunk size.")
+    if chunk_size > 2**31:
+        raise RuntimeError("Velocity chunk size cannot exceed 2^31 with int32 local order indices.")
+
+    output = Path(compressed_path)
+    hp.require_output_path(output, force)
+    hp.require_output_path(order_path, force)
+    chunk_count = (count + chunk_size - 1) // chunk_size
+    chunks_per_batch = max(1, hp.LCP_CHUNK_BATCH_VALUES // chunk_size)
+    full_chunks = count // chunk_size
+    remainder = count % chunk_size
+    segment_count = (
+        (full_chunks + chunks_per_batch - 1) // chunks_per_batch
+        + (1 if remainder else 0)
+    )
+    sources = tuple(
+        np.memmap(path, dtype=np.float32, mode="r", shape=(count,))
+        for path in input_paths
+    )
+    local_order = np.memmap(order_path, dtype=np.int32, mode="w+", shape=(count,))
+
+    with tempfile.TemporaryDirectory(prefix="velocity_lcp_chunks_", dir=order_path.parent) as temp:
+        temp_dir = Path(temp)
+        chunk_inputs = tuple(temp_dir / f"{field}.f32.raw" for field in hp.VELOCITY_FIELDS)
+        chunk_archive = temp_dir / "chunk.lcp"
+        chunk_order = temp_dir / "order.i32.raw"
+
+        with output.open("wb") as archive:
+            archive.write(
+                hp.LCP_CHUNK_HEADER.pack(
+                    hp.LCP_CHUNK_MAGIC,
+                    count,
+                    chunk_size,
+                    segment_count,
+                )
+            )
+            start = 0
+            while start < count:
+                remaining = count - start
+                if remaining < chunk_size:
+                    chunks_in_segment = 1
+                    segment_values = remaining
+                else:
+                    available_full_chunks = remaining // chunk_size
+                    chunks_in_segment = min(chunks_per_batch, available_full_chunks)
+                    segment_values = chunks_in_segment * chunk_size
+                end = start + segment_values
+                for source, path in zip(sources, chunk_inputs):
+                    np.asarray(source[start:end]).tofile(path)
+
+                if chunks_in_segment > 1:
+                    compress_lcp_triplet_batch(
+                        tools,
+                        tuple(str(path) for path in chunk_inputs),
+                        str(chunk_archive),
+                        chunks_in_segment,
+                        chunk_size,
+                        abs_error_bound,
+                        chunk_order,
+                        True,
+                    )
+                else:
+                    compress_lcp_triplet(
+                        tools,
+                        tuple(str(path) for path in chunk_inputs),
+                        str(chunk_archive),
+                        segment_values,
+                        abs_error_bound,
+                        chunk_order,
+                        True,
+                    )
+
+                order = hp.read_raw(str(chunk_order), np.dtype("int32"), segment_values)
+                for local_start in range(0, segment_values, chunk_size):
+                    local_end = min(local_start + chunk_size, segment_values)
+                    local_count = local_end - local_start
+                    chunk_order_values = order[local_start:local_end]
+                    if local_count and (
+                        int(chunk_order_values.min()) < local_start
+                        or int(chunk_order_values.max()) >= local_end
+                    ):
+                        raise RuntimeError("LCP order contains an index outside its velocity chunk.")
+                    localized = chunk_order_values - local_start
+                    if np.unique(localized).size != local_count:
+                        raise RuntimeError("LCP order is not a local permutation within a velocity chunk.")
+                    output_start = start + local_start
+                    output_end = start + local_end
+                    local_order[output_start:output_end] = localized
+
+                payload = chunk_archive.read_bytes()
+                archive.write(hp.LCP_CHUNK_ENTRY.pack(segment_values, len(payload)))
+                archive.write(payload)
+                start = end
+
+    local_order.flush()
+    del local_order
+    del sources
+    return {
+        "chunk_size": chunk_size,
+        "chunk_count": chunk_count,
+        "lcp_segment_count": segment_count,
+        "lcp_batch_values": hp.LCP_CHUNK_BATCH_VALUES,
+        "order_bits_per_particle": velocity_order_bits(chunk_size),
+    }
+
+
 def compress(args: argparse.Namespace,
              manifest: Dict[str, Any],
              raw_paths: Dict[str, str],
@@ -223,6 +380,17 @@ def compress(args: argparse.Namespace,
     count = int(manifest["count"])
     position_compressor = getattr(args, "pos_compressor", "lcp")
     velocity_compressor = args.vel_compressor
+    velocity_chunk_size = int(getattr(args, "vel_chunk_size", 0))
+    if velocity_chunk_size < 0:
+        raise RuntimeError("--vel-chunk-size must be non-negative.")
+    if velocity_chunk_size > 2**31:
+        raise RuntimeError("--vel-chunk-size cannot exceed 2^31 when using int32 order indices.")
+    if velocity_chunk_size and not (
+        position_compressor == "lcp" and velocity_compressor == "lcp"
+    ):
+        raise RuntimeError(
+            "--vel-chunk-size is only supported when both position and velocity compressors are lcp."
+        )
     canonical_order = None
     canonical_mapping = "original_row"
     canonical_field = None
@@ -360,16 +528,29 @@ def compress(args: argparse.Namespace,
 
             velocity_order_raw = pre_dir / "velocity_order.i32.raw"
             raw_paths["velocity_order"] = str(velocity_order_raw)
-            compress_lcp_triplet(
-                tools,
-                tuple(ordered_velocity_paths[logical] for logical in hp.VELOCITY_FIELDS),
-                artifacts["velocities"],
-                count,
-                float(manifest["error_bounds"]["velocities_lcp_abs"]),
-                velocity_order_raw,
-                args.force,
-            )
-            manifest["compressed_fields"]["velocity_order"] = compress_integer_raw(
+            velocity_chunking = None
+            if velocity_chunk_size:
+                velocity_chunking = compress_chunked_lcp_triplet(
+                    tools,
+                    tuple(ordered_velocity_paths[logical] for logical in hp.VELOCITY_FIELDS),
+                    artifacts["velocities"],
+                    count,
+                    velocity_chunk_size,
+                    float(manifest["error_bounds"]["velocities_lcp_abs"]),
+                    velocity_order_raw,
+                    args.force,
+                )
+            else:
+                compress_lcp_triplet(
+                    tools,
+                    tuple(ordered_velocity_paths[logical] for logical in hp.VELOCITY_FIELDS),
+                    artifacts["velocities"],
+                    count,
+                    float(manifest["error_bounds"]["velocities_lcp_abs"]),
+                    velocity_order_raw,
+                    args.force,
+                )
+            velocity_order_field = compress_integer_raw(
                 args.lossless,
                 str(velocity_order_raw),
                 "int32",
@@ -379,6 +560,35 @@ def compress(args: argparse.Namespace,
                 args.szo_abs_eb,
                 args.force,
             )
+            if velocity_chunking is not None:
+                velocity_order_field.update(
+                    {
+                        **velocity_chunking,
+                        "index_scope": "chunk_local",
+                        "uncompressed_storage_dtype": "int32",
+                        "compressed_bits_per_particle": (
+                            8.0 * float(velocity_order_field["bytes"]) / count
+                            if count
+                            else 0.0
+                        ),
+                    }
+                )
+            else:
+                velocity_order_field.update(
+                    {
+                        "chunk_size": 0,
+                        "chunk_count": 1,
+                        "index_scope": "global",
+                        "order_bits_per_particle": velocity_order_bits(count),
+                        "uncompressed_storage_dtype": "int32",
+                        "compressed_bits_per_particle": (
+                            8.0 * float(velocity_order_field["bytes"]) / count
+                            if count
+                            else 0.0
+                        ),
+                    }
+                )
+            manifest["compressed_fields"]["velocity_order"] = velocity_order_field
 
         velocity_lcp = Path(artifacts["velocities"])
         manifest["compressed_fields"]["velocities"] = {
@@ -391,6 +601,17 @@ def compress(args: argparse.Namespace,
             },
             "count": count,
             "abs_error_bound": manifest["error_bounds"]["velocities_lcp_abs"],
+            "chunk_size": velocity_chunk_size if position_compressor == "lcp" else 0,
+            "chunk_count": (
+                (count + velocity_chunk_size - 1) // velocity_chunk_size
+                if position_compressor == "lcp" and velocity_chunk_size
+                else 1
+            ),
+            "container": (
+                hp.LCP_CHUNK_CONTAINER
+                if position_compressor == "lcp" and velocity_chunk_size
+                else "native_lcp"
+            ),
             "path": str(velocity_lcp),
             "bytes": velocity_lcp.stat().st_size,
         }
@@ -398,6 +619,8 @@ def compress(args: argparse.Namespace,
             manifest["ordering"]["velocities"] = {
                 "mapping": "lcp_velocity_sorted_index_to_lcp_position_sorted_row",
                 "field": "velocity_order",
+                "index_scope": "chunk_local" if velocity_chunk_size else "global",
+                "chunk_size": velocity_chunk_size,
             }
         else:
             manifest["ordering"]["velocities"] = {"mapping": canonical_mapping}
@@ -426,6 +649,16 @@ def compress(args: argparse.Namespace,
             )
         manifest["ordering"]["velocities"] = {"mapping": canonical_mapping}
 
+    manifest["velocity_chunking"] = {
+        "enabled": bool(velocity_chunk_size),
+        "chunk_size": velocity_chunk_size,
+        "chunk_count": (
+            (count + velocity_chunk_size - 1) // velocity_chunk_size
+            if velocity_chunk_size
+            else 1
+        ),
+    }
+    manifest["format_version"] = 4 if velocity_chunk_size else 3
     hp.update_compressed_size_metrics(manifest, work_dir)
     hp.write_json(work_dir / "manifest.json", manifest, force=True)
     return manifest

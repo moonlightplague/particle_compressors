@@ -7,6 +7,7 @@ import math
 import ctypes
 import importlib.util
 import hashlib
+import struct
 import h5py
 import numpy as np
 
@@ -30,6 +31,12 @@ VELOCITY_FIELDS = ("vx", "vy", "vz")
 
 PYSZ_MIN_VALUES = 10_000
 SZO_MIN_VALUES = 10_000
+
+LCP_CHUNK_MAGIC = b"LCPCHK2\0"
+LCP_CHUNK_CONTAINER = "chunked_lcp_v2"
+LCP_CHUNK_HEADER = struct.Struct("<8sQQQ")
+LCP_CHUNK_ENTRY = struct.Struct("<QQ")
+LCP_CHUNK_BATCH_VALUES = 1 << 20
 
 
 @dataclass(frozen=True)

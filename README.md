@@ -71,10 +71,10 @@ contains `positions.lcp`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`. With
 `--pos-compressor sz3 --vel-compressor lcp`, it contains `x.psz`, `y.psz`,
 `z.psz`, `id.pco`, and `velocities.lcp`. Neither asymmetric configuration
 stores an LCP order sidecar. If both triplets use LCP, `velocity_order.pco` is
-also stored. The pipeline does not split fields into parts. As a result, preprocessing,
-compression, decompression, reconstruction, and metrics load a complete field
-into memory at once. Manifests produced by the older part-based format are not
-accepted by this format.
+also stored. Except for optional velocity LCP chunking, the pipeline does not
+split fields into parts. Preprocessing, reconstruction, and metrics therefore
+still load a complete field into memory at once. Manifests produced by the
+older part-based format are not accepted by this format.
 
 LCP sorts its input triplet before encoding it. In either asymmetric pipeline,
 the pipeline adopts the LCP-sorted order as the reconstructed particle order
@@ -83,6 +83,35 @@ triplet. Consequently no order sidecar is stored, while every reconstructed row
 still contains the corresponding ID, position, and velocity. When both
 triplets use LCP, position order is canonical and the independently sorted
 velocity stream still requires `velocity_order.pco`.
+
+## Chunked Velocity LCP
+
+When both position and velocity triplets use LCP, independently compress
+contiguous chunks of the position-ordered velocity rows with:
+
+```bash
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs_lcp_chunked \
+  --pos-compressor lcp \
+  --vel-compressor lcp \
+  --lossless pcodec \
+  --vel-chunk-size 4096 \
+  --force
+```
+
+`--vel-chunk-size 0` disables chunking and retains the native monolithic LCP
+stream. A positive value is only valid for the all-LCP pipeline. Each velocity
+order index is then local to its chunk, so its unsigned range needs at most
+`ceil(log2(chunk_size))` bits instead of `ceil(log2(particle_count))`. The raw
+sidecar remains `int32`; pcodec bit-packs its non-negative range. The manifest
+records both the theoretical width (`order_bits_per_particle`) and the actual
+pcodec size (`compressed_bits_per_particle`).
+
+`velocities.lcp` is a framed chunk container in this mode. Equal-sized chunks
+are batched into native LCP calls with temporal prediction disabled, while a
+short final chunk is encoded separately. Decompression validates every local
+permutation, expands it to the corresponding position-ordered row range, and
+then recombines the particle fields.
 
 ## Integer Compression
 
