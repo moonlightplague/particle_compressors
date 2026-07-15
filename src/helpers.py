@@ -4,12 +4,15 @@ import subprocess
 import re
 import sys
 import math
+import ctypes
+import importlib.util
+import hashlib
 import h5py
 import numpy as np
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 
 FIELD_ALIASES = {
@@ -26,6 +29,7 @@ POSITION_FIELDS = ("x", "y", "z")
 VELOCITY_FIELDS = ("vx", "vy", "vz")
 
 PYSZ_MIN_VALUES = 10_000
+SZO_MIN_VALUES = 10_000
 
 
 @dataclass(frozen=True)
@@ -103,13 +107,70 @@ def load_pysz() -> Tuple[Any, Any, Any]:
         return sz, szConfig, szErrorBoundMode
     except ImportError as exc:
         raise RuntimeError("Could not import pysz. Install it with `python -m pip install pysz`.") from exc
-        
+
+
+def load_pyszo() -> Tuple[Any, Any, Any, Any]:
+    try:
+        spec = importlib.util.find_spec("pyszo")
+        if spec is not None and spec.submodule_search_locations:
+            package_dir = Path(next(iter(spec.submodule_search_locations)))
+            for library_name in ("libzstd.so", "libzstd.dylib"):
+                bundled_zstd = package_dir / library_name
+                if bundled_zstd.is_file():
+                    ctypes.CDLL(str(bundled_zstd), mode=ctypes.RTLD_GLOBAL)
+                    break
+        from pyszo import szo, szoAlgorithm, szoConfig, szoErrorBoundMode
+
+        return szo, szoConfig, szoErrorBoundMode, szoAlgorithm
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(
+            "Could not import pyszo. Build/install the local binding with "
+            "`python -m pip install -e tools/SZo/tools/pyszo`."
+        ) from exc
+
 
 def read_raw(path: str, dtype: np.dtype, count: int) -> np.ndarray:
     data = np.fromfile(path, dtype=dtype, count=count)
     if data.size != count:
         raise RuntimeError(f"Unexpected EOF reading {path}; expected {count}, got {data.size}.")
     return data
+
+
+def encode_integers_for_szo(values: np.ndarray) -> Tuple[np.ndarray, str]:
+    source_dtype = np.dtype(values.dtype)
+    if source_dtype.kind not in ("i", "u"):
+        raise RuntimeError(f"SZO lossless encoding requires an integer dtype, got {source_dtype}.")
+
+    if source_dtype.kind == "u" and source_dtype.itemsize in (4, 8):
+        unsigned_dtype = np.dtype(f"uint{source_dtype.itemsize * 8}")
+        signed_dtype = np.dtype(f"int{source_dtype.itemsize * 8}")
+        native = np.ascontiguousarray(values.astype(unsigned_dtype, copy=False))
+        return native.view(signed_dtype), "reinterpret_unsigned"
+
+    encoded_dtype = np.dtype("int32") if source_dtype.itemsize <= 4 else np.dtype("int64")
+    return np.ascontiguousarray(values, dtype=encoded_dtype), "cast"
+
+
+def decode_integers_from_szo(
+    values: np.ndarray,
+    source_dtype: np.dtype,
+    transform: str,
+) -> np.ndarray:
+    source_dtype = np.dtype(source_dtype)
+    values = np.ascontiguousarray(values)
+    if transform == "reinterpret_unsigned":
+        unsigned_dtype = np.dtype(f"uint{source_dtype.itemsize * 8}")
+        decoded = values.view(unsigned_dtype)
+    elif transform == "cast":
+        decoded = values
+    else:
+        raise RuntimeError(f"Unsupported SZO integer transform: {transform!r}.")
+    return np.ascontiguousarray(decoded, dtype=source_dtype)
+
+
+def integer_stream_sha256(values: np.ndarray) -> str:
+    contiguous = np.ascontiguousarray(values)
+    return hashlib.sha256(contiguous.view(np.uint8)).hexdigest()
 
 
 def compressed_sizes(work_dir: Path) -> Dict[str, int]:
@@ -238,14 +299,24 @@ def print_component_summary(report: Mapping[str, Any]) -> None:
     ratios = component_compression_ratios(report)
     print("component_CR:")
     velocity_lcp = ratios["vxyz"]["compressed_bytes"] > 0
-    names = ("xyz", "order", "id", "vxyz", "velocity_order") if velocity_lcp else (
-        "xyz", "order", "id", "vx", "vy", "vz"
-    )
+    names = ["xyz"]
+    if ratios["order"]["compressed_bytes"] > 0:
+        names.append("order")
+    names.append("id")
+    if velocity_lcp:
+        names.extend(("vxyz", "velocity_order"))
+    else:
+        names.extend(("vx", "vy", "vz"))
     for name in names:
         entry = ratios[name]
         ratio = entry["compression_ratio"]
         ratio_s = "inf" if math.isinf(ratio) else f"{ratio:.6g}"
-        note = " includes order sidecar" if name in ("xyz", "vxyz") else ""
+        includes_order = (
+            name == "xyz" and ratios["order"]["compressed_bytes"] > 0
+        ) or (
+            name == "vxyz" and ratios["velocity_order"]["compressed_bytes"] > 0
+        )
+        note = " includes order sidecar" if includes_order else ""
         print(
             f"  {name}: CR={ratio_s}, "
             f"original_bytes={entry['original_bytes']}, "
@@ -336,6 +407,45 @@ def finalize_metric_acc(acc: Mapping[str, Any]) -> Dict[str, Any]:
         "psnr": psnr,
     }
 
+
+def comparison_order_for_reconstructed_rows(
+    original: h5py.File,
+    recon: h5py.File,
+    manifest: Mapping[str, Any],
+    count: int,
+) -> Tuple[Optional[np.ndarray], str]:
+    row_order = manifest.get("ordering", {}).get("reconstructed_rows", {})
+    if row_order.get("original_row_order_restored", True):
+        return None, "original_row"
+
+    raw_order_path = (
+        manifest.get("artifacts", {})
+        .get("preprocessed", {})
+        .get("position_order")
+    )
+    if raw_order_path and Path(raw_order_path).is_file():
+        order = read_raw(raw_order_path, np.dtype("int32"), count).astype(np.intp, copy=False)
+        if count and (int(order.min()) < 0 or int(order.max()) >= count):
+            raise RuntimeError("Temporary LCP position order is outside the original row range.")
+        if np.unique(order).size != count:
+            raise RuntimeError("Temporary LCP position order is not a permutation.")
+        return order, "temporary_lcp_position_order"
+
+    id_path = manifest["fields"]["id"]["h5_path"]
+    original_ids = original[id_path][:count]
+    reconstructed_ids = recon[id_path][:count]
+    original_sort = np.argsort(original_ids, kind="stable")
+    reconstructed_sort = np.argsort(reconstructed_ids, kind="stable")
+    if not np.array_equal(original_ids[original_sort], reconstructed_ids[reconstructed_sort]):
+        raise RuntimeError("Reconstructed particle IDs do not match the original ID set.")
+    if np.unique(original_ids).size != count:
+        raise RuntimeError(
+            "Cannot align reordered rows for metrics after temporary files were removed because particle IDs are not unique."
+        )
+    order = np.empty(count, dtype=np.intp)
+    order[reconstructed_sort] = original_sort
+    return order, "particle_id"
+
 def compute_metrics(
     original_h5: Path,
     reconstructed_h5: Path,
@@ -352,6 +462,15 @@ def compute_metrics(
     }
     metrics_start = time.perf_counter()
     with h5py.File(original_h5, "r") as original, h5py.File(reconstructed_h5, "r") as recon:
+        comparison_order, comparison_source = comparison_order_for_reconstructed_rows(
+            original, recon, manifest, count
+        )
+        metrics["row_comparison"] = {
+            "reconstructed_order": manifest.get("ordering", {})
+            .get("reconstructed_rows", {})
+            .get("mapping", "original_row"),
+            "alignment_source": comparison_source,
+        }
         for logical in LOGICAL_ORDER:
             field = manifest["fields"][logical]
             original_dset = original[field["h5_path"]]
@@ -361,6 +480,8 @@ def compute_metrics(
             exact = True
 
             orig = original_dset[:count]
+            if comparison_order is not None:
+                orig = orig[comparison_order]
             dec = recon_dset[:count]
             if logical == "id":
                 exact = bool(np.array_equal(orig, dec))

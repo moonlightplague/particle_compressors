@@ -35,6 +35,54 @@ def decompress_pcodec_raw(
     data.tofile(out)
 
 
+def decompress_szo_raw(
+    field: Mapping[str, Any],
+    out_path: str,
+    force: bool,
+) -> None:
+    SZo, _, _, _ = hp.load_pyszo()
+    source_dtype = np.dtype(field["dtype"])
+    encoded_dtype = np.dtype(field["encoded_dtype"])
+    count = int(field["count"])
+    encoded_count = int(field.get("encoded_count", count))
+    compressed = np.fromfile(field["path"], dtype=np.uint8)
+    try:
+        encoded, _ = SZo.decompress(compressed, encoded_dtype, (encoded_count,))
+    except Exception as exc:
+        raise RuntimeError(f"SZO decompression failed for {field['field']}.") from exc
+    encoded = np.asarray(encoded, dtype=encoded_dtype).reshape(-1)
+    if encoded.size < count:
+        raise RuntimeError(
+            f"SZO decompression for {field['field']} returned {encoded.size} values, "
+            f"expected at least {count}."
+        )
+    data = hp.decode_integers_from_szo(
+        encoded[:count],
+        source_dtype,
+        str(field["integer_transform"]),
+    )
+    expected_sha256 = field.get("sha256")
+    actual_sha256 = hp.integer_stream_sha256(data)
+    if expected_sha256 and actual_sha256 != expected_sha256:
+        raise RuntimeError(
+            f"SZO integrity check failed for {field['field']}: integer data was not reconstructed exactly."
+        )
+    out = Path(out_path)
+    hp.require_output_path(out, force)
+    data.tofile(out)
+
+
+def decompress_integer_raw(
+    field: Mapping[str, Any],
+    out_path: str,
+    force: bool,
+) -> None:
+    if field.get("codec") == "szo":
+        decompress_szo_raw(field, out_path, force)
+    else:
+        decompress_pcodec_raw(field, out_path, force)
+
+
 def decompress_pysz_raw(
     field: Mapping[str, Any],
     out_path: str,
@@ -125,8 +173,14 @@ def run_lcp_decompress(
 def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], output_h5: Path) -> None:
     count = int(manifest["count"])
     scale = float(manifest["position_scale"]["value"])
-    order_dtype = hp.order_dtype_from_manifest(manifest)
-    order_index = read_lcp_order(dec_paths["order"], order_dtype, count, "LCP position order sidecar")
+    order_index = None
+    if "order" in dec_paths:
+        order_index = read_lcp_order(
+            dec_paths["order"],
+            hp.order_dtype_from_manifest(manifest),
+            count,
+            "LCP position order sidecar",
+        )
     velocity_compressor = velocity_compressor_from_manifest(manifest)
     velocity_order_index = None
     if velocity_compressor == "lcp":
@@ -160,9 +214,12 @@ def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], outp
                     values64 = np.rint(values64)
                     values64 = np.clip(values64, info.min, info.max)
                 converted = values64.astype(target_dtype)
-                restored = np.empty(count, dtype=target_dtype)
-                restored[order_index] = converted
-                dset[:] = restored
+                if order_index is None:
+                    dset[:] = converted
+                else:
+                    restored = np.empty(count, dtype=target_dtype)
+                    restored[order_index] = converted
+                    dset[:] = restored
             elif logical in hp.VELOCITY_FIELDS and velocity_order_index is not None:
                 decoded = np.fromfile(dec_paths[logical], dtype=np.float32, count=count)
                 if decoded.size != count:
@@ -186,6 +243,10 @@ def decompress(args: argparse.Namespace,
     manifest = hp.read_json(manifest_path)
 
     count = int(manifest["count"])
+    fields = manifest.get("compressed_fields")
+    if not fields:
+        raise RuntimeError("Manifest does not contain compressed_fields for the Python compressor pipeline.")
+    has_position_order = "order" in fields
     velocity_compressor = velocity_compressor_from_manifest(manifest)
     dec_dir = work_dir / "decompressed"
     dec_dir.mkdir(parents=True, exist_ok=True)
@@ -193,17 +254,18 @@ def decompress(args: argparse.Namespace,
     hp.require_output_path(output_h5, args.force)
 
     t0 = time.perf_counter()
-    order_dtype = hp.order_dtype_from_manifest(manifest)
     dec_paths = {
         "x": str(dec_dir / "x.f32.raw"),
         "y": str(dec_dir / "y.f32.raw"),
         "z": str(dec_dir / "z.f32.raw"),
-        "order": str(dec_dir / f"order.{order_dtype.name}.raw"),
         "id": str(dec_dir / f"id.{np.dtype(manifest['fields']['id']['dtype']).name}.raw"),
         "vx": str(dec_dir / f"vx.{manifest['fields']['vx']['dtype']}.raw"),
         "vy": str(dec_dir / f"vy.{manifest['fields']['vy']['dtype']}.raw"),
         "vz": str(dec_dir / f"vz.{manifest['fields']['vz']['dtype']}.raw"),
     }
+    if has_position_order:
+        order_dtype = hp.order_dtype_from_manifest(manifest)
+        dec_paths["order"] = str(dec_dir / f"order.{order_dtype.name}.raw")
     if velocity_compressor == "lcp":
         dec_paths["vx"] = str(dec_dir / "vx.f32.raw")
         dec_paths["vy"] = str(dec_dir / "vy.f32.raw")
@@ -225,13 +287,11 @@ def decompress(args: argparse.Namespace,
         float(manifest["error_bounds"]["positions_lcp_abs"]),
     )
 
-    fields = manifest.get("compressed_fields")
-    if not fields:
-        raise RuntimeError("Manifest does not contain compressed_fields for the Python compressor pipeline.")
-    decompress_pcodec_raw(
-        fields["order"], dec_paths["order"], args.force
-    )
-    decompress_pcodec_raw(
+    if has_position_order:
+        decompress_integer_raw(
+            fields["order"], dec_paths["order"], args.force
+        )
+    decompress_integer_raw(
         fields["id"], dec_paths["id"], args.force
     )
     if velocity_compressor == "lcp":
@@ -243,7 +303,7 @@ def decompress(args: argparse.Namespace,
             count,
             float(manifest["error_bounds"]["velocities_lcp_abs"]),
         )
-        decompress_pcodec_raw(
+        decompress_integer_raw(
             fields["velocity_order"], dec_paths["velocity_order"], args.force
         )
     else:

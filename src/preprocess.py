@@ -379,11 +379,14 @@ def make_manifest(
             "lcp": str(tools.lcp),
             "pcodec": package_version("pcodec"),
             "pysz": package_version("pysz"),
+            "pyszo": package_version("pyszo"),
         },
     }
 
 
 def preprocess(args: argparse.Namespace):
+    if args.lossless == "szo" and not 0.0 <= float(args.szo_abs_eb) < 1.0:
+        raise RuntimeError("--szo-abs-eb must be at least 0 and less than 1.")
     input_h5 = Path(args.input_h5).resolve()
     if not input_h5.is_file():
         raise RuntimeError(f"Input HDF5 file does not exist: {input_h5}")
@@ -557,21 +560,23 @@ def preprocess(args: argparse.Namespace):
         }
         if args.vel_compressor == "lcp":
             manifest["error_bounds"]["velocities_lcp_abs"] = vel_eb
+        if args.lossless == "szo":
+            manifest["error_bounds"]["szo_integer_abs"] = float(args.szo_abs_eb)
 
         selected_payload_bytes = sum(
             int(np.dtype(h5[fields[logical]].dtype).itemsize * count) for logical in hp.LOGICAL_ORDER
         )
 
+    lossless_extension = "szo" if args.lossless == "szo" else "pco"
     compressed_artifacts = {
         "positions": str(cmp_dir / "positions.lcp"),
-        "order": str(cmp_dir / "order.pco"),
-        "id": str(cmp_dir / "id.pco"),
+        "id": str(cmp_dir / f"id.{lossless_extension}"),
     }
     if args.vel_compressor == "lcp":
         compressed_artifacts.update(
             {
                 "velocities": str(cmp_dir / "velocities.lcp"),
-                "velocity_order": str(cmp_dir / "velocity_order.pco"),
+                "velocity_order": str(cmp_dir / f"velocity_order.{lossless_extension}"),
             }
         )
     else:

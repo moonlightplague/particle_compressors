@@ -10,8 +10,10 @@ advanced:
   vel_abs_eb: null
   vel_rel_eb: null
   id_abs_eb: 0.0
+  # SZO reconstructs integer streams exactly when its absolute bound is below 1.
+  szo_abs_eb: 0.5
   pos_compressor: lcp
-  vel_compressor: lcp
+  vel_compressor: sz3
   lossless: pcodec
 
   # Integer position conversion used before LCP compression.
