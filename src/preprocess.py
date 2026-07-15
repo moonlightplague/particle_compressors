@@ -214,6 +214,24 @@ def export_float_for_pysz(
     return str(out_path), field_stats
 
 
+def export_float32_for_lcp(
+    raw_path: str,
+    source_dtype: np.dtype,
+    out_path: Path,
+    count: int,
+    force: bool,
+) -> Tuple[str, float]:
+    source_dtype = np.dtype(source_dtype)
+    if source_dtype == np.dtype("float32"):
+        return raw_path, 0.0
+    hp.require_output_path(out_path, force)
+    source = hp.read_raw(raw_path, source_dtype, count)
+    encoded = source.astype(np.float32)
+    cast_error = np.abs(encoded.astype(np.float64) - source.astype(np.float64, copy=False))
+    encoded.tofile(out_path)
+    return str(out_path), float(cast_error.max(initial=0.0))
+
+
 def export_id_for_pcodec(
     h5: h5py.File,
     dataset_path: str,
@@ -417,11 +435,22 @@ def preprocess(args: argparse.Namespace):
 
         velocity_stats: Dict[str, Dict[str, float]] = {}
         for logical in hp.VELOCITY_FIELDS:
-            source_dtype = str(np.dtype(h5[fields[logical]].dtype))
-            out_path = pre_dir / f"{logical}.{source_dtype}.raw"
+            source_dtype = np.dtype(h5[fields[logical]].dtype)
+            out_path = pre_dir / f"{logical}.{source_dtype.name}.raw"
             raw_paths[logical], velocity_stats[logical] = export_float_for_pysz(
                 h5, fields[logical], out_path, count, args.force
             )
+            velocity_stats[logical]["preprocess_cast_max_abs"] = 0.0
+            if args.vel_compressor == "lcp":
+                lcp_path, cast_error = export_float32_for_lcp(
+                    raw_paths[logical],
+                    source_dtype,
+                    pre_dir / f"{logical}.lcp.f32.raw",
+                    count,
+                    args.force,
+                )
+                raw_paths[f"{logical}_lcp"] = lcp_path
+                velocity_stats[logical]["preprocess_cast_max_abs"] = cast_error
         preprocess_stats["velocities"] = velocity_stats
 
         position_ranges = {logical: pos_stats[logical]["range_in_lcp_units"] for logical in hp.POSITION_FIELDS}
@@ -459,10 +488,28 @@ def preprocess(args: argparse.Namespace):
             relative=pos_selection_base.relative,
             compressor_abs=pos_eb,
         )
-        vel_selection = select_relative_or_absolute(
+        vel_selection_base = select_relative_or_absolute(
             args, "vel", hp.VELOCITY_FIELDS, velocity_ranges, args.abs_eb
         )
-        vel_eb = float(max(vel_selection.abs_by_field.values()))
+        if args.vel_compressor == "lcp":
+            velocity_compressor_bounds = [
+                max(
+                    0.0,
+                    vel_selection_base.abs_by_field[logical]
+                    - float(velocity_stats[logical]["preprocess_cast_max_abs"]),
+                )
+                for logical in hp.VELOCITY_FIELDS
+            ]
+            vel_eb = float(min(velocity_compressor_bounds))
+            vel_selection = ErrorBoundSelection(
+                vel_selection_base.mode,
+                vel_selection_base.abs_by_field,
+                relative=vel_selection_base.relative,
+                compressor_abs=vel_eb,
+            )
+        else:
+            vel_eb = float(max(vel_selection_base.abs_by_field.values()))
+            vel_selection = vel_selection_base
         id_eb = validate_error_bound(args.id_abs_eb, "--id-abs-eb")
 
         field_error_bounds = serialize_error_bound_selection(
@@ -503,21 +550,41 @@ def preprocess(args: argparse.Namespace):
             field_error_bounds,
             tools,
         )
+        manifest["compressors"] = {
+            "positions": args.pos_compressor,
+            "velocities": args.vel_compressor,
+            "lossless": args.lossless,
+        }
+        if args.vel_compressor == "lcp":
+            manifest["error_bounds"]["velocities_lcp_abs"] = vel_eb
 
         selected_payload_bytes = sum(
             int(np.dtype(h5[fields[logical]].dtype).itemsize * count) for logical in hp.LOGICAL_ORDER
         )
 
+    compressed_artifacts = {
+        "positions": str(cmp_dir / "positions.lcp"),
+        "order": str(cmp_dir / "order.pco"),
+        "id": str(cmp_dir / "id.pco"),
+    }
+    if args.vel_compressor == "lcp":
+        compressed_artifacts.update(
+            {
+                "velocities": str(cmp_dir / "velocities.lcp"),
+                "velocity_order": str(cmp_dir / "velocity_order.pco"),
+            }
+        )
+    else:
+        compressed_artifacts.update(
+            {
+                "vx": str(cmp_dir / "vx.psz"),
+                "vy": str(cmp_dir / "vy.psz"),
+                "vz": str(cmp_dir / "vz.psz"),
+            }
+        )
     manifest["artifacts"] = {
         "preprocessed": raw_paths,
-        "compressed": {
-            "positions": str(cmp_dir / "positions.lcp"),
-            "order": str(cmp_dir / "order.pco"),
-            "id": str(cmp_dir / "id.pco"),
-            "vx": str(cmp_dir / "vx.psz"),
-            "vy": str(cmp_dir / "vy.psz"),
-            "vz": str(cmp_dir / "vz.psz"),
-        },
+        "compressed": compressed_artifacts,
     }
     manifest["order_dtype"] = "int32"
     manifest["compressed_fields"] = {}

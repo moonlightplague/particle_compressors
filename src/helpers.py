@@ -192,6 +192,10 @@ def component_compression_ratios(report: Mapping[str, Any]) -> Dict[str, Dict[st
     xyz_compressed = int(components.get("compressed/positions.lcp", 0)) + compressed_bytes_with_prefixes(
         components, ("compressed/order.",)
     )
+    velocity_lcp_compressed = int(components.get("compressed/velocities.lcp", 0))
+    velocity_order_compressed = compressed_bytes_with_prefixes(
+        components, ("compressed/velocity_order.",)
+    )
     entries = {
         "xyz": {
             "original_bytes": original_bytes_for_fields(report, POSITION_FIELDS),
@@ -200,6 +204,10 @@ def component_compression_ratios(report: Mapping[str, Any]) -> Dict[str, Dict[st
         "order": {
             "original_bytes": int(order_dtype_from_manifest(report).itemsize * report_count(report)),
             "compressed_bytes": compressed_bytes_with_prefixes(components, ("compressed/order.",)),
+        },
+        "velocity_order": {
+            "original_bytes": int(order_dtype_from_manifest(report).itemsize * report_count(report)),
+            "compressed_bytes": velocity_order_compressed,
         },
         "id": {
             "original_bytes": original_bytes_for_fields(report, ("id",)),
@@ -217,6 +225,10 @@ def component_compression_ratios(report: Mapping[str, Any]) -> Dict[str, Dict[st
             "original_bytes": original_bytes_for_fields(report, ("vz",)),
             "compressed_bytes": compressed_bytes_with_prefixes(components, ("compressed/vz.",)),
         },
+        "vxyz": {
+            "original_bytes": original_bytes_for_fields(report, VELOCITY_FIELDS),
+            "compressed_bytes": velocity_lcp_compressed + velocity_order_compressed,
+        },
     }
     for entry in entries.values():
         entry["compression_ratio"] = compression_ratio(entry["original_bytes"], entry["compressed_bytes"])
@@ -225,11 +237,15 @@ def component_compression_ratios(report: Mapping[str, Any]) -> Dict[str, Dict[st
 def print_component_summary(report: Mapping[str, Any]) -> None:
     ratios = component_compression_ratios(report)
     print("component_CR:")
-    for name in ("xyz", "order", "id", "vx", "vy", "vz"):
+    velocity_lcp = ratios["vxyz"]["compressed_bytes"] > 0
+    names = ("xyz", "order", "id", "vxyz", "velocity_order") if velocity_lcp else (
+        "xyz", "order", "id", "vx", "vy", "vz"
+    )
+    for name in names:
         entry = ratios[name]
         ratio = entry["compression_ratio"]
         ratio_s = "inf" if math.isinf(ratio) else f"{ratio:.6g}"
-        note = " includes order sidecar" if name == "xyz" else ""
+        note = " includes order sidecar" if name in ("xyz", "vxyz") else ""
         print(
             f"  {name}: CR={ratio_s}, "
             f"original_bytes={entry['original_bytes']}, "
@@ -366,7 +382,13 @@ def compute_metrics(
             metrics["fields"][logical] = field_metrics
 
     pos_eb = float(manifest["error_bounds"]["positions_lcp_abs"])
-    vel_eb = float(manifest["error_bounds"]["velocities_sz3_abs"])
+    vel_eb = float(
+        manifest["error_bounds"].get(
+            "velocities_lcp_abs",
+            manifest["error_bounds"]["velocities_sz3_abs"],
+        )
+    )
+    velocity_compressor = manifest.get("compressors", {}).get("velocities", "sz3")
     id_eb = float(manifest["error_bounds"]["id_sz3_abs"])
     field_error_bounds = manifest.get("field_error_bounds", {})
     preprocess = manifest.get("preprocess", {}).get("positions", {})
@@ -397,14 +419,27 @@ def compute_metrics(
             }
         elif logical in VELOCITY_FIELDS:
             requested_abs = float(field_bound.get("abs", vel_eb))
+            compressor_abs = float(field_bound.get("compressor_abs", requested_abs))
+            cast = 0.0
+            if velocity_compressor == "lcp":
+                cast = float(
+                    manifest.get("preprocess", {})
+                    .get("velocities", {})
+                    .get(logical, {})
+                    .get("preprocess_cast_max_abs", 0.0)
+                )
+            effective = requested_abs
+            if velocity_compressor == "lcp" and field_bound.get("mode") != "relative":
+                effective = compressor_abs + cast
             target = {
                 "mode": field_bound.get("mode", "absolute"),
                 "relative_error_bound": field_bound.get("relative"),
                 "range_for_relative": field_bound.get("range"),
                 "range_units": field_bound.get("range_units", "source_units"),
                 "requested_abs_bound": requested_abs,
-                "compressor_abs_eb": float(field_bound.get("compressor_abs", requested_abs)),
-                "effective_final_abs_bound": requested_abs,
+                "compressor_abs_eb": compressor_abs,
+                "preprocess_cast_allowance": cast,
+                "effective_final_abs_bound": effective,
             }
         else:
             target = {

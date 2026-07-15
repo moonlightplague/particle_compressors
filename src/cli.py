@@ -25,7 +25,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
 }
 AVAILABLE_COMPRESSORS: Dict[str, List[str]] = {
     "pos_compressor": ["lcp", "sz3"],
-    "vel_compressor": ["sz3"], 
+    "vel_compressor": ["sz3", "lcp"],
     "lossless": ["pcodec", "zstd"]
 }
 
@@ -59,6 +59,11 @@ def _validated_advanced_config(config: Mapping[str, Any], config_path: Path) -> 
         raise RuntimeError("config value advanced.position_scale_attr must be a string.")
     if not isinstance(defaults["lcp"], str):
         raise RuntimeError("config value advanced.lcp must be a path string.")
+    for key, choices in AVAILABLE_COMPRESSORS.items():
+        if defaults[key] not in choices:
+            raise RuntimeError(
+                f"config value advanced.{key} must be one of: {', '.join(choices)}."
+            )
 
     lcp = Path(defaults["lcp"]).expanduser()
     if not lcp.is_absolute():
@@ -136,13 +141,13 @@ def add_compression_args(parser: argparse.ArgumentParser, defaults: Mapping[str,
         "--vel-abs-eb",
         type=float,
         default=defaults["vel_abs_eb"],
-        help="Absolute error bound for vx/vy/vz passed to pysz/SZ3.",
+        help="Absolute error bound for vx/vy/vz passed to the selected velocity compressor.",
     )
     parser.add_argument(
         "--vel-rel-eb",
         type=float,
         default=defaults["vel_rel_eb"],
-        help="Relative error bound for vx/vy/vz passed to pysz/SZ3.",
+        help="Relative error bound for vx/vy/vz passed to the selected velocity compressor.",
     )
     parser.add_argument(
         "--id-abs-eb",
@@ -170,17 +175,18 @@ def add_compression_args(parser: argparse.ArgumentParser, defaults: Mapping[str,
     )
     parser.add_argument(
         "--pos-compressor",
-        type=str,
+        choices=AVAILABLE_COMPRESSORS["pos_compressor"],
         default=defaults["pos_compressor"]
     )
     parser.add_argument(
         "--vel-compressor",
-        type=str,
-        default=defaults["vel_compressor"]
+        choices=AVAILABLE_COMPRESSORS["vel_compressor"],
+        default=defaults["vel_compressor"],
+        help="Velocity triplet compressor (default: %(default)s).",
     )
     parser.add_argument(
         "--lossless",
-        type=str,
+        choices=AVAILABLE_COMPRESSORS["lossless"],
         default=defaults["lossless"]
     )
 

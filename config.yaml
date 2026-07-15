@@ -11,7 +11,7 @@ advanced:
   vel_rel_eb: null
   id_abs_eb: 0.0
   pos_compressor: lcp
-  vel_compressor: sz3
+  vel_compressor: lcp
   lossless: pcodec
 
   # Integer position conversion used before LCP compression.

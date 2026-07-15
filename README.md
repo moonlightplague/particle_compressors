@@ -66,20 +66,33 @@ python main.py roundtrip data/sample.h5 \
 Use a distinct work directory for each input/error-bound combination. Existing
 outputs are rejected unless `--force` is supplied.
 
-Each compressed field is stored as one file. The compressed directory contains
-`positions.lcp`, `order.pco`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`; the
-pipeline does not split fields into parts. As a result, preprocessing,
+With the default `--vel-compressor sz3`, the compressed directory contains
+`positions.lcp`, `order.pco`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`.
+With `--vel-compressor lcp`, the three velocity files are replaced by
+`velocities.lcp` and `velocity_order.pco`. The pipeline does not split fields
+into parts. As a result, preprocessing,
 compression, decompression, reconstruction, and metrics load a complete field
 into memory at once. Manifests produced by the older part-based format are not
 accepted by this format.
 
+LCP sorts each input triplet independently. Position and velocity LCP streams
+therefore require separate permutations to restore the original HDF5 row
+order. Particle IDs cannot replace those permutations under the input contract:
+IDs identify records, but they are not required to equal row indices or occur
+in a canonical order. Storing IDs in each LCP-sorted order would still require
+two sidecars, guaranteed-unique IDs, and an ID-to-original-row join during
+reconstruction. Direct 32-bit permutations provide bounded memory use and
+linear-time scatter reconstruction.
+
 
 ## Error Bounds
 
-The default `--rel-eb 1e-3` applies to positions and velocities. 
+The default `--rel-eb 1e-3` applies to positions and velocities.
 Position- and velocity-specific bounds can be supplied through
 `--pos-abs-eb`, `--pos-rel-eb`, `--vel-abs-eb`, and `--vel-rel-eb`. A
 field-class-specific value takes precedence over the global `--abs-eb` or
-`--rel-eb`. Do not set both absolute and relative bounds for the same field
-class. IDs are always compressed losslessly. `id_abs_eb` only defines the expected ID
-error used by metrics and defaults to zero.
+`--rel-eb`. LCP accepts one bound for the velocity triplet, so the strictest
+derived `vx`/`vy`/`vz` bound is used. Do not set both absolute and relative
+bounds for the same field class. IDs are always compressed losslessly.
+`id_abs_eb` only defines the expected ID error used by metrics and defaults to
+zero.

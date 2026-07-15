@@ -16,7 +16,7 @@ def compress_pcodec_raw(
     field_name: str,
     count: int,
     force: bool,
-) -> Tuple[Dict[str, Any]]:
+) -> Dict[str, Any]:
     standalone, ChunkConfig = hp.load_pcodec()
     dt = np.dtype(dtype)
     output = Path(compressed_path)
@@ -52,7 +52,7 @@ def compress_pysz_raw(
     count: int,
     abs_eb: float,
     force: bool,
-) -> Tuple[Dict[str, Any]]:
+) -> Dict[str, Any]:
     PyszSZ, PyszConfig, PyszErrorBoundMode = hp.load_pysz()
     dt = np.dtype(dtype)
     if dt not in (np.dtype("float32"), np.dtype("float64")):
@@ -127,6 +127,22 @@ def compress(args: argparse.Namespace,
         args.force,
     )
 
+    manifest["ordering"] = {
+        "positions": {
+            "mapping": "lcp_sorted_index_to_original_row",
+            "field": "order",
+        },
+        "id": {
+            "mapping": "original_row",
+            "replaces_lcp_order": False,
+            "reason": (
+                "Particle IDs identify records but do not encode the original row index; "
+                "LCP-sorted IDs would require separate sidecars plus a uniqueness-dependent "
+                "ID-to-row join during reconstruction."
+            ),
+        },
+    }
+
     manifest["compressed_fields"]["id"]= compress_pcodec_raw(
         raw_paths["id"],
         manifest["fields"]["id"]["dtype"],
@@ -136,17 +152,68 @@ def compress(args: argparse.Namespace,
         args.force,
     )
 
-    for logical in hp.VELOCITY_FIELDS:
-        dtype = manifest["fields"][logical]["dtype"]
-        manifest["compressed_fields"][logical]= compress_pysz_raw(
-            raw_paths[logical],
-            dtype,
-            artifacts[logical],
-            logical,
+    if args.vel_compressor == "lcp":
+        velocity_order_raw = work_dir / "preprocessed" / "velocity_order.i32.raw"
+        hp.require_output_path(velocity_order_raw, args.force)
+        raw_paths["velocity_order"] = str(velocity_order_raw)
+        velocity_lcp = Path(artifacts["velocities"])
+        hp.require_output_path(velocity_lcp, args.force)
+        hp.run_command(
+            [
+                str(tools.lcp),
+                "-i",
+                raw_paths["vx_lcp"],
+                raw_paths["vy_lcp"],
+                raw_paths["vz_lcp"],
+                "-z",
+                str(velocity_lcp),
+                "-1",
+                str(manifest["count"]),
+                "-eb",
+                str(manifest["error_bounds"]["velocities_lcp_abs"]),
+                "-ord",
+                "32",
+                str(velocity_order_raw),
+            ]
+        )
+        manifest["compressed_fields"]["velocity_order"] = compress_pcodec_raw(
+            str(velocity_order_raw),
+            "int32",
+            artifacts["velocity_order"],
+            "velocity_order",
             manifest["count"],
-            manifest["field_error_bounds"][logical]["abs"],
             args.force,
         )
+        manifest["compressed_fields"]["velocities"] = {
+            "field": "velocities",
+            "codec": "lcp",
+            "dtype": "float32",
+            "source_dtypes": {
+                logical: manifest["fields"][logical]["dtype"]
+                for logical in hp.VELOCITY_FIELDS
+            },
+            "count": manifest["count"],
+            "abs_error_bound": manifest["error_bounds"]["velocities_lcp_abs"],
+            "path": str(velocity_lcp),
+            "bytes": velocity_lcp.stat().st_size,
+        }
+        manifest["ordering"]["velocities"] = {
+            "mapping": "lcp_sorted_index_to_original_row",
+            "field": "velocity_order",
+        }
+    else:
+        for logical in hp.VELOCITY_FIELDS:
+            dtype = manifest["fields"][logical]["dtype"]
+            manifest["compressed_fields"][logical]= compress_pysz_raw(
+                raw_paths[logical],
+                dtype,
+                artifacts[logical],
+                logical,
+                manifest["count"],
+                manifest["field_error_bounds"][logical]["abs"],
+                args.force,
+            )
+        manifest["ordering"]["velocities"] = {"mapping": "original_row"}
 
     hp.update_compressed_size_metrics(manifest, work_dir)
     hp.write_json(work_dir / "manifest.json", manifest, force=True)

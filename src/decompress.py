@@ -81,16 +81,61 @@ def create_dataset(h5: h5py.File, path: str, dtype: np.dtype, count: int) -> h5p
         group = h5.require_group(parent_path)
     return group.create_dataset(name, shape=(count,), dtype=dtype)
 
+
+def velocity_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
+    configured = manifest.get("compressors", {}).get("velocities")
+    if configured:
+        return str(configured)
+    if manifest.get("compressed_fields", {}).get("velocities", {}).get("codec") == "lcp":
+        return "lcp"
+    return "sz3"
+
+
+def read_lcp_order(path: str, dtype: np.dtype, count: int, label: str) -> np.ndarray:
+    order = np.fromfile(path, dtype=dtype, count=count)
+    if order.size != count:
+        raise RuntimeError(f"Unexpected EOF reading {path}; expected {count}, got {order.size}.")
+    if count and (int(order.min()) < 0 or int(order.max()) >= count):
+        raise RuntimeError(f"{label} is not a valid index range for this particle count.")
+    return order.astype(np.intp, copy=False)
+
+
+def run_lcp_decompress(
+    tools: hp.ToolPaths,
+    compressed_path: str,
+    output_paths: Mapping[str, str],
+    fields: tuple[str, str, str],
+    count: int,
+    abs_error_bound: float,
+) -> None:
+    hp.run_command(
+        [
+            str(tools.lcp),
+            "-z",
+            compressed_path,
+            "-o",
+            *(output_paths[field] for field in fields),
+            "-1",
+            str(count),
+            "-eb",
+            str(abs_error_bound),
+        ]
+    )
+
 def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], output_h5: Path) -> None:
     count = int(manifest["count"])
     scale = float(manifest["position_scale"]["value"])
     order_dtype = hp.order_dtype_from_manifest(manifest)
-    order = np.fromfile(dec_paths["order"], dtype=order_dtype, count=count)
-    if order.size != count:
-        raise RuntimeError(f"Unexpected EOF reading {dec_paths['order']}; expected {count}, got {order.size}.")
-    if count and (int(order.min()) < 0 or int(order.max()) >= count):
-        raise RuntimeError("LCP order sidecar is not a valid index range for this particle count.")
-    order_index = order.astype(np.intp, copy=False)
+    order_index = read_lcp_order(dec_paths["order"], order_dtype, count, "LCP position order sidecar")
+    velocity_compressor = velocity_compressor_from_manifest(manifest)
+    velocity_order_index = None
+    if velocity_compressor == "lcp":
+        velocity_order_index = read_lcp_order(
+            dec_paths["velocity_order"],
+            np.dtype(manifest["compressed_fields"]["velocity_order"]["dtype"]),
+            count,
+            "LCP velocity order sidecar",
+        )
 
     with h5py.File(output_h5, "w") as out:
         apply_attrs(out, manifest.get("root_attrs", {}))
@@ -118,6 +163,16 @@ def recombine_h5(manifest: Mapping[str, Any], dec_paths: Mapping[str, str], outp
                 restored = np.empty(count, dtype=target_dtype)
                 restored[order_index] = converted
                 dset[:] = restored
+            elif logical in hp.VELOCITY_FIELDS and velocity_order_index is not None:
+                decoded = np.fromfile(dec_paths[logical], dtype=np.float32, count=count)
+                if decoded.size != count:
+                    raise RuntimeError(
+                        f"Unexpected EOF reading {dec_paths[logical]}; expected {count}, got {decoded.size}."
+                    )
+                converted = decoded.astype(target_dtype)
+                restored = np.empty(count, dtype=target_dtype)
+                restored[velocity_order_index] = converted
+                dset[:] = restored
             else:
                 dset[:] = hp.read_raw(dec_paths[logical], target_dtype, count)
 
@@ -131,6 +186,7 @@ def decompress(args: argparse.Namespace,
     manifest = hp.read_json(manifest_path)
 
     count = int(manifest["count"])
+    velocity_compressor = velocity_compressor_from_manifest(manifest)
     dec_dir = work_dir / "decompressed"
     dec_dir.mkdir(parents=True, exist_ok=True)
     output_h5 = work_dir / "reconstructed.h5"
@@ -148,24 +204,25 @@ def decompress(args: argparse.Namespace,
         "vy": str(dec_dir / f"vy.{manifest['fields']['vy']['dtype']}.raw"),
         "vz": str(dec_dir / f"vz.{manifest['fields']['vz']['dtype']}.raw"),
     }
+    if velocity_compressor == "lcp":
+        dec_paths["vx"] = str(dec_dir / "vx.f32.raw")
+        dec_paths["vy"] = str(dec_dir / "vy.f32.raw")
+        dec_paths["vz"] = str(dec_dir / "vz.f32.raw")
+        velocity_order_dtype = np.dtype(manifest["compressed_fields"]["velocity_order"]["dtype"])
+        dec_paths["velocity_order"] = str(
+            dec_dir / f"velocity_order.{velocity_order_dtype.name}.raw"
+        )
     for path in dec_paths.values():
         hp.require_output_path(Path(path), args.force)
 
     artifacts = manifest["artifacts"]["compressed"]
-    hp.run_command(
-        [
-            str(tools.lcp),
-            "-z",
-            artifacts["positions"],
-            "-o",
-            dec_paths["x"],
-            dec_paths["y"],
-            dec_paths["z"],
-            "-1",
-            str(count),
-            "-eb",
-            str(manifest["error_bounds"]["positions_lcp_abs"]),
-        ]
+    run_lcp_decompress(
+        tools,
+        artifacts["positions"],
+        dec_paths,
+        hp.POSITION_FIELDS,
+        count,
+        float(manifest["error_bounds"]["positions_lcp_abs"]),
     )
 
     fields = manifest.get("compressed_fields")
@@ -177,10 +234,23 @@ def decompress(args: argparse.Namespace,
     decompress_pcodec_raw(
         fields["id"], dec_paths["id"], args.force
     )
-    for logical in hp.VELOCITY_FIELDS:
-        decompress_pysz_raw(
-            fields[logical], dec_paths[logical], args.force
+    if velocity_compressor == "lcp":
+        run_lcp_decompress(
+            tools,
+            artifacts["velocities"],
+            dec_paths,
+            hp.VELOCITY_FIELDS,
+            count,
+            float(manifest["error_bounds"]["velocities_lcp_abs"]),
         )
+        decompress_pcodec_raw(
+            fields["velocity_order"], dec_paths["velocity_order"], args.force
+        )
+    else:
+        for logical in hp.VELOCITY_FIELDS:
+            decompress_pysz_raw(
+                fields[logical], dec_paths[logical], args.force
+            )
 
     recombine_start = time.perf_counter()
     recombine_h5(manifest, dec_paths, output_h5)
