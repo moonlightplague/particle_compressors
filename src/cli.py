@@ -16,6 +16,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "vel_abs_eb": None,
     "vel_rel_eb": None,
     "vel_chunk_size": 0,
+    "vel_chunk_workers": 0,
     "id_abs_eb": 0.0,
     "szo_abs_eb": 0.5,
     "position_scale": "auto",
@@ -62,6 +63,12 @@ def _validated_advanced_config(config: Mapping[str, Any], config_path: Path) -> 
         raise RuntimeError("config value advanced.vel_chunk_size must be a non-negative integer.")
     if defaults["vel_chunk_size"] < 0:
         raise RuntimeError("config value advanced.vel_chunk_size must be a non-negative integer.")
+    if isinstance(defaults["vel_chunk_workers"], bool) or not isinstance(
+        defaults["vel_chunk_workers"], int
+    ):
+        raise RuntimeError("config value advanced.vel_chunk_workers must be a non-negative integer.")
+    if defaults["vel_chunk_workers"] < 0:
+        raise RuntimeError("config value advanced.vel_chunk_workers must be a non-negative integer.")
 
     position_scale = defaults["position_scale"]
     if position_scale not in ("auto", "raw", "attr", "value"):
@@ -116,6 +123,15 @@ def add_config_arg(parser: argparse.ArgumentParser, default: Any) -> None:
 
 def add_common_tool_args(parser: argparse.ArgumentParser, defaults: Mapping[str, Any]) -> None:
     parser.add_argument("--lcp", type=str, default=defaults["lcp"], help="Path to the LCP executable.")
+    parser.add_argument(
+        "--vel-chunk-workers",
+        type=int,
+        default=defaults["vel_chunk_workers"],
+        help=(
+            "Parallel native LCP workers for chunked velocities; 0 selects up to 16 workers "
+            "automatically (default: %(default)s)."
+        ),
+    )
     parser.add_argument("--clean-raw", action="store_true", help="Remove raw preprocessed/decompressed files.")
     parser.add_argument("--force", action="store_true", help="Overwrite pipeline outputs in the work directory.")
 

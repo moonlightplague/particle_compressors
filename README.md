@@ -96,6 +96,7 @@ python main.py roundtrip data/sample.h5 \
   --vel-compressor lcp \
   --lossless pcodec \
   --vel-chunk-size 4096 \
+  --vel-chunk-workers 0 \
   --force
 ```
 
@@ -112,6 +113,12 @@ are batched into native LCP calls with temporal prediction disabled, while a
 short final chunk is encoded separately. Decompression validates every local
 permutation, expands it to the corresponding position-ordered row range, and
 then recombines the particle fields.
+
+`--vel-chunk-workers 0` automatically uses up to sixteen independent native LCP
+workers for chunk compression and decompression. Set it to `1` to minimize
+temporary disk and memory pressure, or to a specific positive value to cap CPU
+parallelism. Segment results are written to the container in particle order, so
+the compressed archive is deterministic across worker counts.
 
 ## Integer Compression
 

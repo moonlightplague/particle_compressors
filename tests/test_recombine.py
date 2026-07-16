@@ -7,9 +7,15 @@ from unittest.mock import patch
 import h5py
 import numpy as np
 
+import src.helpers as hp
 from src.cli import AVAILABLE_COMPRESSORS, build_parser
 from src.compress import compress as compress_pipeline
-from src.compress import compress_pcodec_raw, compress_szo_raw, reorder_raw
+from src.compress import (
+    compress_chunked_lcp_triplet,
+    compress_pcodec_raw,
+    compress_szo_raw,
+    reorder_raw,
+)
 from src.decompress import decompress_pcodec_raw, decompress_szo_raw
 from src.decompress import (
     position_compressor_from_manifest,
@@ -381,10 +387,81 @@ class RecombineTests(unittest.TestCase):
             "lcp",
             "--vel-chunk-size",
             "32768",
+            "--vel-chunk-workers",
+            "4",
         ]
         args = build_parser(argv).parse_args(argv)
         self.assertEqual(args.vel_compressor, "lcp")
         self.assertEqual(args.vel_chunk_size, 32768)
+        self.assertEqual(args.vel_chunk_workers, 4)
+
+    def test_parallel_chunk_compression_is_byte_deterministic(self) -> None:
+        count = 12
+        chunk_size = 3
+        values = tuple(
+            np.arange(count, dtype=np.float32) + axis * 100
+            for axis in range(3)
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            inputs = []
+            for axis, data in enumerate(values):
+                path = root / f"input-{axis}.raw"
+                data.tofile(path)
+                inputs.append(str(path))
+
+            def fake_run_command(argv):
+                input_index = argv.index("-i") + 1
+                if "-2" in argv:
+                    shape_index = argv.index("-2")
+                    chunks = int(argv[shape_index + 1])
+                    values_per_chunk = int(argv[shape_index + 2])
+                    encoded_count = chunks * values_per_chunk
+                    order = np.concatenate(
+                        [
+                            np.arange(values_per_chunk, dtype=np.int32)
+                            + chunk * values_per_chunk
+                            for chunk in range(chunks)
+                        ]
+                    )
+                else:
+                    encoded_count = int(argv[argv.index("-1") + 1])
+                    order = np.arange(encoded_count, dtype=np.int32)
+                payload = b"".join(
+                    np.fromfile(argv[input_index + axis], dtype=np.float32, count=encoded_count)
+                    .tobytes()
+                    for axis in range(3)
+                )
+                Path(argv[argv.index("-z") + 1]).write_bytes(payload)
+                order.tofile(argv[-1])
+
+            outputs = []
+            with patch("src.compress.hp.LCP_CHUNK_BATCH_VALUES", 6), patch(
+                "src.compress.hp.run_command", side_effect=fake_run_command
+            ):
+                for workers in (1, 2):
+                    run = root / f"workers-{workers}"
+                    run.mkdir()
+                    archive = run / "velocities.lcp"
+                    order = run / "order.raw"
+                    metadata = compress_chunked_lcp_triplet(
+                        SimpleNamespace(lcp=Path("lcp")),
+                        tuple(inputs),
+                        str(archive),
+                        count,
+                        chunk_size,
+                        0.01,
+                        order,
+                        False,
+                        workers,
+                    )
+                    outputs.append((archive.read_bytes(), order.read_bytes(), metadata))
+
+            self.assertEqual(outputs[0][0], outputs[1][0])
+            self.assertEqual(outputs[0][1], outputs[1][1])
+            self.assertEqual(outputs[0][2]["lcp_workers"], 1)
+            self.assertEqual(outputs[1][2]["lcp_workers"], 2)
 
     def test_all_lcp_chunking_uses_position_order_and_chunk_local_velocity_orders(self) -> None:
         count = 5
@@ -447,6 +524,7 @@ class RecombineTests(unittest.TestCase):
                 pos_compressor="lcp",
                 vel_compressor="lcp",
                 vel_chunk_size=3,
+                vel_chunk_workers=1,
                 szo_abs_eb=0.5,
             )
             captured_integer = {}

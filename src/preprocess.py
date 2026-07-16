@@ -2,6 +2,7 @@ import argparse
 import shutil
 import h5py
 import math
+import time
 import importlib.metadata
 import numpy as np
 
@@ -134,14 +135,12 @@ def export_positions_for_lcp(
     for logical in hp.POSITION_FIELDS:
         dataset = h5[fields[logical]]
         out_path = out_dir / f"{logical}.f32.raw"
-        out_path_int = out_dir / f"{logical}.i32.raw"
         hp.require_output_path(out_path, force)
         max_cast_abs = 0.0
         max_cast_fixed = 0.0
         range_stats = {"float_min": math.inf, "float_max": -math.inf,
                        "int_min": math.inf, "int_max": -math.inf}
         source = dataset[:count]
-        source.tofile(out_path_int)
         source64 = source.astype(np.float64, copy=False)
         scaled64 = source64 / scale.value
         scaled32 = scaled64.astype(np.float32)
@@ -153,7 +152,6 @@ def export_positions_for_lcp(
             max_cast_abs = float(cast_abs.max(initial=0.0))
             max_cast_fixed = max_cast_abs * scale.value
         out_paths[logical] = str(out_path)
-        out_paths[f"{logical}_int"]=str(out_path_int)
         field_stats = finalize_numeric_stats(range_stats)
         stats[logical] = {
             "scale": scale.value,
@@ -385,6 +383,7 @@ def make_manifest(
 
 
 def preprocess(args: argparse.Namespace):
+    preprocess_start = time.perf_counter()
     if args.lossless == "szo" and not 0.0 <= float(args.szo_abs_eb) < 1.0:
         raise RuntimeError("--szo-abs-eb must be at least 0 and less than 1.")
     velocity_chunk_size = int(getattr(args, "vel_chunk_size", 0))
@@ -392,6 +391,9 @@ def preprocess(args: argparse.Namespace):
         raise RuntimeError("--vel-chunk-size must be non-negative.")
     if velocity_chunk_size > 2**31:
         raise RuntimeError("--vel-chunk-size cannot exceed 2^31 when using int32 order indices.")
+    velocity_chunk_workers = int(getattr(args, "vel_chunk_workers", 0))
+    if velocity_chunk_workers < 0:
+        raise RuntimeError("--vel-chunk-workers must be non-negative.")
     if velocity_chunk_size and not (
         args.pos_compressor == "lcp" and args.vel_compressor == "lcp"
     ):
@@ -434,12 +436,6 @@ def preprocess(args: argparse.Namespace):
         )
         raw_paths.update(pos_paths)
         preprocess_stats["positions"] = pos_stats
-
-        xnyzip_path, xnyzip_stats = export_positions_for_xnyzip(
-            pos_paths, pre_dir / "positions.xnyzip.bin", count, args.force
-        )
-        raw_paths["positions_xnyzip"] = xnyzip_path
-        preprocess_stats["positions_xnyzip"] = xnyzip_stats
 
         id_dtype = np.dtype(h5[fields["id"]].dtype)
         id_path, id_stats = export_id_for_pcodec(
@@ -573,6 +569,7 @@ def preprocess(args: argparse.Namespace):
         manifest["velocity_chunking"] = {
             "chunk_size": velocity_chunk_size,
             "enabled": bool(velocity_chunk_size),
+            "configured_workers": velocity_chunk_workers,
         }
         if args.vel_compressor == "lcp":
             manifest["error_bounds"]["velocities_lcp_abs"] = vel_eb
@@ -617,6 +614,9 @@ def preprocess(args: argparse.Namespace):
     manifest["compressed_fields"] = {}
     manifest["preprocess"] = preprocess_stats
     manifest["sizes"] = {"selected_original_payload_bytes": selected_payload_bytes}
+    manifest.setdefault("timing", {})["preprocess_wall_seconds"] = (
+        time.perf_counter() - preprocess_start
+    )
     hp.write_json(work_dir / "manifest.json", manifest, force=True)
 
     return manifest, raw_paths, tools

@@ -4,6 +4,8 @@ import tempfile
 import numpy as np
 import h5py
 
+from concurrent.futures import ThreadPoolExecutor
+
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
@@ -246,9 +248,12 @@ def run_chunked_lcp_decompress(
     count: int,
     chunk_size: int,
     abs_error_bound: float,
+    workers: int = 1,
 ) -> None:
     if chunk_size <= 0:
         raise RuntimeError("Chunked LCP decompression requires a positive chunk size.")
+    if workers <= 0:
+        raise RuntimeError("Chunked LCP decompression requires at least one worker.")
     sinks = {
         field: np.memmap(output_paths[field], dtype=np.float32, mode="w+", shape=(count,))
         for field in fields
@@ -257,11 +262,7 @@ def run_chunked_lcp_decompress(
     temp_parent = Path(output_paths[fields[0]]).parent
     with tempfile.TemporaryDirectory(prefix="velocity_lcp_chunks_", dir=temp_parent) as temp:
         temp_dir = Path(temp)
-        chunk_archive = temp_dir / "chunk.lcp"
-        chunk_outputs = {
-            field: str(temp_dir / f"{field}.f32.raw")
-            for field in fields
-        }
+        segments = []
         with Path(compressed_path).open("rb") as archive:
             header = archive.read(hp.LCP_CHUNK_HEADER.size)
             if len(header) != hp.LCP_CHUNK_HEADER.size:
@@ -276,7 +277,7 @@ def run_chunked_lcp_decompress(
                     "Chunked LCP velocity archive metadata does not match the manifest."
                 )
             start = 0
-            for _ in range(stored_segment_count):
+            for segment_index in range(stored_segment_count):
                 entry = archive.read(hp.LCP_CHUNK_ENTRY.size)
                 if len(entry) != hp.LCP_CHUNK_ENTRY.size:
                     raise RuntimeError("Truncated chunked LCP velocity entry.")
@@ -287,7 +288,29 @@ def run_chunked_lcp_decompress(
                 payload = archive.read(payload_size)
                 if len(payload) != payload_size:
                     raise RuntimeError("Truncated chunked LCP velocity payload.")
+                segment_dir = temp_dir / f"segment_{segment_index:08d}"
+                segment_dir.mkdir()
+                chunk_archive = segment_dir / "chunk.lcp"
                 chunk_archive.write_bytes(payload)
+                chunk_outputs = {
+                    field: str(segment_dir / f"{field}.f32.raw")
+                    for field in fields
+                }
+                segments.append(
+                    (start, segment_values, chunk_archive, chunk_outputs)
+                )
+                start = end
+
+            if start != count:
+                raise RuntimeError("Chunked LCP velocity archive does not cover every particle.")
+
+            if archive.read(1):
+                raise RuntimeError("Chunked LCP velocity archive contains trailing data.")
+
+        def decompress_segment(segment) -> None:
+            start, segment_values, chunk_archive, chunk_outputs = segment
+            end = start + segment_values
+            try:
                 if segment_values > chunk_size:
                     if segment_values % chunk_size:
                         raise RuntimeError(
@@ -315,13 +338,14 @@ def run_chunked_lcp_decompress(
                     sinks[field][start:end] = hp.read_raw(
                         chunk_outputs[field], np.dtype("float32"), segment_values
                     )
-                start = end
+            finally:
+                chunk_archive.unlink(missing_ok=True)
+                for path in chunk_outputs.values():
+                    Path(path).unlink(missing_ok=True)
 
-            if start != count:
-                raise RuntimeError("Chunked LCP velocity archive does not cover every particle.")
-
-            if archive.read(1):
-                raise RuntimeError("Chunked LCP velocity archive contains trailing data.")
+        effective_workers = min(workers, len(segments))
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            list(executor.map(decompress_segment, segments))
 
     for sink in sinks.values():
         sink.flush()
@@ -465,6 +489,7 @@ def decompress(args: argparse.Namespace,
     if velocity_compressor == "lcp":
         velocity_chunk_size = int(fields["velocities"].get("chunk_size", 0))
         if velocity_chunk_size:
+            velocity_lcp_start = time.perf_counter()
             run_chunked_lcp_decompress(
                 tools,
                 artifacts["velocities"],
@@ -473,6 +498,12 @@ def decompress(args: argparse.Namespace,
                 count,
                 velocity_chunk_size,
                 float(manifest["error_bounds"]["velocities_lcp_abs"]),
+                hp.resolve_lcp_chunk_workers(
+                    int(getattr(args, "vel_chunk_workers", 0))
+                ),
+            )
+            manifest.setdefault("timing", {})["velocity_lcp_decompress_wall_seconds"] = (
+                time.perf_counter() - velocity_lcp_start
             )
         else:
             run_lcp_decompress(

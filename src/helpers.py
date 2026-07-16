@@ -8,6 +8,7 @@ import ctypes
 import importlib.util
 import hashlib
 import struct
+import os
 import h5py
 import numpy as np
 
@@ -37,6 +38,15 @@ LCP_CHUNK_CONTAINER = "chunked_lcp_v2"
 LCP_CHUNK_HEADER = struct.Struct("<8sQQQ")
 LCP_CHUNK_ENTRY = struct.Struct("<QQ")
 LCP_CHUNK_BATCH_VALUES = 1 << 20
+
+
+def resolve_lcp_chunk_workers(configured: int) -> int:
+    configured = int(configured)
+    if configured < 0:
+        raise RuntimeError("Velocity chunk workers must be non-negative.")
+    if configured:
+        return configured
+    return min(16, os.cpu_count() or 1)
 
 
 @dataclass(frozen=True)
