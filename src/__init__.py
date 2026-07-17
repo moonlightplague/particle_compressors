@@ -1,0 +1,2 @@
+"""Particle compression pipeline package."""
+

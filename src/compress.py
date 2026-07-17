@@ -1,727 +1,548 @@
+"""Compression-stage orchestration.
+
+Codec implementations live in :mod:`src.raw_codecs` and :mod:`src.lcp_codec`.
+This module coordinates row ordering and records the resulting manifest.
+"""
+
 import argparse
-import numpy as np
-import tempfile
 import time
-
 from concurrent.futures import ThreadPoolExecutor
-
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-import src.helpers as hp
+import numpy as np
+
+from src.constants import (
+    LCP_CHUNK_CONTAINER,
+    MAX_INT32_ORDER_VALUES,
+    POSITION_FIELDS,
+    VELOCITY_FIELDS,
+)
+from src.lcp_codec import (
+    compress_chunked_lcp_triplet,
+    compress_lcp_triplet,
+    compress_lcp_triplet_batch,
+    read_lcp_permutation,
+    reorder_raw,
+    velocity_order_bits,
+)
+from src.manifest import update_compressed_size_metrics
+from src.models import CanonicalOrder, ToolPaths
+from src.raw_codecs import (
+    compress_integer_raw,
+    compress_lossy_raw,
+    compress_pcodec_raw,
+    compress_pysz_raw,
+    compress_szo_raw,
+    pad_codec_input,
+)
+from src.runtime import (
+    resolve_lcp_chunk_workers,
+    write_json,
+)
 
 
-def compress_pcodec_raw(
-    raw_path: str,
-    dtype: str,
-    compressed_path: str,
-    field_name: str,
-    count: int,
-    force: bool,
-) -> Dict[str, Any]:
-    standalone, ChunkConfig = hp.load_pcodec()
-    dt = np.dtype(dtype)
-    output = Path(compressed_path)
-    hp.require_output_path(output, force)
-    values = np.ascontiguousarray(hp.read_raw(raw_path, dt, count))
-    payload = standalone.simple_compress(values, ChunkConfig())
-    output.write_bytes(payload)
-    compressed_bytes = len(payload)
-    return {
-        "field": field_name,
-        "codec": "pcodec",
-        "dtype": str(dt),
-        "count": count,
-        "path": str(output),
-        "bytes": compressed_bytes,
-    }
+@dataclass(frozen=True)
+class CompressionSettings:
+    position_codec: str
+    velocity_codec: str
+    velocity_chunk_size: int
+    configured_chunk_workers: int
+    effective_chunk_workers: int
+    force: bool
 
-
-def compress_szo_raw(
-    raw_path: str,
-    dtype: str,
-    compressed_path: str,
-    field_name: str,
-    count: int,
-    abs_error_bound: float,
-    force: bool,
-) -> Dict[str, Any]:
-    output = Path(compressed_path)
-    hp.require_output_path(output, force)
-    dt = np.dtype(dtype)
-    if dt not in (np.dtype("float32"), np.dtype("float64")):
-        raise RuntimeError(
-            f"SZO compression expected float32/float64, got {dt} for {field_name}."
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "CompressionSettings":
+        position_codec = getattr(args, "pos_compressor", "lcp")
+        velocity_codec = args.vel_compressor
+        chunk_size = int(getattr(args, "vel_chunk_size", 0))
+        configured_workers = int(getattr(args, "vel_chunk_workers", 0))
+        _validate_chunk_configuration(
+            position_codec,
+            velocity_codec,
+            chunk_size,
+            configured_workers,
         )
-    SZo, SZoConfig, SZoErrorBoundMode, _ = hp.load_pyszo()
-    encoded = np.ascontiguousarray(hp.read_raw(raw_path, dt, count))
-    encoded_count = max(count, hp.SZO_MIN_VALUES)
-    if encoded_count != count:
-        padded = np.empty(encoded_count, dtype=dt)
-        padded[:count] = encoded
-        padded[count:] = encoded[-1] if count else 0
-        encoded = padded
-
-    config = SZoConfig((encoded_count,))
-    config.errorBoundMode = SZoErrorBoundMode.ABS
-    config.absErrorBound = float(abs_error_bound)
-    try:
-        compressed, _ = SZo.compress(encoded, config, copy=True)
-    except Exception as exc:
-        raise RuntimeError(f"SZO compression failed for {field_name}.") from exc
-
-    compressed = np.ascontiguousarray(compressed, dtype=np.uint8)
-    compressed.tofile(output)
-    return {
-        "field": field_name,
-        "codec": "szo",
-        "dtype": str(dt),
-        "abs_error_bound": float(abs_error_bound),
-        "count": count,
-        "encoded_count": encoded_count,
-        "path": str(output),
-        "bytes": int(compressed.size),
-    }
-
-
-def compress_integer_raw(
-    codec: str,
-    raw_path: str,
-    dtype: str,
-    compressed_path: str,
-    field_name: str,
-    count: int,
-    force: bool,
-) -> Dict[str, Any]:
-    return compress_pcodec_raw(raw_path, dtype, compressed_path, field_name, count, force)
-
-def pysz_encoded_values(values: np.ndarray) -> Tuple[np.ndarray, int]:
-    if values.size >= hp.PYSZ_MIN_VALUES:
-        return np.ascontiguousarray(values), int(values.size)
-    encoded_count = hp.PYSZ_MIN_VALUES
-    padded = np.empty(encoded_count, dtype=values.dtype)
-    padded[: values.size] = values
-    fill_value = values[-1] if values.size else np.asarray(0, dtype=values.dtype)
-    padded[values.size :] = fill_value
-    return padded, encoded_count
-
-def compress_pysz_raw(
-    raw_path: str,
-    dtype: str,
-    compressed_path: str,
-    field_name: str,
-    count: int,
-    abs_eb: float,
-    force: bool,
-) -> Dict[str, Any]:
-    PyszSZ, PyszConfig, PyszErrorBoundMode = hp.load_pysz()
-    dt = np.dtype(dtype)
-    if dt not in (np.dtype("float32"), np.dtype("float64")):
-        raise RuntimeError(f"pysz compression expected float32/float64, got {dt} for {field_name}.")
-    output = Path(compressed_path)
-    hp.require_output_path(output, force)
-    values = hp.read_raw(raw_path, dt, count)
-    encoded, encoded_count = pysz_encoded_values(values)
-    config = PyszConfig(encoded.shape)
-    config.errorBoundMode = PyszErrorBoundMode.ABS
-    config.absErrorBound = float(abs_eb)
-    try:
-        compressed, _ = PyszSZ.compress(encoded, config)
-    except Exception as exc:
-        raise RuntimeError(
-            f"pysz compression failed for {field_name} with {count} values "
-            f"encoded as {encoded_count} values."
-        ) from exc
-    compressed = np.ascontiguousarray(compressed, dtype=np.uint8)
-    compressed.tofile(output)
-    compressed_bytes = int(compressed.size)
-    return {
-        "field": field_name,
-        "codec": "pysz",
-        "dtype": str(dt),
-        "abs_error_bound": abs_eb,
-        "count": count,
-        "encoded_count": encoded_count,
-        "path": str(output),
-        "bytes": compressed_bytes,
-    }
-
-
-def compress_lossy_raw(
-    codec: str,
-    raw_path: str,
-    dtype: str,
-    compressed_path: str,
-    field_name: str,
-    count: int,
-    abs_error_bound: float,
-    force: bool,
-) -> Dict[str, Any]:
-    if codec == "szo":
-        return compress_szo_raw(
-            raw_path,
-            dtype,
-            compressed_path,
-            field_name,
-            count,
-            abs_error_bound,
-            force,
+        return cls(
+            position_codec=position_codec,
+            velocity_codec=velocity_codec,
+            velocity_chunk_size=chunk_size,
+            configured_chunk_workers=configured_workers,
+            effective_chunk_workers=resolve_lcp_chunk_workers(
+                configured_workers
+            ),
+            force=bool(args.force),
         )
-    if codec == "sz3":
-        return compress_pysz_raw(
-            raw_path,
-            dtype,
-            compressed_path,
-            field_name,
-            count,
-            abs_error_bound,
-            force,
+
+
+class CompressionPipeline:
+    """Coordinate codecs while maintaining one canonical particle row order."""
+
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        manifest: Dict[str, Any],
+        raw_paths: Dict[str, str],
+        tools: ToolPaths,
+    ) -> None:
+        self.args = args
+        self.manifest = manifest
+        self.raw_paths = raw_paths
+        self.tools = tools
+        self.settings = CompressionSettings.from_args(args)
+        self.work_dir = Path(args.work_dir).resolve()
+        self.preprocessed_dir = self.work_dir / "preprocessed"
+        self.artifacts = manifest["artifacts"]["compressed"]
+        self.compressed_fields = manifest["compressed_fields"]
+        self.count = int(manifest["count"])
+
+    def run(self) -> Dict[str, Any]:
+        started = time.perf_counter()
+        canonical_order = self._select_canonical_order()
+        self._record_ordering(canonical_order)
+        self._compress_id(canonical_order)
+        self._compress_positions(canonical_order)
+        self._compress_velocities(canonical_order)
+        self._finalize(started)
+        return self.manifest
+
+    def _select_canonical_order(self) -> CanonicalOrder:
+        if self.settings.position_codec == "lcp":
+            return self._compress_canonical_positions()
+        if self.settings.velocity_codec == "lcp":
+            return self._compress_canonical_velocities()
+        return CanonicalOrder()
+
+    def _compress_canonical_positions(self) -> CanonicalOrder:
+        order_path = self.preprocessed_dir / "order.i32.raw"
+        self.raw_paths["position_order"] = str(order_path)
+        compressed_path = self.artifacts["positions"]
+        abs_error_bound = float(
+            self.manifest["error_bounds"]["positions_lcp_abs"]
         )
-    raise RuntimeError(f"Unsupported lossy compressor: {codec}.")
-
-
-def read_lcp_permutation(order_path: str, count: int) -> np.ndarray:
-    order = hp.read_raw(order_path, np.dtype("int32"), count)
-    if count and (int(order.min()) < 0 or int(order.max()) >= count):
-        raise RuntimeError("LCP order is not a valid index range for this particle count.")
-    if np.unique(order).size != count:
-        raise RuntimeError("LCP order is not a permutation of the particle rows.")
-    return order.astype(np.intp, copy=False)
-
-
-def reorder_raw(
-    raw_path: str,
-    dtype: str,
-    output_path: Path,
-    count: int,
-    order: np.ndarray,
-    force: bool,
-) -> str:
-    hp.require_output_path(output_path, force)
-    values = hp.read_raw(raw_path, np.dtype(dtype), count)
-    np.ascontiguousarray(values[order]).tofile(output_path)
-    return str(output_path)
-
-
-def compress_lcp_triplet(
-    tools: hp.ToolPaths,
-    input_paths: Tuple[str, str, str],
-    compressed_path: str,
-    count: int,
-    abs_error_bound: float,
-    order_path: Path,
-    force: bool,
-) -> None:
-    hp.require_output_path(Path(compressed_path), force)
-    hp.require_output_path(order_path, force)
-    hp.run_command(
-        [
-            str(tools.lcp),
-            "-i",
-            *input_paths,
-            "-z",
-            compressed_path,
-            "-1",
-            str(count),
-            "-eb",
-            str(abs_error_bound),
-            "-ord",
-            "32",
-            str(order_path),
-        ]
-    )
-
-
-def compress_lcp_triplet_batch(
-    tools: hp.ToolPaths,
-    input_paths: Tuple[str, str, str],
-    compressed_path: str,
-    chunks: int,
-    chunk_size: int,
-    abs_error_bound: float,
-    order_path: Path,
-    force: bool,
-) -> None:
-    if chunks <= 1:
-        raise RuntimeError("Batched LCP compression requires at least two chunks.")
-    hp.require_output_path(Path(compressed_path), force)
-    hp.require_output_path(order_path, force)
-    hp.run_command(
-        [
-            str(tools.lcp),
-            "-i",
-            *input_paths,
-            "-z",
-            compressed_path,
-            "-2",
-            str(chunks),
-            str(chunk_size),
-            "-bt",
-            "0",
-            "-eb",
-            str(abs_error_bound),
-            "-ord",
-            "32",
-            str(order_path),
-        ]
-    )
-
-
-def velocity_order_bits(chunk_size: int) -> int:
-    if chunk_size < 0:
-        raise RuntimeError("Velocity chunk size must be non-negative.")
-    return max(0, (chunk_size - 1).bit_length())
-
-
-def compress_chunked_lcp_triplet(
-    tools: hp.ToolPaths,
-    input_paths: Tuple[str, str, str],
-    compressed_path: str,
-    count: int,
-    chunk_size: int,
-    abs_error_bound: float,
-    order_path: Path,
-    force: bool,
-    workers: int = 1,
-) -> Dict[str, int]:
-    if chunk_size <= 0:
-        raise RuntimeError("Chunked LCP compression requires a positive chunk size.")
-    if chunk_size > 2**31:
-        raise RuntimeError("Velocity chunk size cannot exceed 2^31 with int32 local order indices.")
-    if workers <= 0:
-        raise RuntimeError("Chunked LCP compression requires at least one worker.")
-
-    output = Path(compressed_path)
-    hp.require_output_path(output, force)
-    hp.require_output_path(order_path, force)
-    chunk_count = (count + chunk_size - 1) // chunk_size
-    chunks_per_batch = max(1, hp.LCP_CHUNK_BATCH_VALUES // chunk_size)
-    segments = []
-    start = 0
-    while start < count:
-        remaining = count - start
-        if remaining < chunk_size:
-            chunks_in_segment = 1
-            segment_values = remaining
-        else:
-            available_full_chunks = remaining // chunk_size
-            chunks_in_segment = min(chunks_per_batch, available_full_chunks)
-            segment_values = chunks_in_segment * chunk_size
-        segments.append((len(segments), start, segment_values, chunks_in_segment))
-        start += segment_values
-    segment_count = len(segments)
-    effective_workers = min(workers, segment_count)
-    sources = tuple(
-        np.memmap(path, dtype=np.float32, mode="r", shape=(count,))
-        for path in input_paths
-    )
-    local_order = np.memmap(order_path, dtype=np.int32, mode="w+", shape=(count,))
-
-    with tempfile.TemporaryDirectory(prefix="velocity_lcp_chunks_", dir=order_path.parent) as temp:
-        temp_dir = Path(temp)
-
-        def compress_segment(segment):
-            segment_index, start, segment_values, chunks_in_segment = segment
-            segment_dir = temp_dir / f"segment_{segment_index:08d}"
-            segment_dir.mkdir()
-            chunk_inputs = tuple(
-                segment_dir / f"{field}.f32.raw" for field in hp.VELOCITY_FIELDS
-            )
-            chunk_archive = segment_dir / "chunk.lcp"
-            chunk_order = segment_dir / "order.i32.raw"
-            try:
-                end = start + segment_values
-                for source, path in zip(sources, chunk_inputs):
-                    np.asarray(source[start:end]).tofile(path)
-
-                if chunks_in_segment > 1:
-                    compress_lcp_triplet_batch(
-                        tools,
-                        tuple(str(path) for path in chunk_inputs),
-                        str(chunk_archive),
-                        chunks_in_segment,
-                        chunk_size,
-                        abs_error_bound,
-                        chunk_order,
-                        True,
-                    )
-                else:
-                    compress_lcp_triplet(
-                        tools,
-                        tuple(str(path) for path in chunk_inputs),
-                        str(chunk_archive),
-                        segment_values,
-                        abs_error_bound,
-                        chunk_order,
-                        True,
-                    )
-            finally:
-                for path in chunk_inputs:
-                    path.unlink(missing_ok=True)
-            return segment_index, start, segment_values, chunk_archive, chunk_order
-
-        with output.open("wb") as archive:
-            archive.write(
-                hp.LCP_CHUNK_HEADER.pack(
-                    hp.LCP_CHUNK_MAGIC,
-                    count,
-                    chunk_size,
-                    segment_count,
-                )
-            )
-            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-                for _, start, segment_values, chunk_archive, chunk_order in executor.map(
-                    compress_segment, segments
-                ):
-                    order = hp.read_raw(
-                        str(chunk_order), np.dtype("int32"), segment_values
-                    )
-                    for local_start in range(0, segment_values, chunk_size):
-                        local_end = min(local_start + chunk_size, segment_values)
-                        local_count = local_end - local_start
-                        chunk_order_values = order[local_start:local_end]
-                        if local_count and (
-                            int(chunk_order_values.min()) < local_start
-                            or int(chunk_order_values.max()) >= local_end
-                        ):
-                            raise RuntimeError(
-                                "LCP order contains an index outside its velocity chunk."
-                            )
-                        localized = chunk_order_values - local_start
-                        if np.unique(localized).size != local_count:
-                            raise RuntimeError(
-                                "LCP order is not a local permutation within a velocity chunk."
-                            )
-                        output_start = start + local_start
-                        output_end = start + local_end
-                        local_order[output_start:output_end] = localized
-
-                    payload = chunk_archive.read_bytes()
-                    archive.write(hp.LCP_CHUNK_ENTRY.pack(segment_values, len(payload)))
-                    archive.write(payload)
-                    chunk_archive.unlink()
-                    chunk_order.unlink()
-
-    local_order.flush()
-    del local_order
-    del sources
-    return {
-        "chunk_size": chunk_size,
-        "chunk_count": chunk_count,
-        "lcp_segment_count": segment_count,
-        "lcp_batch_values": hp.LCP_CHUNK_BATCH_VALUES,
-        "lcp_workers": effective_workers,
-        "order_bits_per_particle": velocity_order_bits(chunk_size),
-    }
-
-
-def compress(args: argparse.Namespace,
-             manifest: Dict[str, Any],
-             raw_paths: Dict[str, str],
-             tools: hp.ToolPaths) -> Dict[str, Any]:
-    compress_start = time.perf_counter()
-    work_dir = Path(args.work_dir).resolve()
-    pre_dir = work_dir / "preprocessed"
-    artifacts = manifest["artifacts"]["compressed"]
-    count = int(manifest["count"])
-    position_compressor = getattr(args, "pos_compressor", "lcp")
-    velocity_compressor = args.vel_compressor
-    velocity_chunk_size = int(getattr(args, "vel_chunk_size", 0))
-    velocity_chunk_workers = hp.resolve_lcp_chunk_workers(
-        int(getattr(args, "vel_chunk_workers", 0))
-    )
-    if velocity_chunk_size < 0:
-        raise RuntimeError("--vel-chunk-size must be non-negative.")
-    if velocity_chunk_size > 2**31:
-        raise RuntimeError("--vel-chunk-size cannot exceed 2^31 when using int32 order indices.")
-    if velocity_chunk_size and not (
-        position_compressor == "lcp" and velocity_compressor == "lcp"
-    ):
-        raise RuntimeError(
-            "--vel-chunk-size is only supported when both position and velocity compressors are lcp."
-        )
-    canonical_order = None
-    canonical_mapping = "original_row"
-    canonical_field = None
-    canonical_order_artifact = None
-
-    if position_compressor == "lcp":
-        position_order_raw = pre_dir / "order.i32.raw"
-        raw_paths["position_order"] = str(position_order_raw)
         compress_lcp_triplet(
-            tools,
-            tuple(raw_paths[logical] for logical in hp.POSITION_FIELDS),
-            artifacts["positions"],
-            count,
-            float(manifest["error_bounds"]["positions_lcp_abs"]),
-            position_order_raw,
-            args.force,
+            self.tools,
+            self._raw_triplet(POSITION_FIELDS),
+            compressed_path,
+            self.count,
+            abs_error_bound,
+            order_path,
+            self.settings.force,
         )
-        canonical_order = read_lcp_permutation(str(position_order_raw), count)
-        canonical_mapping = "lcp_position_sorted"
-        canonical_field = "positions"
-        canonical_order_artifact = "position_order"
-        position_lcp = Path(artifacts["positions"])
-        manifest["compressed_fields"]["positions"] = {
-            "field": "positions",
-            "codec": "lcp",
-            "dtype": "float32",
-            "source_dtypes": {
-                logical: manifest["fields"][logical]["dtype"]
-                for logical in hp.POSITION_FIELDS
-            },
-            "count": count,
-            "abs_error_bound": manifest["error_bounds"]["positions_lcp_abs"],
-            "path": str(position_lcp),
-            "bytes": position_lcp.stat().st_size,
-        }
-    elif velocity_compressor == "lcp":
-        velocity_order_raw = pre_dir / "velocity_order.i32.raw"
-        raw_paths["velocity_order"] = str(velocity_order_raw)
+        self.compressed_fields["positions"] = self._lcp_field_metadata(
+            "positions",
+            POSITION_FIELDS,
+            compressed_path,
+            abs_error_bound,
+        )
+        return CanonicalOrder(
+            mapping="lcp_position_sorted",
+            field="positions",
+            artifact="position_order",
+            values=read_lcp_permutation(str(order_path), self.count),
+        )
+
+    def _compress_canonical_velocities(self) -> CanonicalOrder:
+        order_path = self.preprocessed_dir / "velocity_order.i32.raw"
+        self.raw_paths["velocity_order"] = str(order_path)
         compress_lcp_triplet(
-            tools,
-            tuple(raw_paths[f"{logical}_lcp"] for logical in hp.VELOCITY_FIELDS),
-            artifacts["velocities"],
-            count,
-            float(manifest["error_bounds"]["velocities_lcp_abs"]),
-            velocity_order_raw,
-            args.force,
+            self.tools,
+            self._raw_triplet(VELOCITY_FIELDS, suffix="_lcp"),
+            self.artifacts["velocities"],
+            self.count,
+            float(self.manifest["error_bounds"]["velocities_lcp_abs"]),
+            order_path,
+            self.settings.force,
         )
-        canonical_order = read_lcp_permutation(str(velocity_order_raw), count)
-        canonical_mapping = "lcp_velocity_sorted"
-        canonical_field = "velocities"
-        canonical_order_artifact = "velocity_order"
-
-    id_dtype = manifest["fields"]["id"]["dtype"]
-    ordered_id_path = raw_paths["id"]
-    if canonical_order is not None:
-        ordered_id_path = reorder_raw(
-            raw_paths["id"],
-            id_dtype,
-            pre_dir / f"id.{canonical_mapping}.{np.dtype(id_dtype).name}.raw",
-            count,
-            canonical_order,
-            args.force,
+        return CanonicalOrder(
+            mapping="lcp_velocity_sorted",
+            field="velocities",
+            artifact="velocity_order",
+            values=read_lcp_permutation(str(order_path), self.count),
         )
-        raw_paths["id_canonical_ordered"] = ordered_id_path
 
-    manifest["ordering"] = {
-        "reconstructed_rows": {
-            "mapping": canonical_mapping,
-            "original_row_order_restored": canonical_order is None,
-            "canonical_lcp_field": canonical_field,
+    def _record_ordering(self, order: CanonicalOrder) -> None:
+        reconstructed_rows = {
+            "mapping": order.mapping,
+            "original_row_order_restored": not order.is_reordered,
+            "canonical_lcp_field": order.field,
             "lcp_permutation_stored": False,
-            "temporary_permutation_artifact": canonical_order_artifact,
-        },
-        "id": {"mapping": canonical_mapping},
-    }
-    if canonical_field == "positions":
-        manifest["ordering"]["reconstructed_rows"]["position_permutation_stored"] = False
-        manifest["ordering"]["id"]["replaces_lcp_position_order"] = True
-    elif canonical_field == "velocities":
-        manifest["ordering"]["reconstructed_rows"]["velocity_permutation_stored"] = False
-        manifest["ordering"]["id"]["replaces_lcp_velocity_order"] = True
-    manifest["format_version"] = 3
-
-    manifest["compressed_fields"]["id"] = compress_integer_raw(
-        args.lossless,
-        ordered_id_path,
-        id_dtype,
-        artifacts["id"],
-        "id",
-        count,
-        args.force,
-    )
-
-    if position_compressor == "lcp":
-        manifest["ordering"]["positions"] = {"mapping": canonical_mapping}
-    else:
-        for logical in hp.POSITION_FIELDS:
-            position_path = raw_paths[logical]
-            if canonical_order is not None:
-                position_path = reorder_raw(
-                    position_path,
-                    "float32",
-                    pre_dir / f"{logical}.{canonical_mapping}.float32.raw",
-                    count,
-                    canonical_order,
-                    args.force,
-                )
-                raw_paths[f"{logical}_canonical_ordered"] = position_path
-            manifest["compressed_fields"][logical] = compress_lossy_raw(
-                position_compressor,
-                position_path,
-                "float32",
-                artifacts[logical],
-                logical,
-                count,
-                float(manifest["field_error_bounds"][logical]["compressor_abs"]),
-                args.force,
-            )
-        manifest["ordering"]["positions"] = {"mapping": canonical_mapping}
-
-    if velocity_compressor == "lcp":
-        if position_compressor == "lcp":
-            def reorder_velocity(logical: str) -> Tuple[str, str]:
-                return logical, reorder_raw(
-                    raw_paths[f"{logical}_lcp"],
-                    "float32",
-                    pre_dir / f"{logical}.{canonical_mapping}.float32.raw",
-                    count,
-                    canonical_order,
-                    args.force,
-                )
-
-            with ThreadPoolExecutor(max_workers=len(hp.VELOCITY_FIELDS)) as executor:
-                ordered_velocity_paths: Dict[str, str] = dict(
-                    executor.map(reorder_velocity, hp.VELOCITY_FIELDS)
-                )
-            for logical, ordered_path in ordered_velocity_paths.items():
-                raw_paths[f"{logical}_canonical_ordered"] = ordered_path
-
-            velocity_order_raw = pre_dir / "velocity_order.i32.raw"
-            raw_paths["velocity_order"] = str(velocity_order_raw)
-            velocity_chunking = None
-            velocity_lcp_start = time.perf_counter()
-            if velocity_chunk_size:
-                velocity_chunking = compress_chunked_lcp_triplet(
-                    tools,
-                    tuple(ordered_velocity_paths[logical] for logical in hp.VELOCITY_FIELDS),
-                    artifacts["velocities"],
-                    count,
-                    velocity_chunk_size,
-                    float(manifest["error_bounds"]["velocities_lcp_abs"]),
-                    velocity_order_raw,
-                    args.force,
-                    velocity_chunk_workers,
-                )
-            else:
-                compress_lcp_triplet(
-                    tools,
-                    tuple(ordered_velocity_paths[logical] for logical in hp.VELOCITY_FIELDS),
-                    artifacts["velocities"],
-                    count,
-                    float(manifest["error_bounds"]["velocities_lcp_abs"]),
-                    velocity_order_raw,
-                    args.force,
-                )
-            manifest.setdefault("timing", {})["velocity_lcp_compress_wall_seconds"] = (
-                time.perf_counter() - velocity_lcp_start
-            )
-            velocity_order_field = compress_integer_raw(
-                args.lossless,
-                str(velocity_order_raw),
-                "int32",
-                artifacts["velocity_order"],
-                "velocity_order",
-                count,
-                args.force,
-            )
-            if velocity_chunking is not None:
-                velocity_order_field.update(
-                    {
-                        **velocity_chunking,
-                        "index_scope": "chunk_local",
-                        "uncompressed_storage_dtype": "int32",
-                        "compressed_bits_per_particle": (
-                            8.0 * float(velocity_order_field["bytes"]) / count
-                            if count
-                            else 0.0
-                        ),
-                    }
-                )
-            else:
-                velocity_order_field.update(
-                    {
-                        "chunk_size": 0,
-                        "chunk_count": 1,
-                        "index_scope": "global",
-                        "order_bits_per_particle": velocity_order_bits(count),
-                        "uncompressed_storage_dtype": "int32",
-                        "compressed_bits_per_particle": (
-                            8.0 * float(velocity_order_field["bytes"]) / count
-                            if count
-                            else 0.0
-                        ),
-                    }
-                )
-            manifest["compressed_fields"]["velocity_order"] = velocity_order_field
-
-        velocity_lcp = Path(artifacts["velocities"])
-        manifest["compressed_fields"]["velocities"] = {
-            "field": "velocities",
-            "codec": "lcp",
-            "dtype": "float32",
-            "source_dtypes": {
-                logical: manifest["fields"][logical]["dtype"]
-                for logical in hp.VELOCITY_FIELDS
-            },
-            "count": count,
-            "abs_error_bound": manifest["error_bounds"]["velocities_lcp_abs"],
-            "chunk_size": velocity_chunk_size if position_compressor == "lcp" else 0,
-            "chunk_count": (
-                (count + velocity_chunk_size - 1) // velocity_chunk_size
-                if position_compressor == "lcp" and velocity_chunk_size
-                else 1
-            ),
-            "container": (
-                hp.LCP_CHUNK_CONTAINER
-                if position_compressor == "lcp" and velocity_chunk_size
-                else "native_lcp"
-            ),
-            "path": str(velocity_lcp),
-            "bytes": velocity_lcp.stat().st_size,
+            "temporary_permutation_artifact": order.artifact,
         }
-        if position_compressor == "lcp":
-            manifest["ordering"]["velocities"] = {
-                "mapping": "lcp_velocity_sorted_index_to_lcp_position_sorted_row",
+        id_ordering: Dict[str, Any] = {"mapping": order.mapping}
+        if order.field == "positions":
+            reconstructed_rows["position_permutation_stored"] = False
+            id_ordering["replaces_lcp_position_order"] = True
+        elif order.field == "velocities":
+            reconstructed_rows["velocity_permutation_stored"] = False
+            id_ordering["replaces_lcp_velocity_order"] = True
+        self.manifest["ordering"] = {
+            "reconstructed_rows": reconstructed_rows,
+            "id": id_ordering,
+        }
+
+    def _compress_id(self, order: CanonicalOrder) -> None:
+        dtype = self.manifest["fields"]["id"]["dtype"]
+        raw_path = self._ordered_raw_path("id", dtype, order)
+        self.compressed_fields["id"] = compress_integer_raw(
+            self.args.lossless,
+            raw_path,
+            dtype,
+            self.artifacts["id"],
+            "id",
+            self.count,
+            self.settings.force,
+        )
+
+    def _compress_positions(self, order: CanonicalOrder) -> None:
+        if self.settings.position_codec == "lcp":
+            self.manifest["ordering"]["positions"] = {
+                "mapping": order.mapping
+            }
+            return
+
+        for logical in POSITION_FIELDS:
+            raw_path = self._ordered_raw_path(logical, "float32", order)
+            self.compressed_fields[logical] = compress_lossy_raw(
+                self.settings.position_codec,
+                raw_path,
+                "float32",
+                self.artifacts[logical],
+                logical,
+                self.count,
+                float(
+                    self.manifest["field_error_bounds"][logical][
+                        "compressor_abs"
+                    ]
+                ),
+                self.settings.force,
+            )
+        self.manifest["ordering"]["positions"] = {"mapping": order.mapping}
+
+    def _compress_velocities(self, order: CanonicalOrder) -> None:
+        if self.settings.velocity_codec == "lcp":
+            self._compress_lcp_velocities(order)
+            return
+
+        for logical in VELOCITY_FIELDS:
+            dtype = self.manifest["fields"][logical]["dtype"]
+            raw_path = self._ordered_raw_path(logical, dtype, order)
+            self.compressed_fields[logical] = compress_lossy_raw(
+                self.settings.velocity_codec,
+                raw_path,
+                dtype,
+                self.artifacts[logical],
+                logical,
+                self.count,
+                float(self.manifest["field_error_bounds"][logical]["abs"]),
+                self.settings.force,
+            )
+        self.manifest["ordering"]["velocities"] = {"mapping": order.mapping}
+
+    def _compress_lcp_velocities(self, order: CanonicalOrder) -> None:
+        if self.settings.position_codec == "lcp":
+            self._compress_secondary_lcp_velocities(order)
+
+        compressed_path = self.artifacts["velocities"]
+        chunk_size = (
+            self.settings.velocity_chunk_size
+            if self.settings.position_codec == "lcp"
+            else 0
+        )
+        self.compressed_fields["velocities"] = self._lcp_field_metadata(
+            "velocities",
+            VELOCITY_FIELDS,
+            compressed_path,
+            float(self.manifest["error_bounds"]["velocities_lcp_abs"]),
+            chunk_size=chunk_size,
+        )
+        if self.settings.position_codec == "lcp":
+            self.manifest["ordering"]["velocities"] = {
+                "mapping": (
+                    "lcp_velocity_sorted_index_to_lcp_position_sorted_row"
+                ),
                 "field": "velocity_order",
-                "index_scope": "chunk_local" if velocity_chunk_size else "global",
-                "chunk_size": velocity_chunk_size,
+                "index_scope": (
+                    "chunk_local"
+                    if self.settings.velocity_chunk_size
+                    else "global"
+                ),
+                "chunk_size": self.settings.velocity_chunk_size,
             }
         else:
-            manifest["ordering"]["velocities"] = {"mapping": canonical_mapping}
-    else:
-        for logical in hp.VELOCITY_FIELDS:
-            dtype = manifest["fields"][logical]["dtype"]
-            velocity_path = raw_paths[logical]
-            if canonical_order is not None:
-                velocity_path = reorder_raw(
-                    velocity_path,
-                    dtype,
-                    pre_dir / f"{logical}.{canonical_mapping}.{np.dtype(dtype).name}.raw",
-                    count,
-                    canonical_order,
-                    args.force,
-                )
-                raw_paths[f"{logical}_canonical_ordered"] = velocity_path
-            manifest["compressed_fields"][logical] = compress_lossy_raw(
-                velocity_compressor,
-                velocity_path,
-                dtype,
-                artifacts[logical],
-                logical,
-                count,
-                manifest["field_error_bounds"][logical]["abs"],
-                args.force,
-            )
-        manifest["ordering"]["velocities"] = {"mapping": canonical_mapping}
+            self.manifest["ordering"]["velocities"] = {
+                "mapping": order.mapping
+            }
 
-    manifest["velocity_chunking"] = {
-        "enabled": bool(velocity_chunk_size),
-        "chunk_size": velocity_chunk_size,
-        "chunk_count": (
-            (count + velocity_chunk_size - 1) // velocity_chunk_size
-            if velocity_chunk_size
-            else 1
-        ),
-        "configured_workers": int(getattr(args, "vel_chunk_workers", 0)),
-        "effective_workers": velocity_chunk_workers if velocity_chunk_size else 1,
-    }
-    manifest["format_version"] = 4 if velocity_chunk_size else 3
-    manifest.setdefault("timing", {})["compress_wall_seconds"] = (
-        time.perf_counter() - compress_start
-    )
-    hp.update_compressed_size_metrics(manifest, work_dir)
-    hp.write_json(work_dir / "manifest.json", manifest, force=True)
-    return manifest
+    def _compress_secondary_lcp_velocities(
+        self,
+        order: CanonicalOrder,
+    ) -> None:
+        if order.values is None:
+            raise RuntimeError(
+                "Position-ordered LCP velocities require a canonical order."
+            )
+
+        def reorder_velocity(logical: str) -> Tuple[str, str]:
+            return logical, reorder_raw(
+                self.raw_paths[f"{logical}_lcp"],
+                "float32",
+                self.preprocessed_dir
+                / f"{logical}.{order.mapping}.float32.raw",
+                self.count,
+                order.values,
+                self.settings.force,
+            )
+
+        with ThreadPoolExecutor(max_workers=len(VELOCITY_FIELDS)) as executor:
+            ordered_paths = dict(
+                executor.map(reorder_velocity, VELOCITY_FIELDS)
+            )
+        for logical, path in ordered_paths.items():
+            self.raw_paths[f"{logical}_canonical_ordered"] = path
+
+        order_path = self.preprocessed_dir / "velocity_order.i32.raw"
+        self.raw_paths["velocity_order"] = str(order_path)
+        chunk_metadata = self._run_secondary_velocity_compressor(
+            ordered_paths,
+            order_path,
+        )
+        order_field = compress_integer_raw(
+            self.args.lossless,
+            str(order_path),
+            "int32",
+            self.artifacts["velocity_order"],
+            "velocity_order",
+            self.count,
+            self.settings.force,
+        )
+        order_field.update(
+            self._velocity_order_metadata(order_field, chunk_metadata)
+        )
+        self.compressed_fields["velocity_order"] = order_field
+
+    def _run_secondary_velocity_compressor(
+        self,
+        ordered_paths: Dict[str, str],
+        order_path: Path,
+    ) -> Optional[Dict[str, int]]:
+        started = time.perf_counter()
+        inputs = tuple(ordered_paths[field] for field in VELOCITY_FIELDS)
+        abs_error_bound = float(
+            self.manifest["error_bounds"]["velocities_lcp_abs"]
+        )
+        chunk_metadata = None
+        if self.settings.velocity_chunk_size:
+            chunk_metadata = compress_chunked_lcp_triplet(
+                self.tools,
+                inputs,
+                self.artifacts["velocities"],
+                self.count,
+                self.settings.velocity_chunk_size,
+                abs_error_bound,
+                order_path,
+                self.settings.force,
+                self.settings.effective_chunk_workers,
+            )
+        else:
+            compress_lcp_triplet(
+                self.tools,
+                inputs,
+                self.artifacts["velocities"],
+                self.count,
+                abs_error_bound,
+                order_path,
+                self.settings.force,
+            )
+        self.manifest.setdefault("timing", {})[
+            "velocity_lcp_compress_wall_seconds"
+        ] = time.perf_counter() - started
+        return chunk_metadata
+
+    def _velocity_order_metadata(
+        self,
+        order_field: Dict[str, Any],
+        chunk_metadata: Optional[Dict[str, int]],
+    ) -> Dict[str, Any]:
+        common = {
+            "uncompressed_storage_dtype": "int32",
+            "compressed_bits_per_particle": (
+                8.0 * float(order_field["bytes"]) / self.count
+                if self.count
+                else 0.0
+            ),
+        }
+        if chunk_metadata is not None:
+            return {
+                **chunk_metadata,
+                **common,
+                "index_scope": "chunk_local",
+            }
+        return {
+            **common,
+            "chunk_size": 0,
+            "chunk_count": 1,
+            "index_scope": "global",
+            "order_bits_per_particle": velocity_order_bits(self.count),
+        }
+
+    def _ordered_raw_path(
+        self,
+        logical: str,
+        dtype: str,
+        order: CanonicalOrder,
+    ) -> str:
+        source_path = self.raw_paths[logical]
+        if not order.is_reordered:
+            return source_path
+        if order.values is None:
+            raise RuntimeError("Canonical order metadata is incomplete.")
+
+        data_type = np.dtype(dtype)
+        ordered_path = reorder_raw(
+            source_path,
+            dtype,
+            self.preprocessed_dir
+            / f"{logical}.{order.mapping}.{data_type.name}.raw",
+            self.count,
+            order.values,
+            self.settings.force,
+        )
+        key = (
+            "id_canonical_ordered"
+            if logical == "id"
+            else f"{logical}_canonical_ordered"
+        )
+        self.raw_paths[key] = ordered_path
+        return ordered_path
+
+    def _raw_triplet(
+        self,
+        fields: Tuple[str, str, str],
+        suffix: str = "",
+    ) -> Tuple[str, str, str]:
+        return tuple(self.raw_paths[f"{field}{suffix}"] for field in fields)
+
+    def _lcp_field_metadata(
+        self,
+        field_name: str,
+        source_fields: Tuple[str, str, str],
+        compressed_path: str,
+        abs_error_bound: float,
+        chunk_size: int = 0,
+    ) -> Dict[str, Any]:
+        path = Path(compressed_path)
+        metadata = {
+            "field": field_name,
+            "codec": "lcp",
+            "dtype": "float32",
+            "source_dtypes": {
+                logical: self.manifest["fields"][logical]["dtype"]
+                for logical in source_fields
+            },
+            "count": self.count,
+            "abs_error_bound": abs_error_bound,
+            "path": str(path),
+            "bytes": path.stat().st_size,
+        }
+        if field_name == "velocities":
+            metadata.update(
+                {
+                    "chunk_size": chunk_size,
+                    "chunk_count": (
+                        (self.count + chunk_size - 1) // chunk_size
+                        if chunk_size
+                        else 1
+                    ),
+                    "container": (
+                        LCP_CHUNK_CONTAINER
+                        if chunk_size
+                        else "native_lcp"
+                    ),
+                }
+            )
+        return metadata
+
+    def _finalize(self, started: float) -> None:
+        chunk_size = self.settings.velocity_chunk_size
+        self.manifest["velocity_chunking"] = {
+            "enabled": bool(chunk_size),
+            "chunk_size": chunk_size,
+            "chunk_count": (
+                (self.count + chunk_size - 1) // chunk_size
+                if chunk_size
+                else 1
+            ),
+            "configured_workers": self.settings.configured_chunk_workers,
+            "effective_workers": (
+                self.settings.effective_chunk_workers
+                if chunk_size
+                else 1
+            ),
+        }
+        self.manifest["format_version"] = 4 if chunk_size else 3
+        self.manifest.setdefault("timing", {})["compress_wall_seconds"] = (
+            time.perf_counter() - started
+        )
+        update_compressed_size_metrics(self.manifest, self.work_dir)
+        write_json(
+            self.work_dir / "manifest.json",
+            self.manifest,
+            force=True,
+        )
+
+
+def _validate_chunk_configuration(
+    position_codec: str,
+    velocity_codec: str,
+    chunk_size: int,
+    workers: int,
+) -> None:
+    if chunk_size < 0:
+        raise RuntimeError("--vel-chunk-size must be non-negative.")
+    if chunk_size > MAX_INT32_ORDER_VALUES:
+        raise RuntimeError(
+            "--vel-chunk-size cannot exceed 2^31 when using int32 order indices."
+        )
+    if workers < 0:
+        raise RuntimeError("--vel-chunk-workers must be non-negative.")
+    if chunk_size and not (
+        position_codec == "lcp" and velocity_codec == "lcp"
+    ):
+        raise RuntimeError(
+            "--vel-chunk-size is only supported when both position and "
+            "velocity compressors are lcp."
+        )
+
+
+def compress(
+    args: argparse.Namespace,
+    manifest: Dict[str, Any],
+    raw_paths: Dict[str, str],
+    tools: ToolPaths,
+) -> Dict[str, Any]:
+    return CompressionPipeline(args, manifest, raw_paths, tools).run()
+
+
+# Backwards-compatible name used by earlier tests and integrations.
+pysz_encoded_values = pad_codec_input
+
+
+__all__ = [
+    "CompressionPipeline",
+    "CompressionSettings",
+    "compress",
+    "compress_chunked_lcp_triplet",
+    "compress_integer_raw",
+    "compress_lcp_triplet",
+    "compress_lcp_triplet_batch",
+    "compress_lossy_raw",
+    "compress_pcodec_raw",
+    "compress_pysz_raw",
+    "compress_szo_raw",
+    "pysz_encoded_values",
+    "read_lcp_permutation",
+    "reorder_raw",
+    "velocity_order_bits",
+]

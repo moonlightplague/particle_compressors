@@ -53,6 +53,21 @@ installs the Python dependencies into the active Python environment:
 bash install.sh
 ```
 
+## Code Structure
+
+The Python implementation is separated by responsibility:
+
+- `preprocess.py`, `compress.py`, and `decompress.py` orchestrate pipeline
+  stages.
+- `raw_codecs.py` adapts pcodec, SZ3, and SZO field streams.
+- `lcp_codec.py` owns native LCP commands and the chunked velocity container.
+- `field_export.py`, `error_bounds.py`, and `hdf5_io.py` handle source
+  conversion, bound selection, and HDF5 reconstruction.
+- `manifest.py`, `metrics.py`, and `runtime.py` contain package metadata,
+  reporting, and low-level runtime utilities.
+- `helpers.py` is a compatibility facade for integrations using the original
+  helper API; new code should import the focused modules directly.
+
 
 ## Quick Start
 

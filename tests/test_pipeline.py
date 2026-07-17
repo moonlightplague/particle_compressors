@@ -7,16 +7,20 @@ from unittest.mock import patch
 import h5py
 import numpy as np
 
-import src.helpers as hp
 from src.cli import AVAILABLE_COMPRESSORS, build_parser
+from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
 from src.compress import compress as compress_pipeline
 from src.compress import (
     compress_chunked_lcp_triplet,
+    compress_lossy_raw,
     compress_pcodec_raw,
     compress_szo_raw,
     reorder_raw,
 )
-from src.decompress import decompress_pcodec_raw, decompress_szo_raw
+from src.decompress import (
+    decompress_lossy_raw,
+    decompress_pcodec_raw,
+)
 from src.decompress import (
     position_compressor_from_manifest,
     recombine_h5,
@@ -31,7 +35,7 @@ FIELDS = {
 }
 
 
-class RecombineTests(unittest.TestCase):
+class CompressionOrderingTests(unittest.TestCase):
     def test_velocity_lcp_reorders_id_and_sz3_positions_and_omits_velocity_order(self) -> None:
         count = 5
         velocity_order = np.array([1, 4, 0, 3, 2], dtype=np.int32)
@@ -102,15 +106,16 @@ class RecombineTests(unittest.TestCase):
                 Path(compressed_path).write_bytes(b"integer")
                 return {"field": field_name, "codec": codec, "dtype": dtype, "count": count}
 
-            def fake_position(raw_path, dtype, compressed_path, field_name, *unused):
+            def fake_position(codec, raw_path, dtype, compressed_path, field_name, *unused):
+                self.assertEqual(codec, "sz3")
                 captured[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
                 Path(compressed_path).write_bytes(b"position")
                 return {"field": field_name, "codec": "pysz", "dtype": dtype, "count": count}
 
-            with patch("src.compress.hp.run_command", side_effect=fake_run_command), patch(
+            with patch("src.lcp_codec.run_command", side_effect=fake_run_command), patch(
                 "src.compress.compress_integer_raw", side_effect=fake_integer
-            ), patch("src.compress.compress_pysz_raw", side_effect=fake_position), patch(
-                "src.compress.hp.update_compressed_size_metrics"
+            ), patch("src.compress.compress_lossy_raw", side_effect=fake_position), patch(
+                "src.compress.update_compressed_size_metrics"
             ):
                 result = compress_pipeline(
                     args,
@@ -121,7 +126,11 @@ class RecombineTests(unittest.TestCase):
 
             self.assertNotIn("velocity_order", result["compressed_fields"])
             self.assertNotIn("velocity_order", result["artifacts"]["compressed"])
-            self.assertFalse(result["ordering"]["reconstructed_rows"]["velocity_permutation_stored"])
+            self.assertFalse(
+                result["ordering"]["reconstructed_rows"][
+                    "velocity_permutation_stored"
+                ]
+            )
             for logical in ("id", "x", "y", "z"):
                 np.testing.assert_array_equal(captured[logical], source[logical][velocity_order])
 
@@ -192,15 +201,16 @@ class RecombineTests(unittest.TestCase):
                 Path(compressed_path).write_bytes(b"integer")
                 return {"field": field_name, "codec": codec, "dtype": dtype, "count": count}
 
-            def fake_velocity(raw_path, dtype, compressed_path, field_name, *unused):
+            def fake_velocity(codec, raw_path, dtype, compressed_path, field_name, *unused):
+                self.assertEqual(codec, "sz3")
                 captured[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
                 Path(compressed_path).write_bytes(b"velocity")
                 return {"field": field_name, "codec": "pysz", "dtype": dtype, "count": count}
 
-            with patch("src.compress.hp.run_command", side_effect=fake_run_command), patch(
+            with patch("src.lcp_codec.run_command", side_effect=fake_run_command), patch(
                 "src.compress.compress_integer_raw", side_effect=fake_integer
-            ), patch("src.compress.compress_pysz_raw", side_effect=fake_velocity), patch(
-                "src.compress.hp.update_compressed_size_metrics"
+            ), patch("src.compress.compress_lossy_raw", side_effect=fake_velocity), patch(
+                "src.compress.update_compressed_size_metrics"
             ):
                 result = compress_pipeline(
                     args,
@@ -211,7 +221,11 @@ class RecombineTests(unittest.TestCase):
 
             self.assertNotIn("order", result["compressed_fields"])
             self.assertNotIn("order", result["artifacts"]["compressed"])
-            self.assertFalse(result["ordering"]["reconstructed_rows"]["position_permutation_stored"])
+            self.assertFalse(
+                result["ordering"]["reconstructed_rows"][
+                    "position_permutation_stored"
+                ]
+            )
             for logical in ("id", "vx", "vy", "vz"):
                 np.testing.assert_array_equal(captured[logical], source[logical][position_order])
 
@@ -241,6 +255,7 @@ class RecombineTests(unittest.TestCase):
                         values[order],
                     )
 
+class RecombinationTests(unittest.TestCase):
     def test_recombine_accepts_shared_lcp_position_order_without_sidecar(self) -> None:
         count = 5
         position_order = np.array([2, 0, 4, 1, 3], dtype=np.intp)
@@ -330,6 +345,7 @@ class RecombineTests(unittest.TestCase):
                 for logical, values in original.items():
                     np.testing.assert_array_equal(h5[logical][:], values[velocity_order])
 
+class SZoPipelineTests(unittest.TestCase):
     def test_cli_exposes_szo_only_as_a_lossy_compressor(self) -> None:
         argv = [
             "roundtrip",
@@ -345,9 +361,10 @@ class RecombineTests(unittest.TestCase):
         self.assertEqual(args.pos_compressor, "szo")
         self.assertEqual(args.vel_compressor, "szo")
         self.assertEqual(args.lossless, "pcodec")
+        self.assertIsInstance(args.rel_eb, float)
         self.assertIn("szo", AVAILABLE_COMPRESSORS["pos_compressor"])
         self.assertIn("szo", AVAILABLE_COMPRESSORS["vel_compressor"])
-        self.assertNotIn("szo", AVAILABLE_COMPRESSORS["lossless"])
+        self.assertEqual(AVAILABLE_COMPRESSORS["lossless"], ("pcodec",))
 
     def test_preprocess_assigns_szo_only_to_lossy_field_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -380,7 +397,7 @@ class RecombineTests(unittest.TestCase):
             artifacts = manifest["artifacts"]["compressed"]
 
             self.assertEqual(Path(artifacts["id"]).name, "id.pco")
-            for logical in hp.POSITION_FIELDS + hp.VELOCITY_FIELDS:
+            for logical in POSITION_FIELDS + VELOCITY_FIELDS:
                 self.assertEqual(Path(artifacts[logical]).suffix, ".szo")
             self.assertEqual(
                 manifest["compressors"],
@@ -416,10 +433,7 @@ class RecombineTests(unittest.TestCase):
             root = Path(temp_dir)
             for dtype_name in ("float32", "float64"):
                 with self.subTest(dtype=dtype_name), patch(
-                    "src.compress.hp.load_pyszo",
-                    return_value=(FakeSZo, FakeConfig, FakeErrorBoundMode, object),
-                ), patch(
-                    "src.decompress.hp.load_pyszo",
+                    "src.raw_codecs.load_pyszo",
                     return_value=(FakeSZo, FakeConfig, FakeErrorBoundMode, object),
                 ):
                     dtype = np.dtype(dtype_name)
@@ -428,7 +442,8 @@ class RecombineTests(unittest.TestCase):
                     compressed_path = root / f"{dtype_name}.szo"
                     output_path = root / f"{dtype_name}.out.raw"
                     source.tofile(raw_path)
-                    field = compress_szo_raw(
+                    field = compress_lossy_raw(
+                        "szo",
                         str(raw_path),
                         dtype_name,
                         str(compressed_path),
@@ -439,7 +454,7 @@ class RecombineTests(unittest.TestCase):
                     )
                     self.assertEqual(field["codec"], "szo")
                     self.assertEqual(field["abs_error_bound"], 0.01)
-                    decompress_szo_raw(field, str(output_path), False)
+                    decompress_lossy_raw(field, str(output_path), False)
                     np.testing.assert_array_equal(np.fromfile(output_path, dtype=dtype), source)
 
             integers = np.arange(4, dtype=np.int32)
@@ -456,6 +471,7 @@ class RecombineTests(unittest.TestCase):
                     False,
                 )
 
+class ChunkedLCPTests(unittest.TestCase):
     def test_cli_accepts_lcp_velocity_compressor(self) -> None:
         argv = [
             "roundtrip",
@@ -516,8 +532,8 @@ class RecombineTests(unittest.TestCase):
                 order.tofile(argv[-1])
 
             outputs = []
-            with patch("src.compress.hp.LCP_CHUNK_BATCH_VALUES", 6), patch(
-                "src.compress.hp.run_command", side_effect=fake_run_command
+            with patch("src.lcp_codec.LCP_CHUNK_BATCH_VALUES", 6), patch(
+                "src.lcp_codec.run_command", side_effect=fake_run_command
             ):
                 for workers in (1, 2):
                     run = root / f"workers-{workers}"
@@ -640,9 +656,9 @@ class RecombineTests(unittest.TestCase):
                     "bytes": len(payload),
                 }
 
-            with patch("src.compress.hp.run_command", side_effect=fake_run_command), patch(
+            with patch("src.lcp_codec.run_command", side_effect=fake_run_command), patch(
                 "src.compress.compress_integer_raw", side_effect=fake_integer
-            ), patch("src.compress.hp.update_compressed_size_metrics"):
+            ), patch("src.compress.update_compressed_size_metrics"):
                 result = compress_pipeline(
                     args,
                     manifest,
@@ -658,9 +674,20 @@ class RecombineTests(unittest.TestCase):
                 expected = source[logical][position_order]
                 np.testing.assert_array_equal(captured_velocity_chunks[0][axis], expected[:3])
                 np.testing.assert_array_equal(captured_velocity_chunks[1][axis], expected[3:])
-            self.assertEqual(result["compressed_fields"]["velocity_order"]["index_scope"], "chunk_local")
-            self.assertEqual(result["compressed_fields"]["velocity_order"]["order_bits_per_particle"], 2)
-            self.assertEqual(result["compressed_fields"]["velocities"]["container"], "chunked_lcp_v2")
+            velocity_order_field = result["compressed_fields"]["velocity_order"]
+            velocity_field = result["compressed_fields"]["velocities"]
+            self.assertEqual(
+                velocity_order_field["index_scope"],
+                "chunk_local",
+            )
+            self.assertEqual(
+                velocity_order_field["order_bits_per_particle"],
+                2,
+            )
+            self.assertEqual(
+                velocity_field["container"],
+                "chunked_lcp_v2",
+            )
             self.assertEqual(result["format_version"], 4)
 
     def test_chunk_local_velocity_order_recombines_each_particle_correspondence(self) -> None:
@@ -707,6 +734,7 @@ class RecombineTests(unittest.TestCase):
                 for logical, expected in canonical.items():
                     np.testing.assert_array_equal(h5[logical][:], expected)
 
+class CodecAndManifestTests(unittest.TestCase):
     def test_pcodec_bitpacks_int32_chunk_order_to_theoretical_width(self) -> None:
         count = 1 << 15
         order = np.random.default_rng(1234).permutation(count).astype(np.int32)
@@ -786,7 +814,7 @@ class RecombineTests(unittest.TestCase):
             velocity_compressor_from_manifest(
                 {
                     "compressed_fields": {
-                        logical: {"codec": "szo"} for logical in hp.VELOCITY_FIELDS
+                        logical: {"codec": "szo"} for logical in VELOCITY_FIELDS
                     }
                 }
             ),
@@ -796,7 +824,7 @@ class RecombineTests(unittest.TestCase):
             position_compressor_from_manifest(
                 {
                     "compressed_fields": {
-                        logical: {"codec": "szo"} for logical in hp.POSITION_FIELDS
+                        logical: {"codec": "szo"} for logical in POSITION_FIELDS
                     }
                 }
             ),
