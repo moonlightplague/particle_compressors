@@ -14,10 +14,8 @@ advanced:
   # 0 selects up to 16 workers automatically for chunked velocity LCP.
   vel_chunk_workers: 0
   id_abs_eb: 0.0
-  # SZO reconstructs integer streams exactly when its absolute bound is below 1.
-  szo_abs_eb: 0.5
   pos_compressor: lcp
-  vel_compressor: sz3
+  vel_compressor: szo
   lossless: pcodec
 
   # Integer position conversion used before LCP compression.

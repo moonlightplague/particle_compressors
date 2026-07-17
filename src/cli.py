@@ -18,18 +18,17 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "vel_chunk_size": 0,
     "vel_chunk_workers": 0,
     "id_abs_eb": 0.0,
-    "szo_abs_eb": 0.5,
     "position_scale": "auto",
     "position_scale_attr": "bitwidth",
     "position_scale_value": None,
     "pos_compressor": "lcp",
     "vel_compressor": "sz3",
-    "lossless": "szo",
+    "lossless": "pcodec",
 }
 AVAILABLE_COMPRESSORS: Dict[str, List[str]] = {
-    "pos_compressor": ["lcp", "sz3"],
-    "vel_compressor": ["sz3", "lcp"],
-    "lossless": ["pcodec", "szo", "zstd"]
+    "pos_compressor": ["lcp", "sz3", "szo"],
+    "vel_compressor": ["sz3", "szo", "lcp"],
+    "lossless": ["pcodec", "zstd"],
 }
 
 
@@ -54,9 +53,6 @@ def _validated_advanced_config(config: Mapping[str, Any], config_path: Path) -> 
     defaults["id_abs_eb"] = _number_or_none(defaults["id_abs_eb"], "id_abs_eb")
     if defaults["id_abs_eb"] is None:
         raise RuntimeError("config value advanced.id_abs_eb cannot be null.")
-    defaults["szo_abs_eb"] = _number_or_none(defaults["szo_abs_eb"], "szo_abs_eb")
-    if defaults["szo_abs_eb"] is None or not 0.0 <= defaults["szo_abs_eb"] < 1.0:
-        raise RuntimeError("config value advanced.szo_abs_eb must be at least 0 and less than 1.")
     if isinstance(defaults["vel_chunk_size"], bool) or not isinstance(
         defaults["vel_chunk_size"], int
     ):
@@ -191,12 +187,6 @@ def add_compression_args(parser: argparse.ArgumentParser, defaults: Mapping[str,
         default=defaults["id_abs_eb"],
         help="Expected ID absolute error for metrics; ID reconstruction is exact.",
     )
-    parser.add_argument(
-        "--szo-abs-eb",
-        type=float,
-        default=defaults["szo_abs_eb"],
-        help="Absolute error bound below 1 used to reconstruct integer SZO streams exactly.",
-    )
     parser.add_argument("--limit", type=int, help="Use only the first N particles for a smoke test.")
     parser.add_argument(
         "--position-scale",
@@ -218,7 +208,8 @@ def add_compression_args(parser: argparse.ArgumentParser, defaults: Mapping[str,
     parser.add_argument(
         "--pos-compressor",
         choices=AVAILABLE_COMPRESSORS["pos_compressor"],
-        default=defaults["pos_compressor"]
+        default=defaults["pos_compressor"],
+        help="Position triplet compressor (default: %(default)s).",
     )
     parser.add_argument(
         "--vel-compressor",

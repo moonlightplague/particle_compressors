@@ -27,7 +27,7 @@ of each dataset path.
 
 ## Requirements
 
-- Python with development headers; Python 3.13 is known to work
+- Python with development headers; Python 3.13 is known to work. Conda environment is recommended.
 - A C++17 compiler, CMake, and Make for LCP
 - Rust and Cargo for the local pcodec Python extension
 - Git submodules initialized for `tools/LCP`, `tools/SZo`, and `tools/pcodec`
@@ -38,6 +38,12 @@ Clone or initialize the native-code submodules:
 
 ```bash
 git submodule update --init --recursive
+```
+
+Setup conda env:
+```bash
+conda create -n compressor python=3.13
+conda activate compressor
 ```
 
 From the repository root, the included installation script builds LCP and
@@ -78,7 +84,7 @@ older part-based format are not accepted by this format.
 
 LCP sorts its input triplet before encoding it. In either asymmetric pipeline,
 the pipeline adopts the LCP-sorted order as the reconstructed particle order
-and applies the same temporary permutation to the ID and SZ3-compressed
+and applies the same temporary permutation to the ID and fieldwise-compressed
 triplet. Consequently no order sidecar is stored, while every reconstructed row
 still contains the corresponding ID, position, and velocity. When both
 triplets use LCP, position order is canonical and the independently sorted
@@ -120,29 +126,30 @@ temporary disk and memory pressure, or to a specific positive value to cap CPU
 parallelism. Segment results are written to the container in particle order, so
 the compressed archive is deterministic across worker counts.
 
-## Integer Compression
+## SZO Lossy Compression
 
-The default `--lossless pcodec` path is unchanged. Select SZO for IDs and the
-optional permutation sidecar used by the all-LCP configuration with:
+SZO is available as a lossy alternative to SZ3 for either positions,
+velocities, or both:
 
 ```bash
 python main.py roundtrip data/sample.h5 \
   --work-dir particle_pipeline_runs_szo \
-  --lossless szo \
-  --szo-abs-eb 0.5 \
+  --pos-compressor szo \
+  --vel-compressor szo \
+  --lossless pcodec \
+  --rel-eb 1e-3 \
   --force
 ```
 
-SZO is error-bounded rather than inherently lossless. The pipeline only accepts
-an SZO absolute bound in the interval `[0, 1)`, where integer reconstruction
-must be exact. SZO packages use `id.szo` and, when both triplets use LCP,
-`velocity_order.szo`. Each stream stores a SHA-256 of the original
-integer bytes; decompression fails before recombination if the reconstructed
-bytes differ. Narrow and unsigned integer IDs are reversibly mapped to SZO's
-supported `int32`/`int64` types. Integer mode uses SZO's Lorenzo/regression
-algorithm; the default interpolation encoder is not used because its RLE/FSE
-path is unstable on large, high-entropy permutation streams.
+The same `--pos-abs-eb`, `--pos-rel-eb`, `--vel-abs-eb`, and `--vel-rel-eb`
+selection rules used by SZ3 apply to SZO. SZO field streams use the `.szo`
+extension. IDs and the optional all-LCP permutation sidecar remain lossless
+pcodec streams.
 
+## Integer Compression
+
+IDs are reconstructed exactly with pcodec. When both triplets use LCP, pcodec
+also compresses the velocity permutation sidecar.
 
 ## Error Bounds
 
@@ -153,5 +160,5 @@ field-class-specific value takes precedence over the global `--abs-eb` or
 `--rel-eb`. LCP accepts one bound for the velocity triplet, so the strictest
 derived `vx`/`vy`/`vz` bound is used. Do not set both absolute and relative
 bounds for the same field class. IDs are always reconstructed exactly with
-either pcodec or the checked SZO integer mode. `id_abs_eb` only defines the
-expected ID error used by metrics and defaults to zero.
+pcodec. `id_abs_eb` only defines the expected ID error used by metrics and
+defaults to zero.

@@ -6,7 +6,6 @@ import sys
 import math
 import ctypes
 import importlib.util
-import hashlib
 import struct
 import os
 import h5py
@@ -151,43 +150,6 @@ def read_raw(path: str, dtype: np.dtype, count: int) -> np.ndarray:
     if data.size != count:
         raise RuntimeError(f"Unexpected EOF reading {path}; expected {count}, got {data.size}.")
     return data
-
-
-def encode_integers_for_szo(values: np.ndarray) -> Tuple[np.ndarray, str]:
-    source_dtype = np.dtype(values.dtype)
-    if source_dtype.kind not in ("i", "u"):
-        raise RuntimeError(f"SZO lossless encoding requires an integer dtype, got {source_dtype}.")
-
-    if source_dtype.kind == "u" and source_dtype.itemsize in (4, 8):
-        unsigned_dtype = np.dtype(f"uint{source_dtype.itemsize * 8}")
-        signed_dtype = np.dtype(f"int{source_dtype.itemsize * 8}")
-        native = np.ascontiguousarray(values.astype(unsigned_dtype, copy=False))
-        return native.view(signed_dtype), "reinterpret_unsigned"
-
-    encoded_dtype = np.dtype("int32") if source_dtype.itemsize <= 4 else np.dtype("int64")
-    return np.ascontiguousarray(values, dtype=encoded_dtype), "cast"
-
-
-def decode_integers_from_szo(
-    values: np.ndarray,
-    source_dtype: np.dtype,
-    transform: str,
-) -> np.ndarray:
-    source_dtype = np.dtype(source_dtype)
-    values = np.ascontiguousarray(values)
-    if transform == "reinterpret_unsigned":
-        unsigned_dtype = np.dtype(f"uint{source_dtype.itemsize * 8}")
-        decoded = values.view(unsigned_dtype)
-    elif transform == "cast":
-        decoded = values
-    else:
-        raise RuntimeError(f"Unsupported SZO integer transform: {transform!r}.")
-    return np.ascontiguousarray(decoded, dtype=source_dtype)
-
-
-def integer_stream_sha256(values: np.ndarray) -> str:
-    contiguous = np.ascontiguousarray(values)
-    return hashlib.sha256(contiguous.view(np.uint8)).hexdigest()
 
 
 def compressed_sizes(work_dir: Path) -> Dict[str, int]:

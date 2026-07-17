@@ -384,8 +384,6 @@ def make_manifest(
 
 def preprocess(args: argparse.Namespace):
     preprocess_start = time.perf_counter()
-    if args.lossless == "szo" and not 0.0 <= float(args.szo_abs_eb) < 1.0:
-        raise RuntimeError("--szo-abs-eb must be at least 0 and less than 1.")
     velocity_chunk_size = int(getattr(args, "vel_chunk_size", 0))
     if velocity_chunk_size < 0:
         raise RuntimeError("--vel-chunk-size must be non-negative.")
@@ -573,37 +571,36 @@ def preprocess(args: argparse.Namespace):
         }
         if args.vel_compressor == "lcp":
             manifest["error_bounds"]["velocities_lcp_abs"] = vel_eb
-        if args.lossless == "szo":
-            manifest["error_bounds"]["szo_integer_abs"] = float(args.szo_abs_eb)
 
         selected_payload_bytes = sum(
             int(np.dtype(h5[fields[logical]].dtype).itemsize * count) for logical in hp.LOGICAL_ORDER
         )
 
-    lossless_extension = "szo" if args.lossless == "szo" else "pco"
-    compressed_artifacts = {"id": str(cmp_dir / f"id.{lossless_extension}")}
+    compressed_artifacts = {"id": str(cmp_dir / "id.pco")}
     if args.pos_compressor == "lcp":
         compressed_artifacts["positions"] = str(cmp_dir / "positions.lcp")
     else:
+        position_extension = "szo" if args.pos_compressor == "szo" else "psz"
         compressed_artifacts.update(
             {
-                "x": str(cmp_dir / "x.psz"),
-                "y": str(cmp_dir / "y.psz"),
-                "z": str(cmp_dir / "z.psz"),
+                "x": str(cmp_dir / f"x.{position_extension}"),
+                "y": str(cmp_dir / f"y.{position_extension}"),
+                "z": str(cmp_dir / f"z.{position_extension}"),
             }
         )
     if args.vel_compressor == "lcp":
         compressed_artifacts["velocities"] = str(cmp_dir / "velocities.lcp")
         if args.pos_compressor == "lcp":
             compressed_artifacts["velocity_order"] = str(
-                cmp_dir / f"velocity_order.{lossless_extension}"
+                cmp_dir / "velocity_order.pco"
             )
     else:
+        velocity_extension = "szo" if args.vel_compressor == "szo" else "psz"
         compressed_artifacts.update(
             {
-                "vx": str(cmp_dir / "vx.psz"),
-                "vy": str(cmp_dir / "vy.psz"),
-                "vz": str(cmp_dir / "vz.psz"),
+                "vx": str(cmp_dir / f"vx.{velocity_extension}"),
+                "vy": str(cmp_dir / f"vy.{velocity_extension}"),
+                "vz": str(cmp_dir / f"vz.{velocity_extension}"),
             }
         )
     manifest["artifacts"] = {

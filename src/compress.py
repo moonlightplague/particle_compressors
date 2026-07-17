@@ -46,17 +46,18 @@ def compress_szo_raw(
     abs_error_bound: float,
     force: bool,
 ) -> Dict[str, Any]:
-    if not 0.0 <= abs_error_bound < 1.0:
-        raise RuntimeError("SZO integer absolute error bound must be at least 0 and less than 1.")
     output = Path(compressed_path)
     hp.require_output_path(output, force)
-    SZo, SZoConfig, SZoErrorBoundMode, SZoAlgorithm = hp.load_pyszo()
-    source_dtype = np.dtype(dtype)
-    source = np.ascontiguousarray(hp.read_raw(raw_path, source_dtype, count))
-    encoded, transform = hp.encode_integers_for_szo(source)
+    dt = np.dtype(dtype)
+    if dt not in (np.dtype("float32"), np.dtype("float64")):
+        raise RuntimeError(
+            f"SZO compression expected float32/float64, got {dt} for {field_name}."
+        )
+    SZo, SZoConfig, SZoErrorBoundMode, _ = hp.load_pyszo()
+    encoded = np.ascontiguousarray(hp.read_raw(raw_path, dt, count))
     encoded_count = max(count, hp.SZO_MIN_VALUES)
     if encoded_count != count:
-        padded = np.empty(encoded_count, dtype=encoded.dtype)
+        padded = np.empty(encoded_count, dtype=dt)
         padded[:count] = encoded
         padded[count:] = encoded[-1] if count else 0
         encoded = padded
@@ -64,8 +65,6 @@ def compress_szo_raw(
     config = SZoConfig((encoded_count,))
     config.errorBoundMode = SZoErrorBoundMode.ABS
     config.absErrorBound = float(abs_error_bound)
-    # Interpolation's RLE/FSE encoder crashes on large, high-entropy permutations.
-    config.cmprAlgo = SZoAlgorithm.LORENZO_REG
     try:
         compressed, _ = SZo.compress(encoded, config, copy=True)
     except Exception as exc:
@@ -76,14 +75,10 @@ def compress_szo_raw(
     return {
         "field": field_name,
         "codec": "szo",
-        "dtype": str(source_dtype),
-        "encoded_dtype": str(encoded.dtype),
-        "integer_transform": transform,
+        "dtype": str(dt),
         "abs_error_bound": float(abs_error_bound),
-        "algorithm": "lorenzo_reg",
         "count": count,
         "encoded_count": encoded_count,
-        "sha256": hp.integer_stream_sha256(source),
         "path": str(output),
         "bytes": int(compressed.size),
     }
@@ -96,19 +91,8 @@ def compress_integer_raw(
     compressed_path: str,
     field_name: str,
     count: int,
-    szo_abs_error_bound: float,
     force: bool,
 ) -> Dict[str, Any]:
-    if codec == "szo":
-        return compress_szo_raw(
-            raw_path,
-            dtype,
-            compressed_path,
-            field_name,
-            count,
-            szo_abs_error_bound,
-            force,
-        )
     return compress_pcodec_raw(raw_path, dtype, compressed_path, field_name, count, force)
 
 def pysz_encoded_values(values: np.ndarray) -> Tuple[np.ndarray, int]:
@@ -161,6 +145,39 @@ def compress_pysz_raw(
         "path": str(output),
         "bytes": compressed_bytes,
     }
+
+
+def compress_lossy_raw(
+    codec: str,
+    raw_path: str,
+    dtype: str,
+    compressed_path: str,
+    field_name: str,
+    count: int,
+    abs_error_bound: float,
+    force: bool,
+) -> Dict[str, Any]:
+    if codec == "szo":
+        return compress_szo_raw(
+            raw_path,
+            dtype,
+            compressed_path,
+            field_name,
+            count,
+            abs_error_bound,
+            force,
+        )
+    if codec == "sz3":
+        return compress_pysz_raw(
+            raw_path,
+            dtype,
+            compressed_path,
+            field_name,
+            count,
+            abs_error_bound,
+            force,
+        )
+    raise RuntimeError(f"Unsupported lossy compressor: {codec}.")
 
 
 def read_lcp_permutation(order_path: str, count: int) -> np.ndarray:
@@ -513,7 +530,6 @@ def compress(args: argparse.Namespace,
         artifacts["id"],
         "id",
         count,
-        args.szo_abs_eb,
         args.force,
     )
 
@@ -532,7 +548,8 @@ def compress(args: argparse.Namespace,
                     args.force,
                 )
                 raw_paths[f"{logical}_canonical_ordered"] = position_path
-            manifest["compressed_fields"][logical] = compress_pysz_raw(
+            manifest["compressed_fields"][logical] = compress_lossy_raw(
+                position_compressor,
                 position_path,
                 "float32",
                 artifacts[logical],
@@ -598,7 +615,6 @@ def compress(args: argparse.Namespace,
                 artifacts["velocity_order"],
                 "velocity_order",
                 count,
-                args.szo_abs_eb,
                 args.force,
             )
             if velocity_chunking is not None:
@@ -679,7 +695,8 @@ def compress(args: argparse.Namespace,
                     args.force,
                 )
                 raw_paths[f"{logical}_canonical_ordered"] = velocity_path
-            manifest["compressed_fields"][logical] = compress_pysz_raw(
+            manifest["compressed_fields"][logical] = compress_lossy_raw(
+                velocity_compressor,
                 velocity_path,
                 dtype,
                 artifacts[logical],

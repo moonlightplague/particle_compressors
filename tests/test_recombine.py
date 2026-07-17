@@ -22,6 +22,7 @@ from src.decompress import (
     recombine_h5,
     velocity_compressor_from_manifest,
 )
+from src.preprocess import preprocess as preprocess_pipeline
 
 
 FIELDS = {
@@ -89,7 +90,6 @@ class RecombineTests(unittest.TestCase):
                 lossless="pcodec",
                 pos_compressor="sz3",
                 vel_compressor="lcp",
-                szo_abs_eb=0.5,
             )
             captured = {}
 
@@ -180,7 +180,6 @@ class RecombineTests(unittest.TestCase):
                 force=False,
                 lossless="pcodec",
                 vel_compressor="sz3",
-                szo_abs_eb=0.5,
             )
             captured = {}
 
@@ -331,30 +330,100 @@ class RecombineTests(unittest.TestCase):
                 for logical, values in original.items():
                     np.testing.assert_array_equal(h5[logical][:], values[velocity_order])
 
-    def test_cli_accepts_szo_lossless_compressor(self) -> None:
-        argv = ["roundtrip", "input.h5", "--lossless", "szo", "--szo-abs-eb", "0.5"]
+    def test_cli_exposes_szo_only_as_a_lossy_compressor(self) -> None:
+        argv = [
+            "roundtrip",
+            "input.h5",
+            "--pos-compressor",
+            "szo",
+            "--vel-compressor",
+            "szo",
+            "--lossless",
+            "pcodec",
+        ]
         args = build_parser(argv).parse_args(argv)
-        self.assertEqual(args.lossless, "szo")
-        self.assertEqual(args.szo_abs_eb, 0.5)
+        self.assertEqual(args.pos_compressor, "szo")
+        self.assertEqual(args.vel_compressor, "szo")
+        self.assertEqual(args.lossless, "pcodec")
+        self.assertIn("szo", AVAILABLE_COMPRESSORS["pos_compressor"])
+        self.assertIn("szo", AVAILABLE_COMPRESSORS["vel_compressor"])
+        self.assertNotIn("szo", AVAILABLE_COMPRESSORS["lossless"])
 
-    def test_szo_roundtrips_integer_dtypes_and_checks_integrity(self) -> None:
-        cases = {
-            "int8": [-128, -1, 0, 127],
-            "uint8": [0, 1, 255],
-            "int16": [-32768, -1, 0, 32767],
-            "uint16": [0, 1, 65535],
-            "int32": [-(2**31), -1, 0, 2**31 - 1],
-            "uint32": [0, 1, 2**31, 2**32 - 1],
-            "int64": [-(2**63), -1, 0, 2**63 - 1],
-            "uint64": [0, 1, 2**63, 2**64 - 1],
-        }
+    def test_preprocess_assigns_szo_only_to_lossy_field_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            fields = {}
-            for dtype_name, values in cases.items():
-                with self.subTest(dtype=dtype_name):
+            input_h5 = root / "input.h5"
+            work_dir = root / "work"
+            with h5py.File(input_h5, "w") as h5:
+                h5.create_dataset("id", data=np.arange(16, dtype=np.uint64))
+                for offset, logical in enumerate(("x", "y", "z", "vx", "vy", "vz")):
+                    h5.create_dataset(
+                        logical,
+                        data=np.arange(16, dtype=np.float32) + offset,
+                    )
+
+            argv = [
+                "preprocess",
+                str(input_h5),
+                "--work-dir",
+                str(work_dir),
+                "--pos-compressor",
+                "szo",
+                "--vel-compressor",
+                "szo",
+                "--lossless",
+                "pcodec",
+                "--force",
+            ]
+            args = build_parser(argv).parse_args(argv)
+            manifest, _, _ = preprocess_pipeline(args)
+            artifacts = manifest["artifacts"]["compressed"]
+
+            self.assertEqual(Path(artifacts["id"]).name, "id.pco")
+            for logical in hp.POSITION_FIELDS + hp.VELOCITY_FIELDS:
+                self.assertEqual(Path(artifacts[logical]).suffix, ".szo")
+            self.assertEqual(
+                manifest["compressors"],
+                {"positions": "szo", "velocities": "szo", "lossless": "pcodec"},
+            )
+
+    def test_szo_roundtrips_lossy_float_fields(self) -> None:
+        class FakeConfig:
+            def __init__(self, shape):
+                self.shape = shape
+                self.errorBoundMode = None
+                self.absErrorBound = None
+
+        class FakeErrorBoundMode:
+            ABS = "abs"
+
+        test_case = self
+
+        class FakeSZo:
+            @staticmethod
+            def compress(data, config, copy):
+                test_case.assertTrue(copy)
+                test_case.assertEqual(config.errorBoundMode, FakeErrorBoundMode.ABS)
+                payload = np.ascontiguousarray(data).view(np.uint8)
+                return payload, data.nbytes / payload.size
+
+            @staticmethod
+            def decompress(compressed, dtype, shape):
+                data = np.frombuffer(compressed.tobytes(), dtype=dtype).copy()
+                return data.reshape(shape), FakeConfig(shape)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for dtype_name in ("float32", "float64"):
+                with self.subTest(dtype=dtype_name), patch(
+                    "src.compress.hp.load_pyszo",
+                    return_value=(FakeSZo, FakeConfig, FakeErrorBoundMode, object),
+                ), patch(
+                    "src.decompress.hp.load_pyszo",
+                    return_value=(FakeSZo, FakeConfig, FakeErrorBoundMode, object),
+                ):
                     dtype = np.dtype(dtype_name)
-                    source = np.array(values, dtype=dtype)
+                    source = np.array([0.125, -3.5, 9.75, 1.0], dtype=dtype)
                     raw_path = root / f"{dtype_name}.raw"
                     compressed_path = root / f"{dtype_name}.szo"
                     output_path = root / f"{dtype_name}.out.raw"
@@ -365,17 +434,27 @@ class RecombineTests(unittest.TestCase):
                         str(compressed_path),
                         dtype_name,
                         source.size,
-                        0.5,
+                        0.01,
                         False,
                     )
-                    self.assertEqual(field["algorithm"], "lorenzo_reg")
+                    self.assertEqual(field["codec"], "szo")
+                    self.assertEqual(field["abs_error_bound"], 0.01)
                     decompress_szo_raw(field, str(output_path), False)
                     np.testing.assert_array_equal(np.fromfile(output_path, dtype=dtype), source)
-                    fields[dtype_name] = field
 
-            corrupted_metadata = dict(fields["uint64"], sha256="0" * 64)
-            with self.assertRaisesRegex(RuntimeError, "integrity check failed"):
-                decompress_szo_raw(corrupted_metadata, str(root / "corrupt.raw"), False)
+            integers = np.arange(4, dtype=np.int32)
+            integer_path = root / "integer.raw"
+            integers.tofile(integer_path)
+            with self.assertRaisesRegex(RuntimeError, "expected float32/float64"):
+                compress_szo_raw(
+                    str(integer_path),
+                    "int32",
+                    str(root / "integer.szo"),
+                    "id",
+                    integers.size,
+                    0.01,
+                    False,
+                )
 
     def test_cli_accepts_lcp_velocity_compressor(self) -> None:
         argv = [
@@ -525,7 +604,6 @@ class RecombineTests(unittest.TestCase):
                 vel_compressor="lcp",
                 vel_chunk_size=3,
                 vel_chunk_workers=1,
-                szo_abs_eb=0.5,
             )
             captured_integer = {}
             captured_velocity_chunks = []
@@ -703,6 +781,26 @@ class RecombineTests(unittest.TestCase):
         self.assertEqual(
             position_compressor_from_manifest({"compressors": {"positions": "sz3"}}),
             "sz3",
+        )
+        self.assertEqual(
+            velocity_compressor_from_manifest(
+                {
+                    "compressed_fields": {
+                        logical: {"codec": "szo"} for logical in hp.VELOCITY_FIELDS
+                    }
+                }
+            ),
+            "szo",
+        )
+        self.assertEqual(
+            position_compressor_from_manifest(
+                {
+                    "compressed_fields": {
+                        logical: {"codec": "szo"} for logical in hp.POSITION_FIELDS
+                    }
+                }
+            ),
+            "szo",
         )
         self.assertEqual(
             position_compressor_from_manifest(

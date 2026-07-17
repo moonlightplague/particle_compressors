@@ -43,36 +43,28 @@ def decompress_szo_raw(
     out_path: str,
     force: bool,
 ) -> None:
+    dt = np.dtype(field["dtype"])
+    if dt not in (np.dtype("float32"), np.dtype("float64")):
+        raise RuntimeError(
+            f"SZO decompression expected float32/float64, got {dt} for {field['field']}."
+        )
     SZo, _, _, _ = hp.load_pyszo()
-    source_dtype = np.dtype(field["dtype"])
-    encoded_dtype = np.dtype(field["encoded_dtype"])
     count = int(field["count"])
     encoded_count = int(field.get("encoded_count", count))
     compressed = np.fromfile(field["path"], dtype=np.uint8)
     try:
-        encoded, _ = SZo.decompress(compressed, encoded_dtype, (encoded_count,))
+        data, _ = SZo.decompress(compressed, dt, (encoded_count,))
     except Exception as exc:
         raise RuntimeError(f"SZO decompression failed for {field['field']}.") from exc
-    encoded = np.asarray(encoded, dtype=encoded_dtype).reshape(-1)
-    if encoded.size < count:
+    data = np.asarray(data, dtype=dt).reshape(-1)
+    if data.size < count:
         raise RuntimeError(
-            f"SZO decompression for {field['field']} returned {encoded.size} values, "
+            f"SZO decompression for {field['field']} returned {data.size} values, "
             f"expected at least {count}."
-        )
-    data = hp.decode_integers_from_szo(
-        encoded[:count],
-        source_dtype,
-        str(field["integer_transform"]),
-    )
-    expected_sha256 = field.get("sha256")
-    actual_sha256 = hp.integer_stream_sha256(data)
-    if expected_sha256 and actual_sha256 != expected_sha256:
-        raise RuntimeError(
-            f"SZO integrity check failed for {field['field']}: integer data was not reconstructed exactly."
         )
     out = Path(out_path)
     hp.require_output_path(out, force)
-    data.tofile(out)
+    data[:count].tofile(out)
 
 
 def decompress_integer_raw(
@@ -80,10 +72,7 @@ def decompress_integer_raw(
     out_path: str,
     force: bool,
 ) -> None:
-    if field.get("codec") == "szo":
-        decompress_szo_raw(field, out_path, force)
-    else:
-        decompress_pcodec_raw(field, out_path, force)
+    decompress_pcodec_raw(field, out_path, force)
 
 
 def decompress_pysz_raw(
@@ -108,6 +97,21 @@ def decompress_pysz_raw(
             f"pysz decompression for {field['field']} returned {data.size} values, expected at least {count}."
         )
     data[:count].tofile(out)
+
+
+def decompress_lossy_raw(
+    field: Mapping[str, Any],
+    out_path: str,
+    force: bool,
+) -> None:
+    codec = field.get("codec")
+    if codec == "szo":
+        decompress_szo_raw(field, out_path, force)
+        return
+    if codec == "pysz":
+        decompress_pysz_raw(field, out_path, force)
+        return
+    raise RuntimeError(f"Unsupported lossy codec for {field.get('field', 'field')}: {codec}.")
 
 
 def restore_attr(payload: Mapping[str, Any]) -> Any:
@@ -139,6 +143,11 @@ def velocity_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
         return str(configured)
     if manifest.get("compressed_fields", {}).get("velocities", {}).get("codec") == "lcp":
         return "lcp"
+    if all(
+        manifest.get("compressed_fields", {}).get(logical, {}).get("codec") == "szo"
+        for logical in hp.VELOCITY_FIELDS
+    ):
+        return "szo"
     return "sz3"
 
 
@@ -150,6 +159,11 @@ def position_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
         for logical in hp.POSITION_FIELDS
     ):
         return "sz3"
+    if all(
+        manifest.get("compressed_fields", {}).get(logical, {}).get("codec") == "szo"
+        for logical in hp.POSITION_FIELDS
+    ):
+        return "szo"
     if "positions" in manifest.get("artifacts", {}).get("compressed", {}):
         return "lcp"
     configured = manifest.get("compressors", {}).get("positions")
@@ -475,7 +489,7 @@ def decompress(args: argparse.Namespace,
         )
     else:
         for logical in hp.POSITION_FIELDS:
-            decompress_pysz_raw(
+            decompress_lossy_raw(
                 fields[logical], dec_paths[logical], args.force
             )
 
@@ -520,7 +534,7 @@ def decompress(args: argparse.Namespace,
             )
     else:
         for logical in hp.VELOCITY_FIELDS:
-            decompress_pysz_raw(
+            decompress_lossy_raw(
                 fields[logical], dec_paths[logical], args.force
             )
 
