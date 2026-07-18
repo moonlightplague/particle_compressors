@@ -596,6 +596,9 @@ class SZoPipelineTests(unittest.TestCase):
         class FakeErrorBoundMode:
             ABS = "abs"
 
+        class FakeAlgorithm:
+            LORENZO_REG = "lorenzo_reg"
+
         test_case = self
 
         class FakeSZo:
@@ -603,6 +606,7 @@ class SZoPipelineTests(unittest.TestCase):
             def compress(data, config, copy):
                 test_case.assertTrue(copy)
                 test_case.assertEqual(config.errorBoundMode, FakeErrorBoundMode.ABS)
+                test_case.assertEqual(config.cmprAlgo, FakeAlgorithm.LORENZO_REG)
                 payload = np.ascontiguousarray(data).view(np.uint8)
                 return payload, data.nbytes / payload.size
 
@@ -616,7 +620,7 @@ class SZoPipelineTests(unittest.TestCase):
             for dtype_name in ("float32", "float64"):
                 with self.subTest(dtype=dtype_name), patch(
                     "src.raw_codecs.load_pyszo",
-                    return_value=(FakeSZo, FakeConfig, FakeErrorBoundMode, object),
+                    return_value=(FakeSZo, FakeConfig, FakeErrorBoundMode, FakeAlgorithm),
                 ):
                     dtype = np.dtype(dtype_name)
                     source = np.array([0.125, -3.5, 9.75, 1.0], dtype=dtype)

@@ -77,13 +77,14 @@ def compress_szo_raw(
     data_type = _require_float_dtype(dtype, field_name, "SZO compression")
     output = Path(compressed_path)
     require_output_path(output, force)
-    szo, config_type, error_bound_mode, _ = load_pyszo()
+    szo, config_type, error_bound_mode, algorithm = load_pyszo()
 
     values = read_raw(raw_path, data_type, count)
     encoded, encoded_count = pad_codec_input(values)
     config = config_type((encoded_count,))
     config.errorBoundMode = error_bound_mode.ABS
     config.absErrorBound = float(abs_error_bound)
+    config.cmprAlgo = algorithm.LORENZO_REG
     try:
         compressed, _ = szo.compress(encoded, config, copy=True)
     except Exception as exc:
