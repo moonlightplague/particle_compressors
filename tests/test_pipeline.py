@@ -1,3 +1,5 @@
+from contextlib import redirect_stdout
+from io import StringIO
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +11,7 @@ import numpy as np
 
 from src.cli import AVAILABLE_COMPRESSORS, build_parser
 from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
+from src.compress import CompressionSettings
 from src.compress import compress as compress_pipeline
 from src.compress import (
     compress_chunked_lcp_triplet,
@@ -25,6 +28,10 @@ from src.decompress import (
     position_compressor_from_manifest,
     recombine_h5,
     velocity_compressor_from_manifest,
+)
+from src.metrics import (
+    comparison_order_for_reconstructed_rows,
+    print_component_summary,
 )
 from src.preprocess import preprocess as preprocess_pipeline
 
@@ -255,6 +262,165 @@ class CompressionOrderingTests(unittest.TestCase):
                         values[order],
                     )
 
+    def test_id_sort_reorders_every_field_before_fieldwise_compression(self) -> None:
+        count = 5
+        source = {
+            "id": np.array([30, 10, 30, 20, 10], dtype=np.uint64),
+            "x": np.array([10, 20, 30, 40, 50], dtype=np.float32),
+            "y": np.array([11, 21, 31, 41, 51], dtype=np.float32),
+            "z": np.array([12, 22, 32, 42, 52], dtype=np.float32),
+            "vx": np.array([1, 2, 3, 4, 5], dtype=np.float32),
+            "vy": np.array([6, 7, 8, 9, 10], dtype=np.float32),
+            "vz": np.array([11, 12, 13, 14, 15], dtype=np.float32),
+        }
+        expected_order = np.array([1, 4, 3, 0, 2], dtype=np.intp)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            preprocessed = root / "preprocessed"
+            compressed = root / "compressed"
+            preprocessed.mkdir()
+            compressed.mkdir()
+            raw_paths = {}
+            for logical, values in source.items():
+                path = preprocessed / f"{logical}.raw"
+                values.tofile(path)
+                raw_paths[logical] = str(path)
+
+            artifacts = {
+                "id": str(compressed / "id.pco"),
+                **{
+                    logical: str(
+                        compressed
+                        / f"{logical}.{'psz' if logical in POSITION_FIELDS else 'szo'}"
+                    )
+                    for logical in POSITION_FIELDS + VELOCITY_FIELDS
+                },
+            }
+            manifest = {
+                "count": count,
+                "fields": {
+                    logical: {"dtype": str(values.dtype)}
+                    for logical, values in source.items()
+                },
+                "field_error_bounds": {
+                    logical: {"abs": 0.01, "compressor_abs": 0.01}
+                    for logical in POSITION_FIELDS + VELOCITY_FIELDS
+                },
+                "artifacts": {
+                    "preprocessed": raw_paths,
+                    "compressed": artifacts,
+                },
+                "compressed_fields": {},
+                "sizes": {"selected_original_payload_bytes": 160},
+            }
+            args = SimpleNamespace(
+                work_dir=str(root),
+                force=False,
+                lossless="pcodec",
+                pos_compressor="sz3",
+                vel_compressor="szo",
+                vel_chunk_size=0,
+                vel_chunk_workers=0,
+                sort=True,
+            )
+            captured = {}
+
+            def fake_compress(
+                codec,
+                raw_path,
+                dtype,
+                compressed_path,
+                field_name,
+                *unused,
+            ):
+                captured[field_name] = np.fromfile(
+                    raw_path,
+                    dtype=np.dtype(dtype),
+                )
+                Path(compressed_path).write_bytes(field_name.encode())
+                return {
+                    "field": field_name,
+                    "codec": codec,
+                    "dtype": dtype,
+                    "count": count,
+                }
+
+            with patch(
+                "src.compress.compress_integer_raw",
+                side_effect=fake_compress,
+            ), patch(
+                "src.compress.compress_lossy_raw",
+                side_effect=fake_compress,
+            ), patch("src.compress.update_compressed_size_metrics"):
+                result = compress_pipeline(
+                    args,
+                    manifest,
+                    raw_paths,
+                    SimpleNamespace(lcp=Path("lcp")),
+                )
+
+            for logical, values in source.items():
+                np.testing.assert_array_equal(
+                    captured[logical],
+                    values[expected_order],
+                )
+            np.testing.assert_array_equal(
+                np.fromfile(
+                    raw_paths["id_sort_order"],
+                    dtype=np.int64,
+                ),
+                expected_order,
+            )
+            self.assertEqual(
+                result["ordering"]["reconstructed_rows"]["mapping"],
+                "id_sorted",
+            )
+            self.assertFalse(
+                result["ordering"]["reconstructed_rows"][
+                    "original_row_order_restored"
+                ]
+            )
+            self.assertEqual(
+                result["ordering"]["reconstructed_rows"][
+                    "temporary_permutation_dtype"
+                ],
+                "int64",
+            )
+            self.assertEqual(
+                result["particle_sort"],
+                {
+                    "requested": True,
+                    "enabled": True,
+                    "key": "id",
+                    "direction": "ascending",
+                    "stable": True,
+                },
+            )
+
+    def test_id_sort_is_disabled_when_either_triplet_uses_lcp(self) -> None:
+        for position_codec, velocity_codec in (
+            ("lcp", "szo"),
+            ("sz3", "lcp"),
+            ("lcp", "lcp"),
+        ):
+            with self.subTest(
+                position_codec=position_codec,
+                velocity_codec=velocity_codec,
+            ):
+                settings = CompressionSettings.from_args(
+                    SimpleNamespace(
+                        pos_compressor=position_codec,
+                        vel_compressor=velocity_codec,
+                        vel_chunk_size=0,
+                        vel_chunk_workers=0,
+                        force=False,
+                        sort=True,
+                    )
+                )
+                self.assertTrue(settings.sort_requested)
+                self.assertFalse(settings.sort_by_id)
+
 class RecombinationTests(unittest.TestCase):
     def test_recombine_accepts_shared_lcp_position_order_without_sidecar(self) -> None:
         count = 5
@@ -361,10 +527,26 @@ class SZoPipelineTests(unittest.TestCase):
         self.assertEqual(args.pos_compressor, "szo")
         self.assertEqual(args.vel_compressor, "szo")
         self.assertEqual(args.lossless, "pcodec")
+        self.assertFalse(args.sort)
         self.assertIsInstance(args.rel_eb, float)
         self.assertIn("szo", AVAILABLE_COMPRESSORS["pos_compressor"])
         self.assertIn("szo", AVAILABLE_COMPRESSORS["vel_compressor"])
         self.assertEqual(AVAILABLE_COMPRESSORS["lossless"], ("pcodec",))
+
+    def test_cli_accepts_id_sort_for_fieldwise_compressors(self) -> None:
+        argv = [
+            "roundtrip",
+            "input.h5",
+            "--pos-compressor",
+            "sz3",
+            "--vel-compressor",
+            "szo",
+            "--sort",
+        ]
+
+        args = build_parser(argv).parse_args(argv)
+
+        self.assertTrue(args.sort)
 
     def test_preprocess_assigns_szo_only_to_lossy_field_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -839,6 +1021,97 @@ class CodecAndManifestTests(unittest.TestCase):
             ),
             "lcp",
         )
+
+
+class MetricReportingTests(unittest.TestCase):
+    def test_fieldwise_triplets_report_separate_position_ratios(self) -> None:
+        report = self._report("sz3", "szo")
+
+        output = StringIO()
+        with redirect_stdout(output):
+            print_component_summary(report)
+
+        lines = output.getvalue().splitlines()
+        self.assertIn("  x: CR=4, original_bytes=16, compressed_bytes=4", lines)
+        self.assertIn("  y: CR=2, original_bytes=16, compressed_bytes=8", lines)
+        self.assertIn("  z: CR=1, original_bytes=16, compressed_bytes=16", lines)
+        self.assertFalse(any(line.startswith("  xyz:") for line in lines))
+
+    def test_lcp_triplet_keeps_combined_position_ratio(self) -> None:
+        report = self._report("lcp", "sz3")
+        report["sizes"]["compressed_components_bytes"][
+            "compressed/positions.lcp"
+        ] = 24
+
+        output = StringIO()
+        with redirect_stdout(output):
+            print_component_summary(report)
+
+        lines = output.getvalue().splitlines()
+        self.assertTrue(any(line.startswith("  xyz:") for line in lines))
+        for logical in POSITION_FIELDS:
+            self.assertFalse(
+                any(line.startswith(f"  {logical}:") for line in lines)
+            )
+
+    def test_metrics_read_the_recorded_id_sort_permutation_dtype(self) -> None:
+        expected_order = np.array([2, 0, 3, 1], dtype=np.int64)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            order_path = root / "id_sort_order.i64.raw"
+            expected_order.tofile(order_path)
+            manifest = {
+                "ordering": {
+                    "reconstructed_rows": {
+                        "mapping": "id_sorted",
+                        "original_row_order_restored": False,
+                        "temporary_permutation_artifact": "id_sort_order",
+                        "temporary_permutation_dtype": "int64",
+                    },
+                },
+                "artifacts": {
+                    "preprocessed": {
+                        "id_sort_order": str(order_path),
+                    },
+                },
+            }
+            original_path = root / "original.h5"
+            reconstructed_path = root / "reconstructed.h5"
+            with h5py.File(original_path, "w") as original, h5py.File(
+                reconstructed_path,
+                "w",
+            ) as reconstructed:
+                order, source = comparison_order_for_reconstructed_rows(
+                    original,
+                    reconstructed,
+                    manifest,
+                    expected_order.size,
+                )
+
+            np.testing.assert_array_equal(order, expected_order)
+            self.assertEqual(source, "temporary_id_sort_order")
+
+    @staticmethod
+    def _report(position_codec: str, velocity_codec: str):
+        return {
+            "count": 4,
+            "fields": FIELDS,
+            "compressors": {
+                "positions": position_codec,
+                "velocities": velocity_codec,
+            },
+            "sizes": {
+                "compressed_components_bytes": {
+                    "compressed/x.psz": 4,
+                    "compressed/y.psz": 8,
+                    "compressed/z.psz": 16,
+                    "compressed/id.pco": 8,
+                    "compressed/vx.szo": 4,
+                    "compressed/vy.szo": 8,
+                    "compressed/vz.szo": 16,
+                },
+            },
+        }
 
 
 if __name__ == "__main__":

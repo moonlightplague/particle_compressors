@@ -38,6 +38,8 @@ from src.raw_codecs import (
     pad_codec_input,
 )
 from src.runtime import (
+    read_raw,
+    require_output_path,
     resolve_lcp_chunk_workers,
     write_json,
 )
@@ -51,11 +53,19 @@ class CompressionSettings:
     configured_chunk_workers: int
     effective_chunk_workers: int
     force: bool
+    sort_requested: bool = False
+    sort_by_id: bool = False
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "CompressionSettings":
         position_codec = getattr(args, "pos_compressor", "lcp")
         velocity_codec = args.vel_compressor
+        sort_requested = bool(getattr(args, "sort", False))
+        sort_by_id = (
+            sort_requested
+            and position_codec != "lcp"
+            and velocity_codec != "lcp"
+        )
         chunk_size = int(getattr(args, "vel_chunk_size", 0))
         configured_workers = int(getattr(args, "vel_chunk_workers", 0))
         _validate_chunk_configuration(
@@ -67,6 +77,8 @@ class CompressionSettings:
         return cls(
             position_codec=position_codec,
             velocity_codec=velocity_codec,
+            sort_requested=sort_requested,
+            sort_by_id=sort_by_id,
             velocity_chunk_size=chunk_size,
             configured_chunk_workers=configured_workers,
             effective_chunk_workers=resolve_lcp_chunk_workers(
@@ -112,7 +124,29 @@ class CompressionPipeline:
             return self._compress_canonical_positions()
         if self.settings.velocity_codec == "lcp":
             return self._compress_canonical_velocities()
+        if self.settings.sort_by_id:
+            return self._id_sorted_order()
         return CanonicalOrder()
+
+    def _id_sorted_order(self) -> CanonicalOrder:
+        id_dtype = np.dtype(self.manifest["fields"]["id"]["dtype"])
+        particle_ids = read_raw(
+            self.raw_paths["id"],
+            id_dtype,
+            self.count,
+        )
+        order = np.argsort(particle_ids, kind="stable")
+        order_path = self.preprocessed_dir / "id_sort_order.i64.raw"
+        require_output_path(order_path, self.settings.force)
+        order.astype(np.int64, copy=False).tofile(order_path)
+        self.raw_paths["id_sort_order"] = str(order_path)
+        return CanonicalOrder(
+            mapping="id_sorted",
+            field="id",
+            artifact="id_sort_order",
+            artifact_dtype="int64",
+            values=order.astype(np.intp, copy=False),
+        )
 
     def _compress_canonical_positions(self) -> CanonicalOrder:
         order_path = self.preprocessed_dir / "order.i32.raw"
@@ -140,6 +174,7 @@ class CompressionPipeline:
             mapping="lcp_position_sorted",
             field="positions",
             artifact="position_order",
+            artifact_dtype="int32",
             values=read_lcp_permutation(str(order_path), self.count),
         )
 
@@ -159,6 +194,7 @@ class CompressionPipeline:
             mapping="lcp_velocity_sorted",
             field="velocities",
             artifact="velocity_order",
+            artifact_dtype="int32",
             values=read_lcp_permutation(str(order_path), self.count),
         )
 
@@ -166,9 +202,15 @@ class CompressionPipeline:
         reconstructed_rows = {
             "mapping": order.mapping,
             "original_row_order_restored": not order.is_reordered,
-            "canonical_lcp_field": order.field,
+            "canonical_field": order.field,
+            "canonical_lcp_field": (
+                order.field
+                if order.field in ("positions", "velocities")
+                else None
+            ),
             "lcp_permutation_stored": False,
             "temporary_permutation_artifact": order.artifact,
+            "temporary_permutation_dtype": order.artifact_dtype,
         }
         id_ordering: Dict[str, Any] = {"mapping": order.mapping}
         if order.field == "positions":
@@ -180,6 +222,13 @@ class CompressionPipeline:
         self.manifest["ordering"] = {
             "reconstructed_rows": reconstructed_rows,
             "id": id_ordering,
+        }
+        self.manifest["particle_sort"] = {
+            "requested": self.settings.sort_requested,
+            "enabled": order.field == "id",
+            "key": "id" if order.field == "id" else None,
+            "direction": "ascending" if order.field == "id" else None,
+            "stable": bool(order.field == "id"),
         }
 
     def _compress_id(self, order: CanonicalOrder) -> None:

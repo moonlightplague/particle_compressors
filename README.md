@@ -161,6 +161,27 @@ selection rules used by SZ3 apply to SZO. SZO field streams use the `.szo`
 extension. IDs and the optional all-LCP permutation sidecar remain lossless
 pcodec streams.
 
+## Optional ID Sorting
+
+When both position and velocity triplets use fieldwise SZ3 or SZO compression,
+pass `--sort` to stably sort every particle field by ascending ID before the
+fields are sent to their compressors:
+
+```bash
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs_sorted \
+  --pos-compressor sz3 \
+  --vel-compressor szo \
+  --sort \
+  --force
+```
+
+The reconstructed rows remain in ascending-ID order, and roundtrip metrics use
+the recorded temporary permutation to compare each row with its source
+particle. Without `--sort`, the current input-order pipeline is unchanged. The
+flag is ignored when either triplet uses LCP because LCP already determines the
+pipeline's canonical particle order.
+
 ## Integer Compression
 
 IDs are reconstructed exactly with pcodec. When both triplets use LCP, pcodec

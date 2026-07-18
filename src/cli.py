@@ -325,6 +325,14 @@ def _add_compression_arguments(
         help="Velocity triplet compressor (default: %(default)s).",
     )
     parser.add_argument(
+        "--sort",
+        action="store_true",
+        help=(
+            "Stably sort particles by ascending ID before compression when "
+            "neither triplet compressor is LCP."
+        ),
+    )
+    parser.add_argument(
         "--lossless",
         choices=AVAILABLE_COMPRESSORS["lossless"],
         default=defaults["lossless"],

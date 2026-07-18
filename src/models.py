@@ -35,14 +35,14 @@ class ErrorBoundSelection:
 
 @dataclass(frozen=True)
 class CanonicalOrder:
-    """The row order selected by whichever triplet is compressed with LCP."""
+    """The particle row order shared by every compressor in a pipeline."""
 
     mapping: str = "original_row"
     field: Optional[str] = None
     artifact: Optional[str] = None
+    artifact_dtype: Optional[str] = None
     values: Optional[np.ndarray] = None
 
     @property
     def is_reordered(self) -> bool:
         return self.values is not None
-

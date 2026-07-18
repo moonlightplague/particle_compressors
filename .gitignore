@@ -1,3 +1,4 @@
 data
 particle_pipeline_runs/
+analysis/
 *__pycache__/

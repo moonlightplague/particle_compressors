@@ -10,7 +10,12 @@ import h5py
 import numpy as np
 
 from src.constants import LOGICAL_ORDER, POSITION_FIELDS, VELOCITY_FIELDS
-from src.manifest import compressed_sizes, order_dtype_from_manifest
+from src.manifest import (
+    compressed_sizes,
+    order_dtype_from_manifest,
+    position_compressor_from_manifest,
+    velocity_compressor_from_manifest,
+)
 from src.runtime import read_raw
 
 
@@ -156,6 +161,9 @@ def component_compression_ratios(
     order_bytes = int(order_dtype_from_manifest(report).itemsize * count)
 
     entries = {
+        "x": _field_size_entry(report, components, "x"),
+        "y": _field_size_entry(report, components, "y"),
+        "z": _field_size_entry(report, components, "z"),
         "xyz": _size_entry(
             original_bytes_for_fields(report, POSITION_FIELDS),
             position_bytes,
@@ -181,7 +189,11 @@ def print_component_summary(report: Mapping[str, Any]) -> None:
     ratios = component_compression_ratios(report)
     print("component_CR:")
 
-    names = ["xyz"]
+    fieldwise_triplets = (
+        position_compressor_from_manifest(report) != "lcp"
+        and velocity_compressor_from_manifest(report) != "lcp"
+    )
+    names = list(POSITION_FIELDS) if fieldwise_triplets else ["xyz"]
     if ratios["order"]["compressed_bytes"] > 0:
         names.append("order")
     names.append("id")
@@ -211,8 +223,12 @@ def print_component_summary(report: Mapping[str, Any]) -> None:
 
 
 def print_summary(metrics: Mapping[str, Any], metrics_path: Path) -> None:
-    sizes = metrics["sizes"]
     print(f"metrics_json = {metrics_path}")
+    print("Compressor Configuration: ")
+    print(f"Lossless: {metrics["compressors"]["lossless"]}")
+    print(f"Positions: {metrics["compressors"]["positions"]}")
+    print(f"Velocities: {metrics["compressors"]["velocities"]}")
+    sizes = metrics["sizes"]
     print(
         "payload_CR = "
         f"{sizes.get('payload_compression_ratio', math.nan):.6g}"
@@ -271,9 +287,12 @@ def comparison_order_for_reconstructed_rows(
         .get(artifact)
     )
     if raw_order_path and Path(raw_order_path).is_file():
+        permutation_dtype = np.dtype(
+            row_order.get("temporary_permutation_dtype", "int32")
+        )
         order = read_raw(
             raw_order_path,
-            np.dtype("int32"),
+            permutation_dtype,
             count,
         ).astype(np.intp, copy=False)
         _validate_comparison_order(order, count)
@@ -297,6 +316,8 @@ def compute_metrics(
     metrics: Dict[str, Any] = {
         "fields": {},
         "error_bound_consistency": {},
+        "compressors": dict(manifest.get("compressors", {})),
+        "particle_sort": dict(manifest.get("particle_sort", {})),
         "sizes": dict(manifest.get("sizes", {})),
         "timing": dict(manifest.get("timing", {})),
         "order_dtype": str(order_dtype_from_manifest(manifest)),
@@ -620,4 +641,3 @@ def _size_entry(
             compressed_bytes,
         ),
     }
-
