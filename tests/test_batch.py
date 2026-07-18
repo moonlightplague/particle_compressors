@@ -90,6 +90,77 @@ class BatchPipelineTests(unittest.TestCase):
             4.0,
         )
 
+    def test_batch_metrics_include_each_files_field_quality_metrics(
+        self,
+    ) -> None:
+        result = self._result(
+            "a.h5",
+            particles=10,
+            original_bytes=100,
+            compressed_bytes=20,
+            wall_seconds=4.0,
+            preprocess_seconds=1.0,
+        )
+        result.report["fields"] = {
+            "x": {
+                "max_absolute_error": 0.01,
+                "mse": 0.0001,
+                "psnr": 60.0,
+            },
+            "y": {
+                "max_absolute_error": 0.02,
+                "mse": 0.0002,
+                "psnr": 55.0,
+                "fixed_point_units": {
+                    "max_absolute_error": 2.0,
+                    "mse": 1.25,
+                    "psnr": 48.0,
+                },
+            },
+            "vx": {
+                "max_absolute_error": 0.03,
+                "mse": 0.0003,
+                "psnr": 50.0,
+            },
+        }
+
+        metrics = build_batch_metrics(
+            Path("/inputs"),
+            "roundtrip",
+            1,
+            [result],
+            batch_wall_seconds=4.0,
+        )
+
+        quality = metrics["files"][0]["quality_metrics"]
+        self.assertEqual(
+            quality["x"],
+            {
+                "max_abs": 0.01,
+                "mse": 0.0001,
+                "psnr": 60.0,
+                "units": "lcp_units",
+            },
+        )
+        self.assertEqual(
+            quality["y"],
+            {
+                "max_abs": 2.0,
+                "mse": 1.25,
+                "psnr": 48.0,
+                "units": "source_units",
+            },
+        )
+        self.assertEqual(
+            quality["vx"],
+            {
+                "max_abs": 0.03,
+                "mse": 0.0003,
+                "psnr": 50.0,
+                "units": "source_units",
+            },
+        )
+
     def test_single_file_still_uses_the_existing_application(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             input_h5 = Path(temp_dir) / "input.h5"

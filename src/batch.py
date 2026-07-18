@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from src.constants import POSITION_FIELDS
+
 
 MAX_AUTOMATIC_FILE_WORKERS = 16
 
@@ -266,7 +268,46 @@ def _file_metrics(result: BatchFileResult) -> Dict[str, Any]:
             "timing": dict(result.report.get("timing", {})),
         }
     )
+    quality_metrics = _file_quality_metrics(result.report)
+    if quality_metrics:
+        entry["quality_metrics"] = quality_metrics
     return entry
+
+
+def _file_quality_metrics(
+    report: Mapping[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Extract the displayed reconstruction metrics for each report field."""
+
+    quality_metrics: Dict[str, Dict[str, Any]] = {}
+    fields = report.get("fields", {})
+    if not isinstance(fields, Mapping):
+        return quality_metrics
+
+    for logical, field in fields.items():
+        if not isinstance(field, Mapping):
+            continue
+        display_field = (
+            field.get("fixed_point_units", field)
+            if logical in POSITION_FIELDS
+            else field
+        )
+        if not isinstance(display_field, Mapping) or not all(
+            name in display_field
+            for name in ("max_absolute_error", "mse", "psnr")
+        ):
+            continue
+        quality_metrics[str(logical)] = {
+            "max_abs": display_field["max_absolute_error"],
+            "mse": display_field["mse"],
+            "psnr": display_field["psnr"],
+            "units": (
+                "lcp_units"
+                if logical in POSITION_FIELDS and display_field is field
+                else "source_units"
+            ),
+        }
+    return quality_metrics
 
 
 def _sum_stage_timings(
