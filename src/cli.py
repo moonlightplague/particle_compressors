@@ -164,6 +164,15 @@ def _add_pipeline_command(
     _add_config_argument(command, argparse.SUPPRESS)
     _add_runtime_arguments(command, defaults)
     _add_compression_arguments(command, defaults)
+    command.add_argument(
+        "--file-workers",
+        type=int,
+        default=0,
+        help=(
+            "Parallel file processes for directory input; 0 selects up to "
+            "16 workers automatically (default: %(default)s)."
+        ),
+    )
 
 
 def _add_decompress_command(
@@ -230,7 +239,10 @@ def _add_compression_arguments(
     parser: argparse.ArgumentParser,
     defaults: Mapping[str, Any],
 ) -> None:
-    parser.add_argument("input_h5", help="Input HDF5 particle file.")
+    parser.add_argument(
+        "input_h5",
+        help="Input HDF5 particle file or directory of .h5 files.",
+    )
     parser.add_argument(
         "--work-dir",
         default="particle_pipeline_runs",

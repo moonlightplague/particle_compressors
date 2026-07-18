@@ -87,6 +87,26 @@ python main.py roundtrip data/sample.h5 \
 Use a distinct work directory for each input/error-bound combination. Existing
 outputs are rejected unless `--force` is supplied.
 
+To process every `.h5` file directly inside a directory, pass the directory in
+place of a single input file:
+
+```bash
+python main.py roundtrip data/snapshots \
+  --work-dir particle_pipeline_runs/snapshots \
+  --rel-eb 1e-3 \
+  --file-workers 0 \
+  --force
+```
+
+Directory inputs run in parallel processes. `--file-workers 0` automatically
+uses up to 16 workers; a positive value sets an explicit cap. Each input keeps
+the normal single-file pipeline and writes to a separate subdirectory named
+after the source file, such as `particle_pipeline_runs/snapshots/step_01.h5`.
+Per-file console metrics are printed as usual, and the batch root receives
+`batch_metrics.json` with byte-weighted total compression ratio, aggregate
+stage timings, observed batch wall time, throughput, and per-file statistics.
+Directory globbing is non-recursive and matches the `.h5` extension exactly.
+
 With `--pos-compressor lcp --vel-compressor sz3`, the compressed directory
 contains `positions.lcp`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`. With
 `--pos-compressor sz3 --vel-compressor lcp`, it contains `x.psz`, `y.psz`,
