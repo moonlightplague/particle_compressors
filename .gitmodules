@@ -4,9 +4,6 @@
 [submodule "tools/LCP"]
 	path = tools/LCP
 	url = https://github.com/hpdslab/LCP.git
-[submodule "tools/XnYZip"]
-	path = tools/XnYZip
-	url = https://github.com/Karshilov/XnYZip
 [submodule "tools/SZo"]
 	path = tools/SZo
 	url = https://github.com/BingluCS/SZo.git
