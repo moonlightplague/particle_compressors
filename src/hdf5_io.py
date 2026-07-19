@@ -188,8 +188,9 @@ class HDF5Recombiner:
         )
 
     def _velocity_order(self) -> Optional[np.ndarray]:
+        velocity_codec = velocity_compressor_from_manifest(self.manifest)
         if (
-            velocity_compressor_from_manifest(self.manifest) != "lcp"
+            velocity_codec not in ("lcp", "xynzip")
             or "velocity_order" not in self.paths
         ):
             return None
@@ -198,7 +199,11 @@ class HDF5Recombiner:
             self.paths["velocity_order"],
             np.dtype(field["dtype"]),
             self.count,
-            "LCP velocity order sidecar",
+            (
+                "LCP velocity order sidecar"
+                if velocity_codec == "lcp"
+                else "XnYZip velocity order sidecar"
+            ),
             int(field.get("chunk_size", 0)),
         )
 
@@ -227,4 +232,3 @@ as_jsonable_attr = serialize_attribute
 collect_attrs = collect_attributes
 restore_attr = restore_attribute
 apply_attrs = apply_attributes
-

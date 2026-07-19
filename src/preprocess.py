@@ -80,7 +80,14 @@ class PreprocessingPipeline:
             raise RuntimeError(
                 f"Input HDF5 file does not exist: {self.input_h5}"
             )
-        self.tools = ToolPaths(lcp=Path(args.lcp))
+        self.tools = ToolPaths(
+            lcp=Path(args.lcp),
+            xnyzip=(
+                Path(args.xnyzip)
+                if getattr(args, "xnyzip", None) is not None
+                else None
+            ),
+        )
         self.workspace = PreprocessWorkspace.prepare(
             args.work_dir,
             bool(args.force),
@@ -148,6 +155,15 @@ class PreprocessingPipeline:
         )
         self.raw_paths.update(position_paths)
         self.statistics["positions"] = position_stats
+        if self.args.pos_compressor == "xynzip":
+            xnyzip_path, xnyzip_stats = export_positions_for_xnyzip(
+                position_paths,
+                self.workspace.raw / "positions.xnyzip.f32.raw",
+                count,
+                self.args.force,
+            )
+            self.raw_paths["positions_xnyzip"] = xnyzip_path
+            self.statistics["positions_xnyzip"] = xnyzip_stats
         self._export_id(source, fields, count)
         self._export_velocities(source, fields, count)
 
@@ -186,15 +202,17 @@ class PreprocessingPipeline:
             )
             self.raw_paths[logical] = raw_path
             stats["preprocess_cast_max_abs"] = 0.0
-            if self.args.vel_compressor == "lcp":
-                lcp_path, cast_error = export_float32_for_lcp(
+            if self.args.vel_compressor in ("lcp", "xynzip"):
+                vector_codec = self.args.vel_compressor
+                vector_path, cast_error = export_float32_for_lcp(
                     raw_path,
                     dtype,
-                    self.workspace.raw / f"{logical}.lcp.f32.raw",
+                    self.workspace.raw
+                    / f"{logical}.{vector_codec}.f32.raw",
                     count,
                     self.args.force,
                 )
-                self.raw_paths[f"{logical}_lcp"] = lcp_path
+                self.raw_paths[f"{logical}_{vector_codec}"] = vector_path
                 stats["preprocess_cast_max_abs"] = cast_error
             velocity_stats[logical] = stats
         self.statistics["velocities"] = velocity_stats
@@ -222,6 +240,26 @@ class PreprocessingPipeline:
             manifest["error_bounds"]["velocities_lcp_abs"] = float(
                 manifest["field_error_bounds"]["vx"]["compressor_abs"]
             )
+        if self.args.vel_compressor == "xynzip":
+            manifest["error_bounds"]["velocities_xnyzip_abs"] = float(
+                manifest["field_error_bounds"]["velocities_xnyzip"][
+                    "compressor_abs"
+                ]
+            )
+        else:
+            manifest["error_bounds"].pop(
+                "velocities_xnyzip_abs",
+                None,
+            )
+            manifest["field_error_bounds"].pop(
+                "velocities_xnyzip",
+                None,
+            )
+        if (
+            self.args.pos_compressor == "xynzip"
+            or self.args.vel_compressor == "xynzip"
+        ):
+            manifest["tools"]["xnyzip"] = str(self.tools.xnyzip)
         manifest["artifacts"] = {
             "preprocessed": self.raw_paths,
             "compressed": build_compressed_artifacts(
@@ -230,7 +268,11 @@ class PreprocessingPipeline:
                 self.args.vel_compressor,
             ),
         }
-        manifest["order_dtype"] = "int32"
+        manifest["order_dtype"] = (
+            "uint64"
+            if self.args.pos_compressor == "xynzip"
+            else "int32"
+        )
         manifest["compressed_fields"] = {}
         manifest["preprocess"] = self.statistics
         manifest["sizes"] = {
@@ -333,6 +375,7 @@ def make_manifest(
         position_lcp_abs=position_abs,
         position_vector_abs=position_vector_abs,
         velocity_abs=velocity_abs,
+        velocity_vector_abs=velocity_abs,
         id_abs=id_abs,
         fields={
             name: dict(payload)
@@ -358,8 +401,15 @@ def build_compressed_artifacts(
 ) -> Dict[str, str]:
     validate_compressor_combination(position_codec, velocity_codec)
     artifacts = {"id": str(compressed_dir / "id.pco")}
-    if position_codec == "lcp":
-        artifacts["positions"] = str(compressed_dir / "positions.lcp")
+    if position_codec in ("lcp", "xynzip"):
+        artifacts["positions"] = str(
+            compressed_dir
+            / (
+                "positions.lcp"
+                if position_codec == "lcp"
+                else "positions.xynzip"
+            )
+        )
     else:
         extension = _lossy_extension(position_codec)
         artifacts.update(
@@ -368,8 +418,15 @@ def build_compressed_artifacts(
                 for field in POSITION_FIELDS
             }
         )
-    if velocity_codec == "lcp":
-        artifacts["velocities"] = str(compressed_dir / "velocities.lcp")
+    if velocity_codec in ("lcp", "xynzip"):
+        artifacts["velocities"] = str(
+            compressed_dir
+            / (
+                "velocities.lcp"
+                if velocity_codec == "lcp"
+                else "velocities.xynzip"
+            )
+        )
         artifacts["velocity_order"] = str(
             compressed_dir / "velocity_order.pco"
         )

@@ -28,9 +28,10 @@ of each dataset path.
 ## Requirements
 
 - Python with development headers; Python 3.13 is known to work. Conda environment is recommended.
-- A C++17 compiler, CMake, and Make for LCP
+- A C++20-capable compiler, CMake, and Make for LCP and XnYZip
 - Rust and Cargo for the local pcodec Python extension
-- Git submodules initialized for `tools/LCP`, `tools/SZo`, and `tools/pcodec`
+- Git submodules initialized for `tools/LCP`, `tools/XnYZip`, `tools/SZo`,
+  and `tools/pcodec`
 
 ## Installation
 
@@ -47,7 +48,8 @@ conda activate compressor
 ```
 
 From the repository root, the included installation script builds LCP and
-installs the Python dependencies into the active Python environment:
+XnYZip and installs the Python dependencies into the active Python
+environment:
 
 ```bash
 bash install.sh
@@ -60,7 +62,8 @@ The Python implementation is separated by responsibility:
 - `preprocess.py`, `compress.py`, and `decompress.py` orchestrate pipeline
   stages.
 - `raw_codecs.py` adapts pcodec, SZ3, and SZO field streams.
-- `lcp_codec.py` owns native LCP commands and the chunked velocity container.
+- `lcp_codec.py` owns native LCP commands and the chunked velocity container;
+  `xnyzip_codec.py` owns native XnYZip commands and its `uint64` order files.
 - `field_export.py`, `error_bounds.py`, and `hdf5_io.py` handle source
   conversion, bound selection, and HDF5 reconstruction.
 - `manifest.py`, `metrics.py`, and `runtime.py` contain package metadata,
@@ -127,6 +130,49 @@ compressed velocities. Consequently no order sidecar is stored, while every
 reconstructed row still contains the corresponding ID, position, and velocity.
 When both triplets use LCP, position order is canonical and the independently
 sorted velocity stream still requires `velocity_order.pco`.
+
+## XnYZip Compression
+
+XnYZip is available as a position compressor with fieldwise SZ3 or SZo
+velocities:
+
+```bash
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs_xnyzip \
+  --pos-compressor xynzip \
+  --vel-compressor sz3 \
+  --pos-rel-eb 1e-3 \
+  --vel-rel-eb 1e-3 \
+  --force
+```
+
+It can also compress both triplets:
+
+```bash
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs_all_xnyzip \
+  --pos-compressor xynzip \
+  --vel-compressor xynzip \
+  --pos-rel-eb 1e-3 \
+  --vel-rel-eb 1e-3 \
+  --force
+```
+
+The CLI spelling is `xynzip`; the native project and executable are named
+XnYZip. The pipeline interleaves each triplet as
+`x1,y1,z1,x2,y2,z2,...` float32 data before invoking the native compressor.
+Unlike the per-axis L-infinity bounds used by the other triplet paths, the
+XnYZip bound is an L2 bound. Relative bounds are therefore derived from the
+three-dimensional bounding-box diagonal. The manifest and roundtrip metrics
+record the requested and observed maximum per-particle L2 error.
+
+Like LCP, XnYZip sorts particles during compression. Its position order becomes
+the canonical package row order, and the pipeline applies it to IDs and
+velocities before their compressors run. The temporary position order is not
+packaged. With all-XnYZip compression, the independently sorted velocity stream
+uses a losslessly pcodec-compressed `velocity_order.pco` sidecar containing
+`uint64` indices. `--vel-compressor xynzip` therefore requires
+`--pos-compressor xynzip`.
 
 ## Chunked Velocity LCP
 
@@ -202,13 +248,13 @@ python main.py roundtrip data/sample.h5 \
 The reconstructed rows remain in ascending-ID order, and roundtrip metrics use
 the recorded temporary permutation to compare each row with its source
 particle. Without `--sort`, the current input-order pipeline is unchanged. The
-flag is ignored when positions use LCP because LCP already determines the
-pipeline's canonical particle order.
+flag is ignored when positions use LCP or XnYZip because that compressor
+already determines the pipeline's canonical particle order.
 
 ## Integer Compression
 
-IDs are reconstructed exactly with pcodec. When both triplets use LCP, pcodec
-also compresses the velocity permutation sidecar.
+IDs are reconstructed exactly with pcodec. When both triplets use LCP or both
+use XnYZip, pcodec also compresses the velocity permutation sidecar.
 
 ## Error Bounds
 
@@ -217,7 +263,7 @@ Position- and velocity-specific bounds can be supplied through
 `--pos-abs-eb`, `--pos-rel-eb`, `--vel-abs-eb`, and `--vel-rel-eb`. A
 field-class-specific value takes precedence over the global `--abs-eb` or
 `--rel-eb`. LCP accepts one bound for the velocity triplet, so the strictest
-derived `vx`/`vy`/`vz` bound is used. Do not set both absolute and relative
-bounds for the same field class. IDs are always reconstructed exactly with
-pcodec. `id_abs_eb` only defines the expected ID error used by metrics and
-defaults to zero.
+derived `vx`/`vy`/`vz` bound is used. XnYZip accepts one L2 bound for an entire
+triplet. Do not set both absolute and relative bounds for the same field class.
+IDs are always reconstructed exactly with pcodec. `id_abs_eb` only defines the
+expected ID error used by metrics and defaults to zero.

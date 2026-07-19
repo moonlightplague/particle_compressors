@@ -55,8 +55,12 @@ def update_compressed_size_metrics(
 def order_dtype_from_manifest(manifest: Mapping[str, Any]) -> np.dtype:
     field = manifest.get("compressed_fields", {}).get("order", {})
     dtype = np.dtype(field.get("dtype", manifest.get("order_dtype", "int64")))
-    if dtype not in (np.dtype("int32"), np.dtype("int64")):
-        raise RuntimeError(f"Unsupported LCP order dtype in manifest: {dtype}.")
+    if dtype not in (
+        np.dtype("int32"),
+        np.dtype("int64"),
+        np.dtype("uint64"),
+    ):
+        raise RuntimeError(f"Unsupported order dtype in manifest: {dtype}.")
     return dtype
 
 
@@ -68,6 +72,8 @@ def velocity_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
     compressed_fields = manifest.get("compressed_fields", {})
     if compressed_fields.get("velocities", {}).get("codec") == "lcp":
         return "lcp"
+    if compressed_fields.get("velocities", {}).get("codec") == "xynzip":
+        return "xynzip"
     if _all_fields_use_codec(compressed_fields, VELOCITY_FIELDS, "szo"):
         return "szo"
     return "sz3"
@@ -77,12 +83,17 @@ def position_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
     compressed_fields = manifest.get("compressed_fields", {})
     if compressed_fields.get("positions", {}).get("codec") == "lcp":
         return "lcp"
+    if compressed_fields.get("positions", {}).get("codec") == "xynzip":
+        return "xynzip"
     if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "pysz"):
         return "sz3"
     if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "szo"):
         return "szo"
     if "positions" in manifest.get("artifacts", {}).get("compressed", {}):
-        return "lcp"
+        path = str(
+            manifest["artifacts"]["compressed"]["positions"]
+        )
+        return "xynzip" if path.endswith(".xynzip") else "lcp"
 
     configured = manifest.get("compressors", {}).get("positions")
     return str(configured) if configured else "lcp"
@@ -97,4 +108,3 @@ def _all_fields_use_codec(
         compressed_fields.get(logical, {}).get("codec") == codec
         for logical in fields
     )
-

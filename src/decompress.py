@@ -41,6 +41,7 @@ from src.runtime import (
     resolve_lcp_chunk_workers,
     write_json,
 )
+from src.xnyzip_codec import run_xnyzip_decompress
 
 
 class DecompressionPipeline:
@@ -113,7 +114,7 @@ class DecompressionPipeline:
             paths["order"] = str(
                 self.decompressed_dir / f"order.{order_dtype.name}.raw"
             )
-        if self.velocity_codec == "lcp":
+        if self.velocity_codec in ("lcp", "xynzip"):
             for logical in VELOCITY_FIELDS:
                 paths[logical] = str(
                     self.decompressed_dir / f"{logical}.f32.raw"
@@ -139,6 +140,22 @@ class DecompressionPipeline:
                 ),
             )
             return
+        if self.position_codec == "xynzip":
+            run_xnyzip_decompress(
+                self.tools,
+                self.compressed_artifacts["positions"],
+                self.output_paths,
+                POSITION_FIELDS,
+                self.count,
+                float(
+                    self.manifest["error_bounds"][
+                        "positions_xnyzip_abs"
+                    ]
+                ),
+                self.decompressed_dir / "positions.xynzip.f32.raw",
+                self.args.force,
+            )
+            return
         for logical in POSITION_FIELDS:
             decompress_lossy_raw(
                 self.fields[logical],
@@ -160,6 +177,36 @@ class DecompressionPipeline:
         )
 
     def _decompress_velocities(self) -> None:
+        if self.velocity_codec == "xynzip":
+            if "velocity_order" not in self.fields:
+                raise RuntimeError(
+                    "XnYZip velocity package is missing its velocity_order "
+                    "sidecar metadata."
+                )
+            started = time.perf_counter()
+            run_xnyzip_decompress(
+                self.tools,
+                self.compressed_artifacts["velocities"],
+                self.output_paths,
+                VELOCITY_FIELDS,
+                self.count,
+                float(
+                    self.manifest["error_bounds"][
+                        "velocities_xnyzip_abs"
+                    ]
+                ),
+                self.decompressed_dir / "velocities.xynzip.f32.raw",
+                self.args.force,
+            )
+            self.manifest.setdefault("timing", {})[
+                "velocity_xnyzip_decompress_wall_seconds"
+            ] = time.perf_counter() - started
+            decompress_integer_raw(
+                self.fields["velocity_order"],
+                self.output_paths["velocity_order"],
+                self.args.force,
+            )
+            return
         if self.velocity_codec != "lcp":
             for logical in VELOCITY_FIELDS:
                 decompress_lossy_raw(

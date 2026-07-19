@@ -19,6 +19,7 @@ class ResolvedErrorBounds:
     position_lcp_abs: float
     position_vector_abs: float
     velocity_abs: float
+    velocity_vector_abs: float
     id_abs: float
     fields: Dict[str, Dict[str, Any]]
 
@@ -126,6 +127,9 @@ def resolve_error_bounds(
     position_diagonal = math.sqrt(
         sum(value * value for value in position_ranges.values())
     )
+    velocity_diagonal = math.sqrt(
+        sum(value * value for value in velocity_ranges.values())
+    )
 
     base_position = select_relative_or_absolute(
         args,
@@ -152,7 +156,15 @@ def resolve_error_bounds(
         base_position,
         position_preprocess_errors,
         position_diagonal,
+        subtract_absolute_preprocess=(
+            args.pos_compressor == "xynzip"
+        ),
     )
+    if args.pos_compressor == "xynzip" and position_vector_abs <= 0.0:
+        raise RuntimeError(
+            "The requested position error bound leaves no positive XnYZip "
+            "L2 compressor bound after float32 preprocessing."
+        )
     position = ErrorBoundSelection(
         base_position.mode,
         base_position.abs_by_field,
@@ -167,6 +179,25 @@ def resolve_error_bounds(
         velocity_ranges,
         args.abs_eb,
     )
+    (
+        velocity_vector_abs,
+        velocity_vector_requested_abs,
+        velocity_vector_preprocess_error,
+    ) = _resolve_vector_compressor_bound(
+        base_velocity,
+        {
+            field: float(
+                velocity_stats[field]["preprocess_cast_max_abs"]
+            )
+            for field in VELOCITY_FIELDS
+        },
+        velocity_diagonal,
+    )
+    if args.vel_compressor == "xynzip" and velocity_vector_abs <= 0.0:
+        raise RuntimeError(
+            "The requested velocity error bound leaves no positive XnYZip "
+            "L2 compressor bound after float32 preprocessing."
+        )
     if args.vel_compressor == "lcp":
         velocity_abs = min(
             max(
@@ -212,6 +243,15 @@ def resolve_error_bounds(
             "source_units",
         )
     )
+    field_bounds["velocities_xnyzip"] = {
+        "mode": base_velocity.mode,
+        "abs": velocity_vector_requested_abs,
+        "relative": base_velocity.relative,
+        "range": velocity_diagonal,
+        "range_units": "source_units_bbox_diagonal",
+        "compressor_abs": velocity_vector_abs,
+        "preprocess_l2_max_abs": velocity_vector_preprocess_error,
+    }
     id_stats = statistics["id"]
     field_bounds["id"] = {
         "mode": "lossless",
@@ -231,6 +271,7 @@ def resolve_error_bounds(
         position_lcp_abs=float(position_lcp_abs),
         position_vector_abs=float(position_vector_abs),
         velocity_abs=float(velocity_abs),
+        velocity_vector_abs=float(velocity_vector_abs),
         id_abs=id_abs,
         fields=field_bounds,
     )
@@ -252,10 +293,21 @@ def _resolve_position_compressor_bounds(
     selection: ErrorBoundSelection,
     preprocess_errors: Mapping[str, float],
     position_diagonal: float,
+    subtract_absolute_preprocess: bool = False,
 ) -> Tuple[float, float, float, float]:
     if selection.mode != "relative":
         absolute = float(min(selection.abs_by_field.values()))
-        return absolute, absolute, absolute, 0.0
+        if not subtract_absolute_preprocess:
+            return absolute, absolute, absolute, 0.0
+        vector_preprocess_error = math.sqrt(
+            sum(error * error for error in preprocess_errors.values())
+        )
+        return (
+            absolute,
+            max(0.0, absolute - vector_preprocess_error),
+            absolute,
+            vector_preprocess_error,
+        )
 
     compressor_abs = min(
         max(
@@ -281,3 +333,22 @@ def _resolve_position_compressor_bounds(
         vector_preprocess_error,
     )
 
+
+def _resolve_vector_compressor_bound(
+    selection: ErrorBoundSelection,
+    preprocess_errors: Mapping[str, float],
+    vector_diagonal: float,
+) -> Tuple[float, float, float]:
+    requested_abs = (
+        float(selection.relative * vector_diagonal)
+        if selection.mode == "relative"
+        else float(min(selection.abs_by_field.values()))
+    )
+    preprocess_error = math.sqrt(
+        sum(error * error for error in preprocess_errors.values())
+    )
+    return (
+        max(0.0, requested_abs - preprocess_error),
+        requested_abs,
+        preprocess_error,
+    )

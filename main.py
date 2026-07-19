@@ -71,7 +71,10 @@ class PipelineApplication:
     def _decompress(self) -> None:
         manifest = decompress(
             self.args,
-            ToolPaths(lcp=Path(self.args.lcp)),
+            ToolPaths(
+                lcp=Path(self.args.lcp),
+                xnyzip=Path(self.args.xnyzip),
+            ),
         )
         self._clean_raw_if_requested()
         print(

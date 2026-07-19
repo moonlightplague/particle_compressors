@@ -12,6 +12,9 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lcp": str(
         DEFAULT_CONFIG_PATH.parent / "tools" / "LCP" / "build" / "bin" / "lcp"
     ),
+    "xnyzip": str(
+        DEFAULT_CONFIG_PATH.parent / "tools" / "XnYZip" / "build" / "XnYZip"
+    ),
     "abs_eb": None,
     "rel_eb": 1e-3,
     "pos_abs_eb": None,
@@ -29,8 +32,8 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lossless": "pcodec",
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
-    "pos_compressor": ("lcp", "sz3", "szo"),
-    "vel_compressor": ("sz3", "szo", "lcp"),
+    "pos_compressor": ("lcp", "xynzip", "sz3", "szo"),
+    "vel_compressor": ("sz3", "szo", "lcp", "xynzip"),
     "lossless": ("pcodec",),
 }
 NULLABLE_NUMBER_KEYS = (
@@ -51,6 +54,10 @@ def validate_compressor_combination(
     if velocity_codec == "lcp" and position_codec != "lcp":
         raise RuntimeError(
             "--vel-compressor lcp requires --pos-compressor lcp."
+        )
+    if velocity_codec == "xynzip" and position_codec != "xynzip":
+        raise RuntimeError(
+            "--vel-compressor xynzip requires --pos-compressor xynzip."
         )
 
 
@@ -140,15 +147,19 @@ def _validated_advanced_config(
         raise RuntimeError(
             "config value advanced.position_scale_attr must be a string."
         )
-    if not isinstance(defaults["lcp"], str):
-        raise RuntimeError("config value advanced.lcp must be a path string.")
+    for key in ("lcp", "xnyzip"):
+        if not isinstance(defaults[key], str):
+            raise RuntimeError(
+                f"config value advanced.{key} must be a path string."
+            )
     for key, choices in AVAILABLE_COMPRESSORS.items():
         defaults[key] = _choice(defaults[key], key, choices)
 
-    lcp_path = Path(defaults["lcp"]).expanduser()
-    if not lcp_path.is_absolute():
-        lcp_path = config_path.parent / lcp_path
-    defaults["lcp"] = str(lcp_path.resolve())
+    for key in ("lcp", "xnyzip"):
+        tool_path = Path(defaults[key]).expanduser()
+        if not tool_path.is_absolute():
+            tool_path = config_path.parent / tool_path
+        defaults[key] = str(tool_path.resolve())
     return defaults
 
 
@@ -223,6 +234,11 @@ def _add_runtime_arguments(
         "--lcp",
         default=defaults["lcp"],
         help="Path to the LCP executable.",
+    )
+    parser.add_argument(
+        "--xnyzip",
+        default=defaults["xnyzip"],
+        help="Path to the XnYZip executable.",
     )
     parser.add_argument(
         "--vel-chunk-workers",
@@ -345,7 +361,8 @@ def _add_compression_arguments(
         choices=AVAILABLE_COMPRESSORS["vel_compressor"],
         default=defaults["vel_compressor"],
         help=(
-            "Velocity triplet compressor; lcp requires --pos-compressor lcp "
+            "Velocity triplet compressor; lcp requires lcp positions and "
+            "xynzip requires xynzip positions "
             "(default: %(default)s)."
         ),
     )
@@ -354,7 +371,7 @@ def _add_compression_arguments(
         action="store_true",
         help=(
             "Stably sort particles by ascending ID before compression when "
-            "neither triplet compressor is LCP."
+            "neither triplet compressor establishes a canonical row order."
         ),
     )
     parser.add_argument(

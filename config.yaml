@@ -1,6 +1,7 @@
 advanced:
   # Relative paths are resolved from this config file's directory.
   lcp: ./tools/LCP/build/bin/lcp
+  xnyzip: ./tools/XnYZip/build/XnYZip
 
   # Optional field-specific bounds override --abs-eb/--rel-eb when set.
   abs_eb: null
@@ -18,7 +19,7 @@ advanced:
   vel_compressor: szo
   lossless: pcodec
 
-  # Integer position conversion used before LCP compression.
+  # Integer position conversion used before float32 triplet compression.
   position_scale: auto
   position_scale_attr: bitwidth
   position_scale_value: null

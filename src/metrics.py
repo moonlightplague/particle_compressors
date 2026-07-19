@@ -144,6 +144,7 @@ def component_compression_ratios(
     )
     position_bytes = (
         int(components.get("compressed/positions.lcp", 0))
+        + int(components.get("compressed/positions.xynzip", 0))
         + position_order_bytes
         + compressed_bytes_with_prefixes(
             components,
@@ -152,13 +153,26 @@ def component_compression_ratios(
     )
     velocity_lcp_bytes = int(
         components.get("compressed/velocities.lcp", 0)
-    )
+    ) + int(components.get("compressed/velocities.xynzip", 0))
     velocity_order_bytes = compressed_bytes_with_prefixes(
         components,
         ("compressed/velocity_order.",),
     )
     count = report_count(report)
     order_bytes = int(order_dtype_from_manifest(report).itemsize * count)
+    velocity_order_field = report.get("compressed_fields", {}).get(
+        "velocity_order",
+        {},
+    )
+    velocity_order_original_bytes = int(
+        np.dtype(
+            velocity_order_field.get(
+                "dtype",
+                order_dtype_from_manifest(report),
+            )
+        ).itemsize
+        * count
+    )
 
     entries = {
         "x": _field_size_entry(report, components, "x"),
@@ -169,7 +183,10 @@ def component_compression_ratios(
             position_bytes,
         ),
         "order": _size_entry(order_bytes, position_order_bytes),
-        "velocity_order": _size_entry(order_bytes, velocity_order_bytes),
+        "velocity_order": _size_entry(
+            velocity_order_original_bytes,
+            velocity_order_bytes,
+        ),
         "id": _size_entry(
             original_bytes_for_fields(report, ("id",)),
             compressed_bytes_with_prefixes(components, ("compressed/id.",)),
@@ -199,6 +216,7 @@ def field_group_compression_ratios(
         components,
         (
             "compressed/velocities.lcp",
+            "compressed/velocities.xynzip",
             "compressed/velocity_order.",
             "compressed/vx.",
             "compressed/vy.",
@@ -220,8 +238,10 @@ def print_component_summary(report: Mapping[str, Any]) -> None:
     print("component_CR:")
 
     fieldwise_triplets = (
-        position_compressor_from_manifest(report) != "lcp"
-        and velocity_compressor_from_manifest(report) != "lcp"
+        position_compressor_from_manifest(report)
+        not in ("lcp", "xynzip")
+        and velocity_compressor_from_manifest(report)
+        not in ("lcp", "xynzip")
     )
     names = list(POSITION_FIELDS) if fieldwise_triplets else ["xyz"]
     if ratios["order"]["compressed_bytes"] > 0:
@@ -380,11 +400,27 @@ def compute_metrics(
             comparison_order,
             count,
         )
+        vector_metrics = _compute_xnyzip_vector_metrics(
+            original,
+            reconstructed,
+            manifest,
+            comparison_order,
+            count,
+        )
+        if vector_metrics:
+            metrics["xnyzip_l2"] = vector_metrics
 
     metrics["error_bound_consistency"] = _evaluate_error_bounds(
         metrics["fields"],
         manifest,
     )
+    if "xnyzip_l2" in metrics:
+        metrics["xnyzip_l2_error_bound_consistency"] = (
+            _evaluate_xnyzip_vector_bounds(
+                metrics["xnyzip_l2"],
+                manifest,
+            )
+        )
     _update_final_size_metrics(metrics, manifest)
     metrics["timing"]["metrics_wall_seconds"] = time.perf_counter() - started
     return metrics
@@ -445,6 +481,84 @@ def _compute_field_metrics(
     return results
 
 
+def _compute_xnyzip_vector_metrics(
+    original: h5py.File,
+    reconstructed: h5py.File,
+    manifest: Mapping[str, Any],
+    comparison_order: Optional[np.ndarray],
+    count: int,
+) -> Dict[str, Dict[str, Any]]:
+    triplets = []
+    if position_compressor_from_manifest(manifest) == "xynzip":
+        triplets.append(("positions", POSITION_FIELDS, "lcp_units"))
+    if velocity_compressor_from_manifest(manifest) == "xynzip":
+        triplets.append(("velocities", VELOCITY_FIELDS, "source_units"))
+
+    results = {}
+    scale = float(manifest["position_scale"]["value"])
+    for name, fields, units in triplets:
+        original_axes = []
+        reconstructed_axes = []
+        for logical in fields:
+            path = manifest["fields"][logical]["h5_path"]
+            original_values = original[path][:count].astype(np.float64)
+            if comparison_order is not None:
+                original_values = original_values[comparison_order]
+            reconstructed_values = reconstructed[path][:count].astype(
+                np.float64
+            )
+            if name == "positions":
+                original_values /= scale
+                reconstructed_values /= scale
+            original_axes.append(original_values)
+            reconstructed_axes.append(reconstructed_values)
+
+        difference = np.column_stack(reconstructed_axes) - np.column_stack(
+            original_axes
+        )
+        l2_error = np.linalg.norm(difference, axis=1)
+        results[name] = {
+            "count": count,
+            "norm": "l2",
+            "units": units,
+            "max_l2_error": float(l2_error.max(initial=0.0)),
+            "mean_l2_error": float(l2_error.mean()) if count else 0.0,
+            "rms_l2_error": (
+                float(math.sqrt(np.dot(l2_error, l2_error) / count))
+                if count
+                else 0.0
+            ),
+        }
+    return results
+
+
+def _evaluate_xnyzip_vector_bounds(
+    vector_metrics: Mapping[str, Mapping[str, Any]],
+    manifest: Mapping[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    results = {}
+    for name, observed in vector_metrics.items():
+        field_bound = manifest["field_error_bounds"][f"{name}_xnyzip"]
+        requested = float(field_bound["abs"])
+        maximum = float(observed["max_l2_error"])
+        tolerance = 1e-12 + 1e-6 * max(1.0, requested)
+        results[name] = {
+            "norm": "l2",
+            "mode": field_bound["mode"],
+            "relative_error_bound": field_bound.get("relative"),
+            "range_for_relative": field_bound.get("range"),
+            "range_units": field_bound.get("range_units"),
+            "requested_l2_bound": requested,
+            "compressor_l2_bound": float(field_bound["compressor_abs"]),
+            "preprocess_l2_allowance": float(
+                field_bound.get("preprocess_l2_max_abs", 0.0)
+            ),
+            "observed_max_l2_error": maximum,
+            "satisfied": bool(maximum <= requested + tolerance),
+        }
+    return results
+
+
 def _evaluate_error_bounds(
     field_metrics: Mapping[str, Mapping[str, Any]],
     manifest: Mapping[str, Any],
@@ -493,6 +607,28 @@ def _position_error_target(
     field_bound: Mapping[str, Any],
     manifest: Mapping[str, Any],
 ) -> Dict[str, Any]:
+    if position_compressor_from_manifest(manifest) == "xynzip":
+        vector_bound = manifest["field_error_bounds"][
+            "positions_xnyzip"
+        ]
+        requested = float(vector_bound["abs"])
+        return {
+            "mode": vector_bound["mode"],
+            "norm": "l2",
+            "relative_error_bound": vector_bound.get("relative"),
+            "range_for_relative": vector_bound.get("range"),
+            "range_units": vector_bound.get(
+                "range_units",
+                "lcp_units_bbox_diagonal",
+            ),
+            "requested_abs_bound": requested,
+            "compressor_abs_eb": float(vector_bound["compressor_abs"]),
+            "preprocess_cast_allowance": float(
+                vector_bound.get("preprocess_l2_max_abs", 0.0)
+            ),
+            "recombine_rounding_allowance": 0.0,
+            "effective_final_abs_bound": requested,
+        }
     fallback = float(manifest["error_bounds"]["positions_lcp_abs"])
     cast = float(
         manifest.get("preprocess", {})
@@ -528,6 +664,27 @@ def _velocity_error_target(
     field_bound: Mapping[str, Any],
     manifest: Mapping[str, Any],
 ) -> Dict[str, Any]:
+    if velocity_compressor_from_manifest(manifest) == "xynzip":
+        vector_bound = manifest["field_error_bounds"][
+            "velocities_xnyzip"
+        ]
+        requested = float(vector_bound["abs"])
+        return {
+            "mode": vector_bound["mode"],
+            "norm": "l2",
+            "relative_error_bound": vector_bound.get("relative"),
+            "range_for_relative": vector_bound.get("range"),
+            "range_units": vector_bound.get(
+                "range_units",
+                "source_units_bbox_diagonal",
+            ),
+            "requested_abs_bound": requested,
+            "compressor_abs_eb": float(vector_bound["compressor_abs"]),
+            "preprocess_cast_allowance": float(
+                vector_bound.get("preprocess_l2_max_abs", 0.0)
+            ),
+            "effective_final_abs_bound": requested,
+        }
     fallback = float(
         manifest["error_bounds"].get(
             "velocities_lcp_abs",

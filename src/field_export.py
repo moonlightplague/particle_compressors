@@ -175,6 +175,22 @@ def export_positions_for_xnyzip(
     count: int,
     force: bool,
 ) -> Tuple[str, Dict[str, Any]]:
+    return export_triplet_for_xnyzip(
+        position_paths,
+        POSITION_FIELDS,
+        output,
+        count,
+        force,
+    )
+
+
+def export_triplet_for_xnyzip(
+    field_paths: Mapping[str, str],
+    fields: Tuple[str, str, str],
+    output: Path,
+    count: int,
+    force: bool,
+) -> Tuple[str, Dict[str, Any]]:
     require_output_path(output, force)
     interleaved = np.memmap(
         output,
@@ -182,24 +198,26 @@ def export_positions_for_xnyzip(
         mode="w+",
         shape=(count, 3),
     )
-    for axis, logical in enumerate(POSITION_FIELDS):
+    for axis, logical in enumerate(fields):
         values = np.memmap(
-            position_paths[logical],
+            field_paths[logical],
             dtype=np.float32,
             mode="r",
         )
         if values.size != count:
             raise RuntimeError(
-                f"XnYZip position export expected {count} values in "
-                f"{position_paths[logical]}, got {values.size}."
+                f"XnYZip triplet export expected {count} values in "
+                f"{field_paths[logical]}, got {values.size}."
             )
         interleaved[:, axis] = values
+        del values
     interleaved.flush()
     del interleaved
     return str(output), {
         "dtype": "float32",
         "shape": [count, 3],
         "layout": "xyz_interleaved",
+        "fields": list(fields),
         "file_bytes": count * 3 * np.dtype(np.float32).itemsize,
     }
 
@@ -275,4 +293,3 @@ def _positive_scale(value: Any) -> float:
     if scale <= 0:
         raise RuntimeError("Position scale must be positive.")
     return scale
-

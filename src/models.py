@@ -12,6 +12,7 @@ class ToolPaths:
     """Paths to native executables used by the pipeline."""
 
     lcp: Path
+    xnyzip: Optional[Path] = None
 
 
 @dataclass(frozen=True)
