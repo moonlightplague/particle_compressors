@@ -14,8 +14,8 @@ advanced:
   # 0 selects up to 16 workers automatically for chunked velocity LCP.
   vel_chunk_workers: 0
   id_abs_eb: 0.0
-  pos_compressor: lcp
-  vel_compressor: sz3
+  pos_compressor: szo
+  vel_compressor: szo
   lossless: pcodec
 
   # Integer position conversion used before LCP compression.

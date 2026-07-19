@@ -84,7 +84,6 @@ def compress_szo_raw(
     config = config_type((encoded_count,))
     config.errorBoundMode = error_bound_mode.ABS
     config.absErrorBound = float(abs_error_bound)
-    config.cmprAlgo = algorithm.LORENZO_REG
     try:
         compressed, _ = szo.compress(encoded, config, copy=True)
     except Exception as exc:
