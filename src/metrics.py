@@ -185,6 +185,36 @@ def component_compression_ratios(
     return entries
 
 
+def field_group_compression_ratios(
+    report: Mapping[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Return combined size ratios for positions, IDs, and velocities."""
+
+    components = report.get("sizes", {}).get(
+        "compressed_components_bytes",
+        {},
+    )
+    component_ratios = component_compression_ratios(report)
+    velocity_bytes = compressed_bytes_with_prefixes(
+        components,
+        (
+            "compressed/velocities.lcp",
+            "compressed/velocity_order.",
+            "compressed/vx.",
+            "compressed/vy.",
+            "compressed/vz.",
+        ),
+    )
+    return {
+        "positions": component_ratios["xyz"],
+        "id": component_ratios["id"],
+        "velocities": _size_entry(
+            original_bytes_for_fields(report, VELOCITY_FIELDS),
+            velocity_bytes,
+        ),
+    }
+
+
 def print_component_summary(report: Mapping[str, Any]) -> None:
     ratios = component_compression_ratios(report)
     print("component_CR:")

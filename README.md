@@ -105,7 +105,9 @@ after the source file, such as `particle_pipeline_runs/snapshots/step_01.h5`.
 Per-file console metrics are printed as usual, and the batch root receives
 `batch_metrics.json` with byte-weighted total compression ratio, aggregate
 stage timings, observed batch wall time, throughput, per-file statistics, and
-per-field `max_abs`, `mse`, and `psnr` quality metrics for each roundtrip.
+separate byte-weighted total CRs for positions, IDs, and velocities. It also
+records per-field `max_abs`, `mse`, and `psnr` quality metrics for each
+roundtrip.
 Directory globbing is non-recursive and matches the `.h5` extension exactly.
 
 With `--pos-compressor lcp --vel-compressor sz3`, the compressed directory

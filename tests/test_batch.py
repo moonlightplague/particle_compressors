@@ -14,6 +14,7 @@ from src.batch import (
     BatchFileResult,
     build_batch_metrics,
     discover_h5_files,
+    print_batch_summary,
 )
 from src.runtime import read_json
 
@@ -89,6 +90,82 @@ class BatchPipelineTests(unittest.TestCase):
             ],
             4.0,
         )
+
+    def test_batch_summary_reports_byte_weighted_field_group_crs(self) -> None:
+        first = self._result(
+            "a.h5",
+            particles=10,
+            original_bytes=320,
+            compressed_bytes=100,
+            wall_seconds=4.0,
+            preprocess_seconds=1.0,
+        )
+        second = self._result(
+            "b.h5",
+            particles=30,
+            original_bytes=960,
+            compressed_bytes=300,
+            wall_seconds=6.0,
+            preprocess_seconds=2.0,
+        )
+        fields = {
+            "id": {"dtype": "uint64"},
+            **{
+                logical: {"dtype": "float32"}
+                for logical in ("x", "y", "z", "vx", "vy", "vz")
+            },
+        }
+        first.report["fields"] = fields
+        first.report["sizes"]["compressed_components_bytes"] = {
+            "compressed/positions.lcp": 20,
+            "compressed/order.pco": 10,
+            "compressed/id.pco": 10,
+            "compressed/velocities.lcp": 25,
+            "compressed/velocity_order.pco": 5,
+        }
+        second.report["fields"] = fields
+        second.report["sizes"]["compressed_components_bytes"] = {
+            "compressed/x.psz": 40,
+            "compressed/y.psz": 40,
+            "compressed/z.psz": 40,
+            "compressed/id.pco": 60,
+            "compressed/vx.szo": 30,
+            "compressed/vy.szo": 30,
+            "compressed/vz.szo": 30,
+        }
+
+        metrics = build_batch_metrics(
+            Path("/inputs"),
+            "roundtrip",
+            2,
+            [first, second],
+            batch_wall_seconds=7.0,
+        )
+
+        groups = metrics["sizes"]["field_groups"]
+        self.assertEqual(groups["positions"]["original_bytes_total"], 480)
+        self.assertEqual(groups["positions"]["compressed_bytes_total"], 150)
+        self.assertTrue(
+            math.isclose(groups["positions"]["compression_ratio"], 3.2)
+        )
+        self.assertTrue(
+            math.isclose(
+                groups["id"]["compression_ratio"],
+                320 / 70,
+            )
+        )
+        self.assertTrue(
+            math.isclose(groups["velocities"]["compression_ratio"], 4.0)
+        )
+
+        output = StringIO()
+        with redirect_stdout(output):
+            print_batch_summary(metrics, Path("/outputs/batch_metrics.json"))
+
+        summary = output.getvalue()
+        self.assertIn("positions_CR_total = 3.2", summary)
+        self.assertIn("id_CR_total = 4.57143", summary)
+        self.assertIn("velocities_CR_total = 4", summary)
 
     def test_batch_metrics_include_each_files_field_quality_metrics(
         self,

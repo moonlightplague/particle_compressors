@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from src.constants import POSITION_FIELDS
+from src.metrics import field_group_compression_ratios
 
 
 MAX_AUTOMATIC_FILE_WORKERS = 16
+FIELD_GROUPS = ("positions", "id", "velocities")
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,10 @@ def build_batch_metrics(
         if complete_batch_compression
         else None
     )
+    field_groups = _aggregate_field_group_sizes(
+        successful,
+        complete_batch_compression,
+    )
 
     file_seconds = [result.wall_seconds for result in successful]
     ratios = [
@@ -141,6 +147,7 @@ def build_batch_metrics(
                 compressed_bytes if complete_batch_compression else None
             ),
             "payload_compression_ratio": total_ratio,
+            "field_groups": field_groups,
         },
         "timing": {
             "batch_wall_seconds": batch_wall_seconds,
@@ -190,6 +197,17 @@ def print_batch_summary(
         "payload_CR_total = "
         f"{_format_number(ratio) if ratio is not None else 'n/a'}"
     )
+    for name in FIELD_GROUPS:
+        field_ratio = sizes["field_groups"][name]["compression_ratio"]
+        ratio_label = (
+            _format_number(field_ratio)
+            if field_ratio is not None
+            else "n/a"
+        )
+        print(
+            f"{name}_CR_total = "
+            f"{ratio_label}"
+        )
     print(
         "original_payload_bytes_total = "
         f"{sizes['selected_original_payload_bytes_total']}"
@@ -321,6 +339,57 @@ def _sum_stage_timings(
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 totals[name] = totals.get(name, 0.0) + float(value)
     return dict(sorted(totals.items()))
+
+
+def _aggregate_field_group_sizes(
+    results: Sequence[BatchFileResult],
+    complete_batch_compression: bool,
+) -> Dict[str, Dict[str, Any]]:
+    unavailable = {
+        name: {
+            "original_bytes_total": None,
+            "compressed_bytes_total": None,
+            "compression_ratio": None,
+        }
+        for name in FIELD_GROUPS
+    }
+    if not complete_batch_compression:
+        return unavailable
+
+    totals = {
+        name: {"original_bytes_total": 0, "compressed_bytes_total": 0}
+        for name in FIELD_GROUPS
+    }
+    for result in results:
+        if result.report is None:
+            return unavailable
+        components = result.report.get("sizes", {}).get(
+            "compressed_components_bytes"
+        )
+        if not isinstance(components, Mapping):
+            return unavailable
+        try:
+            groups = field_group_compression_ratios(result.report)
+        except (KeyError, RuntimeError, TypeError, ValueError):
+            return unavailable
+        for name in FIELD_GROUPS:
+            totals[name]["original_bytes_total"] += int(
+                groups[name]["original_bytes"]
+            )
+            totals[name]["compressed_bytes_total"] += int(
+                groups[name]["compressed_bytes"]
+            )
+
+    return {
+        name: {
+            **values,
+            "compression_ratio": _compression_ratio(
+                values["original_bytes_total"],
+                values["compressed_bytes_total"],
+            ),
+        }
+        for name, values in totals.items()
+    }
 
 
 def _report_particle_count(report: Mapping[str, Any]) -> int:
