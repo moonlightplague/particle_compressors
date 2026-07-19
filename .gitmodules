@@ -7,3 +7,6 @@
 [submodule "tools/SZo"]
 	path = tools/SZo
 	url = https://github.com/BingluCS/SZo.git
+[submodule "tools/XnYZip"]
+	path = tools/XnYZip
+	url = https://github.com/moonlightplague/XnYZip.git

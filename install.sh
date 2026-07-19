@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-LCP_SOURCE="${PROJECT_ROOT}/tools/LCP"
-LCP_BUILD="${LCP_SOURCE}/build"
+cd tools/LCP
+cmake -B build -DCMAKE_INSTALL_PREFIX:PATH=build
+cmake --build build --target lcp
+cmake --install build
+cd ../..
 
-cmake \
-  -S "${LCP_SOURCE}" \
-  -B "${LCP_BUILD}" \
-  -DCMAKE_INSTALL_PREFIX:PATH="${LCP_BUILD}"
-cmake --build "${LCP_BUILD}" --target lcp
-cmake --install "${LCP_BUILD}"
+python -m pip install -r requirements.txt
 
-python -m pip install -r "${PROJECT_ROOT}/requirements.txt"
+cd tools/XnYZip
+conan install . -s build_type=Release -b missing
+cmake -S . -B build \
+  -D CMAKE_BUILD_TYPE=Release \
+  -D CMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -D CMAKE_TOOLCHAIN_FILE=conan/conan_toolchain.cmake
+cmake --build build --parallel
+cd ../..
