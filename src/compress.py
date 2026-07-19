@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
+from src.cli import validate_compressor_combination
 from src.constants import (
     LCP_CHUNK_CONTAINER,
     MAX_INT32_ORDER_VALUES,
@@ -60,6 +61,7 @@ class CompressionSettings:
     def from_args(cls, args: argparse.Namespace) -> "CompressionSettings":
         position_codec = getattr(args, "pos_compressor", "lcp")
         velocity_codec = args.vel_compressor
+        validate_compressor_combination(position_codec, velocity_codec)
         sort_requested = bool(getattr(args, "sort", False))
         sort_by_id = (
             sort_requested
@@ -122,8 +124,6 @@ class CompressionPipeline:
     def _select_canonical_order(self) -> CanonicalOrder:
         if self.settings.position_codec == "lcp":
             return self._compress_canonical_positions()
-        if self.settings.velocity_codec == "lcp":
-            return self._compress_canonical_velocities()
         if self.settings.sort_by_id:
             return self._id_sorted_order()
         return CanonicalOrder()
@@ -178,35 +178,13 @@ class CompressionPipeline:
             values=read_lcp_permutation(str(order_path), self.count),
         )
 
-    def _compress_canonical_velocities(self) -> CanonicalOrder:
-        order_path = self.preprocessed_dir / "velocity_order.i32.raw"
-        self.raw_paths["velocity_order"] = str(order_path)
-        compress_lcp_triplet(
-            self.tools,
-            self._raw_triplet(VELOCITY_FIELDS, suffix="_lcp"),
-            self.artifacts["velocities"],
-            self.count,
-            float(self.manifest["error_bounds"]["velocities_lcp_abs"]),
-            order_path,
-            self.settings.force,
-        )
-        return CanonicalOrder(
-            mapping="lcp_velocity_sorted",
-            field="velocities",
-            artifact="velocity_order",
-            artifact_dtype="int32",
-            values=read_lcp_permutation(str(order_path), self.count),
-        )
-
     def _record_ordering(self, order: CanonicalOrder) -> None:
         reconstructed_rows = {
             "mapping": order.mapping,
             "original_row_order_restored": not order.is_reordered,
             "canonical_field": order.field,
             "canonical_lcp_field": (
-                order.field
-                if order.field in ("positions", "velocities")
-                else None
+                "positions" if order.field == "positions" else None
             ),
             "lcp_permutation_stored": False,
             "temporary_permutation_artifact": order.artifact,
@@ -216,9 +194,6 @@ class CompressionPipeline:
         if order.field == "positions":
             reconstructed_rows["position_permutation_stored"] = False
             id_ordering["replaces_lcp_position_order"] = True
-        elif order.field == "velocities":
-            reconstructed_rows["velocity_permutation_stored"] = False
-            id_ordering["replaces_lcp_velocity_order"] = True
         self.manifest["ordering"] = {
             "reconstructed_rows": reconstructed_rows,
             "id": id_ordering,
@@ -290,39 +265,28 @@ class CompressionPipeline:
         self.manifest["ordering"]["velocities"] = {"mapping": order.mapping}
 
     def _compress_lcp_velocities(self, order: CanonicalOrder) -> None:
-        if self.settings.position_codec == "lcp":
-            self._compress_secondary_lcp_velocities(order)
+        self._compress_secondary_lcp_velocities(order)
 
         compressed_path = self.artifacts["velocities"]
-        chunk_size = (
-            self.settings.velocity_chunk_size
-            if self.settings.position_codec == "lcp"
-            else 0
-        )
         self.compressed_fields["velocities"] = self._lcp_field_metadata(
             "velocities",
             VELOCITY_FIELDS,
             compressed_path,
             float(self.manifest["error_bounds"]["velocities_lcp_abs"]),
-            chunk_size=chunk_size,
+            chunk_size=self.settings.velocity_chunk_size,
         )
-        if self.settings.position_codec == "lcp":
-            self.manifest["ordering"]["velocities"] = {
-                "mapping": (
-                    "lcp_velocity_sorted_index_to_lcp_position_sorted_row"
-                ),
-                "field": "velocity_order",
-                "index_scope": (
-                    "chunk_local"
-                    if self.settings.velocity_chunk_size
-                    else "global"
-                ),
-                "chunk_size": self.settings.velocity_chunk_size,
-            }
-        else:
-            self.manifest["ordering"]["velocities"] = {
-                "mapping": order.mapping
-            }
+        self.manifest["ordering"]["velocities"] = {
+            "mapping": (
+                "lcp_velocity_sorted_index_to_lcp_position_sorted_row"
+            ),
+            "field": "velocity_order",
+            "index_scope": (
+                "chunk_local"
+                if self.settings.velocity_chunk_size
+                else "global"
+            ),
+            "chunk_size": self.settings.velocity_chunk_size,
+        }
 
     def _compress_secondary_lcp_velocities(
         self,
@@ -469,9 +433,8 @@ class CompressionPipeline:
     def _raw_triplet(
         self,
         fields: Tuple[str, str, str],
-        suffix: str = "",
     ) -> Tuple[str, str, str]:
-        return tuple(self.raw_paths[f"{field}{suffix}"] for field in fields)
+        return tuple(self.raw_paths[field] for field in fields)
 
     def _lcp_field_metadata(
         self,

@@ -1,4 +1,4 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import tempfile
 import unittest
@@ -9,6 +9,7 @@ from unittest.mock import patch
 import h5py
 import numpy as np
 
+import main as particle_main
 from src.cli import AVAILABLE_COMPRESSORS, build_parser
 from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
 from src.compress import CompressionSettings
@@ -43,103 +44,110 @@ FIELDS = {
 
 
 class CompressionOrderingTests(unittest.TestCase):
-    def test_velocity_lcp_reorders_id_and_sz3_positions_and_omits_velocity_order(self) -> None:
-        count = 5
-        velocity_order = np.array([1, 4, 0, 3, 2], dtype=np.int32)
-        source = {
-            "x": np.array([10, 20, 30, 40, 50], dtype=np.float32),
-            "y": np.array([11, 21, 31, 41, 51], dtype=np.float32),
-            "z": np.array([12, 22, 32, 42, 52], dtype=np.float32),
-            "id": np.array([901, 117, 502, 330, 774], dtype=np.uint64),
-            "vx": np.array([1, 2, 3, 4, 5], dtype=np.float32),
-            "vy": np.array([6, 7, 8, 9, 10], dtype=np.float32),
-            "vz": np.array([11, 12, 13, 14, 15], dtype=np.float32),
-        }
+    def test_velocity_lcp_requires_lcp_positions_at_compression_entry(
+        self,
+    ) -> None:
+        for position_codec in ("sz3", "szo"):
+            with self.subTest(position_codec=position_codec):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "--vel-compressor lcp requires --pos-compressor lcp",
+                ):
+                    compress_pipeline(
+                        SimpleNamespace(
+                            work_dir="unused",
+                            pos_compressor=position_codec,
+                            vel_compressor="lcp",
+                            vel_chunk_size=0,
+                            vel_chunk_workers=0,
+                            force=False,
+                            sort=False,
+                        ),
+                        {},
+                        {},
+                        SimpleNamespace(lcp=Path("lcp")),
+                    )
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            preprocessed = root / "preprocessed"
-            compressed = root / "compressed"
-            preprocessed.mkdir()
-            compressed.mkdir()
-            raw_paths = {}
-            for logical, values in source.items():
-                path = preprocessed / f"{logical}.raw"
-                values.tofile(path)
-                raw_paths[logical] = str(path)
-                if logical in ("vx", "vy", "vz"):
-                    raw_paths[f"{logical}_lcp"] = str(path)
+    def test_cli_rejects_velocity_lcp_with_fieldwise_positions(
+        self,
+    ) -> None:
+        for position_codec in ("sz3", "szo"):
+            with self.subTest(position_codec=position_codec):
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    result = particle_main.main(
+                        [
+                            "compress",
+                            "input.h5",
+                            "--pos-compressor",
+                            position_codec,
+                            "--vel-compressor",
+                            "lcp",
+                        ]
+                    )
 
-            artifacts = {
-                "x": str(compressed / "x.psz"),
-                "y": str(compressed / "y.psz"),
-                "z": str(compressed / "z.psz"),
-                "id": str(compressed / "id.pco"),
-                "velocities": str(compressed / "velocities.lcp"),
-            }
-            manifest = {
-                "count": count,
-                "fields": {
-                    logical: {"dtype": str(values.dtype)}
-                    for logical, values in source.items()
-                },
-                "error_bounds": {"velocities_lcp_abs": 0.01},
-                "field_error_bounds": {
-                    logical: {"abs": 0.01, "compressor_abs": 0.01}
-                    for logical in ("x", "y", "z")
-                },
-                "artifacts": {
-                    "preprocessed": raw_paths,
-                    "compressed": artifacts,
-                },
-                "compressed_fields": {},
-                "sizes": {"selected_original_payload_bytes": 160},
-            }
-            args = SimpleNamespace(
-                work_dir=str(root),
-                force=False,
-                lossless="pcodec",
-                pos_compressor="sz3",
-                vel_compressor="lcp",
-            )
-            captured = {}
-
-            def fake_run_command(argv):
-                Path(argv[argv.index("-z") + 1]).write_bytes(b"lcp")
-                velocity_order.tofile(argv[-1])
-
-            def fake_integer(codec, raw_path, dtype, compressed_path, field_name, *unused):
-                captured[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
-                Path(compressed_path).write_bytes(b"integer")
-                return {"field": field_name, "codec": codec, "dtype": dtype, "count": count}
-
-            def fake_position(codec, raw_path, dtype, compressed_path, field_name, *unused):
-                self.assertEqual(codec, "sz3")
-                captured[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
-                Path(compressed_path).write_bytes(b"position")
-                return {"field": field_name, "codec": "pysz", "dtype": dtype, "count": count}
-
-            with patch("src.lcp_codec.run_command", side_effect=fake_run_command), patch(
-                "src.compress.compress_integer_raw", side_effect=fake_integer
-            ), patch("src.compress.compress_lossy_raw", side_effect=fake_position), patch(
-                "src.compress.update_compressed_size_metrics"
-            ):
-                result = compress_pipeline(
-                    args,
-                    manifest,
-                    raw_paths,
-                    SimpleNamespace(lcp=Path("lcp")),
+                self.assertEqual(result, 2)
+                self.assertIn(
+                    "error: --vel-compressor lcp requires "
+                    "--pos-compressor lcp.",
+                    stderr.getvalue(),
                 )
 
-            self.assertNotIn("velocity_order", result["compressed_fields"])
-            self.assertNotIn("velocity_order", result["artifacts"]["compressed"])
-            self.assertFalse(
-                result["ordering"]["reconstructed_rows"][
-                    "velocity_permutation_stored"
-                ]
-            )
-            for logical in ("id", "x", "y", "z"):
-                np.testing.assert_array_equal(captured[logical], source[logical][velocity_order])
+    def test_preprocess_rejects_deprecated_combination_before_writing(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            work_dir = root / "work"
+            argv = [
+                "preprocess",
+                str(root / "missing.h5"),
+                "--work-dir",
+                str(work_dir),
+                "--pos-compressor",
+                "sz3",
+                "--vel-compressor",
+                "lcp",
+            ]
+            args = build_parser(argv).parse_args(argv)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "--vel-compressor lcp requires --pos-compressor lcp",
+            ):
+                preprocess_pipeline(args)
+
+            self.assertFalse(work_dir.exists())
+
+    def test_compression_settings_accepts_all_remaining_combinations(
+        self,
+    ) -> None:
+        combinations = (
+            ("lcp", "sz3"),
+            ("lcp", "szo"),
+            ("lcp", "lcp"),
+            ("sz3", "sz3"),
+            ("sz3", "szo"),
+            ("szo", "sz3"),
+            ("szo", "szo"),
+        )
+        for position_codec, velocity_codec in combinations:
+            with self.subTest(
+                position_codec=position_codec,
+                velocity_codec=velocity_codec,
+            ):
+                settings = CompressionSettings.from_args(
+                    SimpleNamespace(
+                        pos_compressor=position_codec,
+                        vel_compressor=velocity_codec,
+                        vel_chunk_size=0,
+                        vel_chunk_workers=0,
+                        force=False,
+                        sort=False,
+                    )
+                )
+                self.assertEqual(settings.position_codec, position_codec)
+                self.assertEqual(settings.velocity_codec, velocity_codec)
 
     def test_compress_reorders_id_and_sz3_velocities_and_omits_position_order(self) -> None:
         count = 5
@@ -398,10 +406,10 @@ class CompressionOrderingTests(unittest.TestCase):
                 },
             )
 
-    def test_id_sort_is_disabled_when_either_triplet_uses_lcp(self) -> None:
+    def test_id_sort_is_disabled_when_positions_use_lcp(self) -> None:
         for position_codec, velocity_codec in (
+            ("lcp", "sz3"),
             ("lcp", "szo"),
-            ("sz3", "lcp"),
             ("lcp", "lcp"),
         ):
             with self.subTest(
@@ -467,7 +475,9 @@ class RecombinationTests(unittest.TestCase):
                 for logical, values in original.items():
                     np.testing.assert_array_equal(h5[logical][:], values[position_order])
 
-    def test_recombine_accepts_shared_lcp_velocity_order_without_sidecar(self) -> None:
+    def test_recombine_keeps_legacy_velocity_lcp_packages_readable(
+        self,
+    ) -> None:
         count = 5
         velocity_order = np.array([1, 4, 0, 3, 2], dtype=np.intp)
         original = {

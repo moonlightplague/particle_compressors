@@ -111,22 +111,22 @@ roundtrip.
 Directory globbing is non-recursive and matches the `.h5` extension exactly.
 
 With `--pos-compressor lcp --vel-compressor sz3`, the compressed directory
-contains `positions.lcp`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`. With
-`--pos-compressor sz3 --vel-compressor lcp`, it contains `x.psz`, `y.psz`,
-`z.psz`, `id.pco`, and `velocities.lcp`. Neither asymmetric configuration
-stores an LCP order sidecar. If both triplets use LCP, `velocity_order.pco` is
-also stored. Except for optional velocity LCP chunking, the pipeline does not
-split fields into parts. Preprocessing, reconstruction, and metrics therefore
-still load a complete field into memory at once. Manifests produced by the
-older part-based format are not accepted by this format.
+contains `positions.lcp`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`, without
+an LCP order sidecar. If both triplets use LCP, `velocity_order.pco` is also
+stored. `--vel-compressor lcp` requires `--pos-compressor lcp`; configurations
+that combine LCP velocities with fieldwise-compressed positions are rejected.
+Except for optional velocity LCP chunking, the pipeline does not split fields
+into parts. Preprocessing, reconstruction, and metrics therefore still load a
+complete field into memory at once. Manifests produced by the older part-based
+format are not accepted by this format.
 
-LCP sorts its input triplet before encoding it. In either asymmetric pipeline,
-the pipeline adopts the LCP-sorted order as the reconstructed particle order
-and applies the same temporary permutation to the ID and fieldwise-compressed
-triplet. Consequently no order sidecar is stored, while every reconstructed row
-still contains the corresponding ID, position, and velocity. When both
-triplets use LCP, position order is canonical and the independently sorted
-velocity stream still requires `velocity_order.pco`.
+LCP sorts its input triplet before encoding it. When only positions use LCP,
+the pipeline adopts the LCP-sorted position order as the reconstructed particle
+order and applies the same temporary permutation to the ID and fieldwise-
+compressed velocities. Consequently no order sidecar is stored, while every
+reconstructed row still contains the corresponding ID, position, and velocity.
+When both triplets use LCP, position order is canonical and the independently
+sorted velocity stream still requires `velocity_order.pco`.
 
 ## Chunked Velocity LCP
 
@@ -202,7 +202,7 @@ python main.py roundtrip data/sample.h5 \
 The reconstructed rows remain in ascending-ID order, and roundtrip metrics use
 the recorded temporary permutation to compare each row with its source
 particle. Without `--sort`, the current input-order pipeline is unchanged. The
-flag is ignored when either triplet uses LCP because LCP already determines the
+flag is ignored when positions use LCP because LCP already determines the
 pipeline's canonical particle order.
 
 ## Integer Compression

@@ -44,6 +44,16 @@ NULLABLE_NUMBER_KEYS = (
 )
 
 
+def validate_compressor_combination(
+    position_codec: str,
+    velocity_codec: str,
+) -> None:
+    if velocity_codec == "lcp" and position_codec != "lcp":
+        raise RuntimeError(
+            "--vel-compressor lcp requires --pos-compressor lcp."
+        )
+
+
 def load_config(path: str) -> Tuple[Path, Dict[str, Any]]:
     config_path = Path(path).expanduser().resolve()
     if not config_path.is_file():
@@ -334,7 +344,10 @@ def _add_compression_arguments(
         "--vel-compressor",
         choices=AVAILABLE_COMPRESSORS["vel_compressor"],
         default=defaults["vel_compressor"],
-        help="Velocity triplet compressor (default: %(default)s).",
+        help=(
+            "Velocity triplet compressor; lcp requires --pos-compressor lcp "
+            "(default: %(default)s)."
+        ),
     )
     parser.add_argument(
         "--sort",

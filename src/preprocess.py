@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 import h5py
 import numpy as np
 
+from src.cli import validate_compressor_combination
 from src.constants import (
     LOGICAL_ORDER,
     MAX_INT32_ORDER_VALUES,
@@ -355,6 +356,7 @@ def build_compressed_artifacts(
     position_codec: str,
     velocity_codec: str,
 ) -> Dict[str, str]:
+    validate_compressor_combination(position_codec, velocity_codec)
     artifacts = {"id": str(compressed_dir / "id.pco")}
     if position_codec == "lcp":
         artifacts["positions"] = str(compressed_dir / "positions.lcp")
@@ -368,10 +370,9 @@ def build_compressed_artifacts(
         )
     if velocity_codec == "lcp":
         artifacts["velocities"] = str(compressed_dir / "velocities.lcp")
-        if position_codec == "lcp":
-            artifacts["velocity_order"] = str(
-                compressed_dir / "velocity_order.pco"
-            )
+        artifacts["velocity_order"] = str(
+            compressed_dir / "velocity_order.pco"
+        )
     else:
         extension = _lossy_extension(velocity_codec)
         artifacts.update(
@@ -397,6 +398,10 @@ def preprocess(
 
 
 def _validate_preprocess_args(args: argparse.Namespace) -> None:
+    validate_compressor_combination(
+        args.pos_compressor,
+        args.vel_compressor,
+    )
     chunk_size = int(getattr(args, "vel_chunk_size", 0))
     workers = int(getattr(args, "vel_chunk_workers", 0))
     if chunk_size < 0:

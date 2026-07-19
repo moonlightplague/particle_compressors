@@ -18,7 +18,7 @@ from src.batch import (
     print_batch_summary,
     resolve_file_workers,
 )
-from src.cli import build_parser
+from src.cli import build_parser, validate_compressor_combination
 from src.compress import compress
 from src.decompress import decompress
 from src.metrics import (
@@ -254,6 +254,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser(argv)
     args = parser.parse_args(argv)
     try:
+        if hasattr(args, "pos_compressor"):
+            validate_compressor_combination(
+                args.pos_compressor,
+                args.vel_compressor,
+            )
         if hasattr(args, "input_h5") and Path(args.input_h5).is_dir():
             return DirectoryPipelineApplication(args).run()
         return PipelineApplication(args).run()
