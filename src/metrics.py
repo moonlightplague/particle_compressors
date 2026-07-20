@@ -30,7 +30,11 @@ class MetricAccumulator:
     minimum: float = math.inf
     maximum: float = -math.inf
 
-    def update(self, original: np.ndarray, reconstructed: np.ndarray) -> None:
+    def update(
+        self,
+        original: np.ndarray,
+        reconstructed: np.ndarray,
+    ) -> np.ndarray:
         original64 = original.astype(np.float64, copy=False)
         reconstructed64 = reconstructed.astype(np.float64, copy=False)
         difference = reconstructed64 - original64
@@ -46,6 +50,7 @@ class MetricAccumulator:
         if original.size:
             self.minimum = min(self.minimum, float(original64.min()))
             self.maximum = max(self.maximum, float(original64.max()))
+        return difference
 
     def finalize(self) -> Dict[str, Any]:
         if self.count == 0:
@@ -393,14 +398,7 @@ def compute_metrics(
             ),
             "alignment_source": comparison_source,
         }
-        metrics["fields"] = _compute_field_metrics(
-            original,
-            reconstructed,
-            manifest,
-            comparison_order,
-            count,
-        )
-        vector_metrics = _compute_xnyzip_vector_metrics(
+        metrics["fields"], vector_metrics = _compute_field_metrics(
             original,
             reconstructed,
             manifest,
@@ -432,9 +430,23 @@ def _compute_field_metrics(
     manifest: Mapping[str, Any],
     comparison_order: Optional[np.ndarray],
     count: int,
-) -> Dict[str, Dict[str, Any]]:
+) -> Tuple[
+    Dict[str, Dict[str, Any]],
+    Dict[str, Dict[str, Any]],
+]:
     results = {}
     scale = float(manifest["position_scale"]["value"])
+    xnyzip_groups = {}
+    if position_compressor_from_manifest(manifest) == "xnyzip":
+        xnyzip_groups.update(
+            {logical: "positions" for logical in POSITION_FIELDS}
+        )
+    if velocity_compressor_from_manifest(manifest) == "xnyzip":
+        xnyzip_groups.update(
+            {logical: "velocities" for logical in VELOCITY_FIELDS}
+        )
+    vector_squared_errors: Dict[str, np.ndarray] = {}
+
     for logical in LOGICAL_ORDER:
         field = manifest["fields"][logical]
         original_dataset = original[field["h5_path"]]
@@ -457,12 +469,23 @@ def _compute_field_metrics(
             )
 
         if logical in POSITION_FIELDS:
-            accumulator.update(
+            difference = accumulator.update(
                 original_values.astype(np.float64) / scale,
                 reconstructed_values.astype(np.float64) / scale,
             )
         else:
-            accumulator.update(original_values, reconstructed_values)
+            difference = accumulator.update(
+                original_values,
+                reconstructed_values,
+            )
+
+        vector_group = xnyzip_groups.get(logical)
+        if vector_group is not None:
+            np.square(difference, out=difference)
+            if vector_group in vector_squared_errors:
+                vector_squared_errors[vector_group] += difference
+            else:
+                vector_squared_errors[vector_group] = difference
 
         field_metrics = accumulator.finalize()
         field_metrics["original_dtype"] = str(original_dataset.dtype)
@@ -478,6 +501,34 @@ def _compute_field_metrics(
                 fixed_point_accumulator.finalize()
             )
         results[logical] = field_metrics
+    return results, _finalize_xnyzip_vector_metrics(
+        vector_squared_errors,
+        count,
+    )
+
+
+def _finalize_xnyzip_vector_metrics(
+    squared_errors: Mapping[str, np.ndarray],
+    count: int,
+) -> Dict[str, Dict[str, Any]]:
+    results = {}
+    for name, l2_squared in squared_errors.items():
+        sum_squared = float(l2_squared.sum())
+        np.sqrt(l2_squared, out=l2_squared)
+        results[name] = {
+            "count": count,
+            "norm": "l2",
+            "units": (
+                "lcp_units" if name == "positions" else "source_units"
+            ),
+            "max_l2_error": float(l2_squared.max(initial=0.0)),
+            "mean_l2_error": (
+                float(l2_squared.mean()) if count else 0.0
+            ),
+            "rms_l2_error": (
+                float(math.sqrt(sum_squared / count)) if count else 0.0
+            ),
+        }
     return results
 
 

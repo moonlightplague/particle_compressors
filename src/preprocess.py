@@ -145,6 +145,11 @@ class PreprocessingPipeline:
         count: int,
         position_scale: PositionScale,
     ) -> None:
+        xnyzip_position_path = (
+            self.workspace.raw / "positions.xnyzip.f32.raw"
+            if self.args.pos_compressor == "xnyzip"
+            else None
+        )
         position_paths, position_stats = export_positions_for_lcp(
             source,
             fields,
@@ -152,18 +157,24 @@ class PreprocessingPipeline:
             count,
             position_scale,
             self.args.force,
+            xnyzip_output=xnyzip_position_path,
         )
         self.raw_paths.update(position_paths)
         self.statistics["positions"] = position_stats
-        if self.args.pos_compressor == "xnyzip":
-            xnyzip_path, xnyzip_stats = export_positions_for_xnyzip(
-                position_paths,
-                self.workspace.raw / "positions.xnyzip.f32.raw",
-                count,
-                self.args.force,
+        if xnyzip_position_path is not None:
+            self.raw_paths["positions_xnyzip"] = str(
+                xnyzip_position_path
             )
-            self.raw_paths["positions_xnyzip"] = xnyzip_path
-            self.statistics["positions_xnyzip"] = xnyzip_stats
+            self.statistics["positions_xnyzip"] = {
+                "dtype": "float32",
+                "shape": [count, 3],
+                "layout": "xyz_interleaved",
+                "fields": list(POSITION_FIELDS),
+                "file_bytes": (
+                    count * 3 * np.dtype(np.float32).itemsize
+                ),
+                "interleaved_during_position_export": True,
+            }
         self._export_id(source, fields, count)
         self._export_velocities(source, fields, count)
 

@@ -22,7 +22,9 @@ from src.constants import (
     VELOCITY_FIELDS,
     XNYZIP_CHUNK_CONTAINER,
 )
-from src.field_export import export_triplet_for_xnyzip
+from src.field_export import (
+    export_ordered_triplet_for_xnyzip,
+)
 from src.lcp_codec import (
     compress_chunked_lcp_triplet,
     compress_lcp_triplet,
@@ -333,31 +335,17 @@ class CompressionPipeline:
                 "order."
             )
 
-        def reorder_velocity(logical: str) -> Tuple[str, str]:
-            return logical, reorder_raw(
-                self.raw_paths[f"{logical}_xnyzip"],
-                "float32",
-                self.preprocessed_dir
-                / f"{logical}.{order.mapping}.float32.raw",
-                self.count,
-                order.values,
-                self.settings.force,
-            )
-
-        with ThreadPoolExecutor(max_workers=len(VELOCITY_FIELDS)) as executor:
-            ordered_paths = dict(
-                executor.map(reorder_velocity, VELOCITY_FIELDS)
-            )
-        for logical, path in ordered_paths.items():
-            self.raw_paths[f"{logical}_canonical_ordered"] = path
-
         interleaved_path, interleaved_metadata = (
-            export_triplet_for_xnyzip(
-                ordered_paths,
+            export_ordered_triplet_for_xnyzip(
+                {
+                    logical: self.raw_paths[f"{logical}_xnyzip"]
+                    for logical in VELOCITY_FIELDS
+                },
                 VELOCITY_FIELDS,
                 self.preprocessed_dir
                 / "velocities.xnyzip.canonical.f32.raw",
                 self.count,
+                order.values,
                 self.settings.force,
             )
         )
