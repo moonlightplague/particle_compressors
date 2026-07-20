@@ -53,6 +53,7 @@ from src.runtime import (
     repo_root,
     require_output_path,
     resolve_lcp_chunk_workers,
+    resolve_velocity_chunk_workers,
     run_command,
     write_json,
 )
@@ -209,6 +210,7 @@ __all__ = [
     "repo_root",
     "require_output_path",
     "resolve_lcp_chunk_workers",
+    "resolve_velocity_chunk_workers",
     "report_count",
     "report_field_dtype",
     "run_command",

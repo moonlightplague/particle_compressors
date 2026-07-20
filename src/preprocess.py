@@ -463,18 +463,24 @@ def _validate_preprocess_args(args: argparse.Namespace) -> None:
     workers = int(getattr(args, "vel_chunk_workers", 0))
     if chunk_size < 0:
         raise RuntimeError("--vel-chunk-size must be non-negative.")
-    if chunk_size > MAX_INT32_ORDER_VALUES:
+    if (
+        args.pos_compressor == "lcp"
+        and args.vel_compressor == "lcp"
+        and chunk_size > MAX_INT32_ORDER_VALUES
+    ):
         raise RuntimeError(
             "--vel-chunk-size cannot exceed 2^31 when using int32 order indices."
         )
     if workers < 0:
         raise RuntimeError("--vel-chunk-workers must be non-negative.")
-    if chunk_size and not (
-        args.pos_compressor == "lcp" and args.vel_compressor == "lcp"
-    ):
+    chunked_pair = (
+        args.pos_compressor == args.vel_compressor
+        and args.pos_compressor in ("lcp", "xnyzip")
+    )
+    if chunk_size and not chunked_pair:
         raise RuntimeError(
             "--vel-chunk-size is only supported when both --pos-compressor "
-            "and --vel-compressor are lcp."
+            "and --vel-compressor are lcp or both are xnyzip."
         )
 
 

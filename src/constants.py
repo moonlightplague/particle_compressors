@@ -27,3 +27,7 @@ LCP_CHUNK_ENTRY: Final = struct.Struct("<QQ")
 LCP_CHUNK_BATCH_VALUES: Final = 1 << 20
 MAX_INT32_ORDER_VALUES: Final = 2**31
 
+XNYZIP_CHUNK_MAGIC: Final = b"XNYCHK1\0"
+XNYZIP_CHUNK_CONTAINER: Final = "chunked_xnyzip_v1"
+XNYZIP_CHUNK_HEADER: Final = struct.Struct("<8sQQQ")
+XNYZIP_CHUNK_ENTRY: Final = struct.Struct("<QQ")

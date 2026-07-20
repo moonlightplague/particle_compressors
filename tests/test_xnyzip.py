@@ -17,7 +17,11 @@ from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
 from src.hdf5_io import recombine_h5
 from src.models import ToolPaths
 from src.preprocess import build_compressed_artifacts
-from src.xnyzip_codec import read_xnyzip_permutation
+from src.xnyzip_codec import (
+    compress_chunked_xnyzip_triplet,
+    read_xnyzip_permutation,
+    run_chunked_xnyzip_decompress,
+)
 
 
 XNYZIP_EXE = (
@@ -134,6 +138,19 @@ class XnYZipConfigurationTests(unittest.TestCase):
                         )
                     )
 
+    def test_all_xnyzip_accepts_velocity_chunk_settings(self) -> None:
+        args = SimpleNamespace(
+            **{
+                **vars(_args(Path("unused"), "xnyzip")),
+                "vel_chunk_size": 32768,
+                "vel_chunk_workers": 4,
+            }
+        )
+        settings = CompressionSettings.from_args(args)
+        self.assertEqual(settings.velocity_chunk_size, 32768)
+        self.assertEqual(settings.configured_chunk_workers, 4)
+        self.assertEqual(settings.effective_chunk_workers, 4)
+
     def test_cli_rejects_xnyzip_velocities_without_xnyzip_positions(
         self,
     ) -> None:
@@ -217,6 +234,121 @@ class XnYZipPermutationTests(unittest.TestCase):
                 "not a valid index range",
             ):
                 read_xnyzip_permutation(str(path), 3)
+
+
+class ChunkedXnYZipCodecTests(unittest.TestCase):
+    def test_chunk_container_is_deterministic_and_roundtrips_local_orders(
+        self,
+    ) -> None:
+        count = 5
+        chunk_size = 3
+        values = np.arange(count * 3, dtype=np.float32).reshape(count, 3)
+
+        def fake_compress(
+            tools,
+            input_path,
+            compressed_path,
+            particle_count,
+            bound,
+            order_path,
+            force,
+        ):
+            chunk = np.fromfile(input_path, dtype=np.float32).reshape(-1, 3)
+            self.assertEqual(chunk.shape[0], particle_count)
+            order = np.arange(particle_count - 1, -1, -1, dtype=np.uint64)
+            Path(compressed_path).write_bytes(
+                np.ascontiguousarray(chunk[order]).tobytes()
+            )
+            order.tofile(order_path)
+            return order
+
+        def fake_decompress(
+            tools,
+            compressed_path,
+            output_paths,
+            fields,
+            particle_count,
+            bound,
+            interleaved_path,
+            force,
+        ):
+            chunk = np.frombuffer(
+                Path(compressed_path).read_bytes(),
+                dtype=np.float32,
+            ).reshape(particle_count, 3)
+            for axis, field in enumerate(fields):
+                np.ascontiguousarray(chunk[:, axis]).tofile(
+                    output_paths[field]
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_path = root / "velocities.f32.raw"
+            values.tofile(input_path)
+            outputs = []
+
+            with patch(
+                "src.xnyzip_codec.compress_xnyzip_triplet",
+                side_effect=fake_compress,
+            ):
+                for workers in (1, 2):
+                    run = root / f"workers-{workers}"
+                    run.mkdir()
+                    archive = run / "velocities.xnyzip"
+                    order = run / "velocity_order.u64.raw"
+                    metadata = compress_chunked_xnyzip_triplet(
+                        ToolPaths(Path("lcp"), Path("xnyzip")),
+                        str(input_path),
+                        str(archive),
+                        count,
+                        chunk_size,
+                        0.05,
+                        order,
+                        False,
+                        workers,
+                    )
+                    outputs.append(
+                        (archive.read_bytes(), order.read_bytes(), metadata)
+                    )
+
+            self.assertEqual(outputs[0][0], outputs[1][0])
+            self.assertEqual(outputs[0][1], outputs[1][1])
+            self.assertEqual(outputs[0][2]["xnyzip_workers"], 1)
+            self.assertEqual(outputs[1][2]["xnyzip_workers"], 2)
+            expected_local_order = np.array(
+                [2, 1, 0, 1, 0],
+                dtype=np.uint64,
+            )
+            np.testing.assert_array_equal(
+                np.frombuffer(outputs[0][1], dtype=np.uint64),
+                expected_local_order,
+            )
+
+            decoded_paths = {
+                field: str(root / f"{field}.decoded.raw")
+                for field in VELOCITY_FIELDS
+            }
+            with patch(
+                "src.xnyzip_codec.run_xnyzip_decompress",
+                side_effect=fake_decompress,
+            ):
+                run_chunked_xnyzip_decompress(
+                    ToolPaths(Path("lcp"), Path("xnyzip")),
+                    str(root / "workers-2" / "velocities.xnyzip"),
+                    decoded_paths,
+                    VELOCITY_FIELDS,
+                    count,
+                    chunk_size,
+                    0.05,
+                    2,
+                )
+
+            encoded_order = np.array([2, 1, 0, 4, 3])
+            for axis, field in enumerate(VELOCITY_FIELDS):
+                np.testing.assert_array_equal(
+                    np.fromfile(decoded_paths[field], dtype=np.float32),
+                    values[encoded_order, axis],
+                )
 
 
 class XnYZipOrderingTests(unittest.TestCase):
@@ -448,6 +580,137 @@ class XnYZipOrderingTests(unittest.TestCase):
                 "global",
             )
 
+    def test_all_xnyzip_chunking_stores_chunk_local_velocity_orders(
+        self,
+    ) -> None:
+        source = _source_fields()
+        count = len(source["id"])
+        position_order = np.array([2, 0, 4, 1, 3], dtype=np.uint64)
+        local_order = np.array([2, 0, 1, 1, 0], dtype=np.uint64)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "preprocessed").mkdir()
+            (root / "compressed").mkdir()
+            raw_paths = _write_preprocessed(
+                root / "preprocessed",
+                source,
+            )
+            manifest = _manifest(root, source, "xnyzip")
+            manifest["artifacts"]["preprocessed"] = raw_paths
+            captured_integer = {}
+
+            def fake_xnyzip(
+                tools,
+                input_path,
+                compressed_path,
+                particle_count,
+                bound,
+                order_path,
+                force,
+            ):
+                self.assertEqual(particle_count, count)
+                Path(compressed_path).write_bytes(b"positions")
+                position_order.tofile(order_path)
+                return position_order
+
+            def fake_chunked_xnyzip(
+                tools,
+                input_path,
+                compressed_path,
+                particle_count,
+                chunk_size,
+                bound,
+                order_path,
+                force,
+                workers,
+            ):
+                self.assertEqual(particle_count, count)
+                self.assertEqual(chunk_size, 3)
+                self.assertEqual(workers, 2)
+                np.testing.assert_array_equal(
+                    np.fromfile(input_path, dtype=np.float32).reshape(-1, 3),
+                    np.column_stack(
+                        [
+                            source[field][position_order]
+                            for field in VELOCITY_FIELDS
+                        ]
+                    ),
+                )
+                Path(compressed_path).write_bytes(b"chunked-velocities")
+                local_order.tofile(order_path)
+                return {
+                    "chunk_size": 3,
+                    "chunk_count": 2,
+                    "xnyzip_workers": 2,
+                    "order_bits_per_particle": 2,
+                }
+
+            def fake_integer(
+                codec,
+                raw_path,
+                dtype,
+                compressed_path,
+                field_name,
+                *unused,
+            ):
+                captured_integer[field_name] = np.fromfile(
+                    raw_path,
+                    dtype=np.dtype(dtype),
+                )
+                Path(compressed_path).write_bytes(b"integer")
+                return {
+                    "field": field_name,
+                    "codec": codec,
+                    "dtype": dtype,
+                    "count": count,
+                    "path": compressed_path,
+                    "bytes": 7,
+                }
+
+            args = SimpleNamespace(
+                **{
+                    **vars(_args(root, "xnyzip")),
+                    "vel_chunk_size": 3,
+                    "vel_chunk_workers": 2,
+                }
+            )
+            with patch(
+                "src.compress.compress_xnyzip_triplet",
+                side_effect=fake_xnyzip,
+            ), patch(
+                "src.compress.compress_chunked_xnyzip_triplet",
+                side_effect=fake_chunked_xnyzip,
+            ), patch(
+                "src.compress.compress_integer_raw",
+                side_effect=fake_integer,
+            ), patch("src.compress.update_compressed_size_metrics"):
+                result = compress(
+                    args,
+                    manifest,
+                    raw_paths,
+                    ToolPaths(Path("lcp"), Path("xnyzip")),
+                )
+
+            np.testing.assert_array_equal(
+                captured_integer["velocity_order"],
+                local_order,
+            )
+            velocity_field = result["compressed_fields"]["velocities"]
+            order_field = result["compressed_fields"]["velocity_order"]
+            self.assertEqual(velocity_field["chunk_size"], 3)
+            self.assertEqual(
+                velocity_field["container"],
+                "chunked_xnyzip_v1",
+            )
+            self.assertEqual(order_field["dtype"], "uint64")
+            self.assertEqual(order_field["index_scope"], "chunk_local")
+            self.assertEqual(order_field["xnyzip_workers"], 2)
+            self.assertEqual(
+                result["ordering"]["velocities"]["index_scope"],
+                "chunk_local",
+            )
+            self.assertEqual(result["format_version"], 6)
+
     def test_recombination_applies_uint64_xnyzip_velocity_order(self) -> None:
         source = _source_fields()
         count = len(source["id"])
@@ -518,10 +781,10 @@ class XnYZipOrderingTests(unittest.TestCase):
     "XnYZip executable has not been built",
 )
 class XnYZipNativeRoundtripTests(unittest.TestCase):
-    def test_all_xnyzip_pipeline_preserves_particle_correspondence_and_l2_bounds(
+    def test_all_xnyzip_pipeline_preserves_rows_and_bounds_with_optional_chunks(
         self,
     ) -> None:
-        count = 256
+        count = 257
         rng = np.random.default_rng(20260719)
         source = {
             "x": rng.uniform(-10.0, 10.0, count).astype(np.float32),
@@ -532,6 +795,15 @@ class XnYZipNativeRoundtripTests(unittest.TestCase):
             "vz": rng.normal(size=count).astype(np.float32),
             "id": np.arange(1000, 1000 + count, dtype=np.uint64),
         }
+        for chunk_size in (0, 64):
+            with self.subTest(chunk_size=chunk_size):
+                self._assert_native_roundtrip(source, chunk_size)
+
+    def _assert_native_roundtrip(
+        self,
+        source: dict[str, np.ndarray],
+        chunk_size: int,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             input_h5 = root / "input.h5"
@@ -540,28 +812,37 @@ class XnYZipNativeRoundtripTests(unittest.TestCase):
                 for logical, values in source.items():
                     h5.create_dataset(logical, data=values)
 
+            argv = [
+                "roundtrip",
+                str(input_h5),
+                "--work-dir",
+                str(work_dir),
+                "--xnyzip",
+                str(XNYZIP_EXE),
+                "--pos-compressor",
+                "xnyzip",
+                "--vel-compressor",
+                "xnyzip",
+                "--pos-abs-eb",
+                "0.1",
+                "--vel-abs-eb",
+                "0.05",
+            ]
+            if chunk_size:
+                argv.extend(
+                    [
+                        "--vel-chunk-size",
+                        str(chunk_size),
+                        "--vel-chunk-workers",
+                        "2",
+                    ]
+                )
+            argv.append("--force")
+
             stdout = StringIO()
             stderr = StringIO()
             with redirect_stdout(stdout), redirect_stderr(stderr):
-                result = particle_main.main(
-                    [
-                        "roundtrip",
-                        str(input_h5),
-                        "--work-dir",
-                        str(work_dir),
-                        "--xnyzip",
-                        str(XNYZIP_EXE),
-                        "--pos-compressor",
-                        "xnyzip",
-                        "--vel-compressor",
-                        "xnyzip",
-                        "--pos-abs-eb",
-                        "0.1",
-                        "--vel-abs-eb",
-                        "0.05",
-                        "--force",
-                    ]
-                )
+                result = particle_main.main(argv)
             self.assertEqual(result, 0, stderr.getvalue())
 
             manifest = json.loads(
@@ -570,10 +851,20 @@ class XnYZipNativeRoundtripTests(unittest.TestCase):
             metrics = json.loads(
                 (work_dir / "metrics.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(manifest["format_version"], 5)
+            order_field = manifest["compressed_fields"]["velocity_order"]
+            velocity_field = manifest["compressed_fields"]["velocities"]
             self.assertEqual(
-                manifest["compressed_fields"]["velocity_order"]["dtype"],
-                "uint64",
+                manifest["format_version"],
+                6 if chunk_size else 5,
+            )
+            self.assertEqual(order_field["dtype"], "uint64")
+            self.assertEqual(
+                order_field["index_scope"],
+                "chunk_local" if chunk_size else "global",
+            )
+            self.assertEqual(
+                velocity_field["container"],
+                "chunked_xnyzip_v1" if chunk_size else "native_xnyzip",
             )
             self.assertNotIn("order", manifest["artifacts"]["compressed"])
             self.assertTrue(

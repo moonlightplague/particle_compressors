@@ -121,13 +121,19 @@ def read_raw(path: str, dtype: np.dtype, count: int) -> np.ndarray:
     return data
 
 
-def resolve_lcp_chunk_workers(configured: int) -> int:
+def resolve_velocity_chunk_workers(configured: int) -> int:
     configured = int(configured)
     if configured < 0:
         raise RuntimeError("Velocity chunk workers must be non-negative.")
     if configured:
         return configured
     return min(16, os.cpu_count() or 1)
+
+
+def resolve_lcp_chunk_workers(configured: int) -> int:
+    """Compatibility alias for the codec-neutral worker resolver."""
+
+    return resolve_velocity_chunk_workers(configured)
 
 
 __all__ = [
@@ -141,7 +147,7 @@ __all__ = [
     "repo_root",
     "require_output_path",
     "resolve_lcp_chunk_workers",
+    "resolve_velocity_chunk_workers",
     "run_command",
     "write_json",
 ]
-

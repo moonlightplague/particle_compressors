@@ -20,6 +20,7 @@ from src.constants import (
     MAX_INT32_ORDER_VALUES,
     POSITION_FIELDS,
     VELOCITY_FIELDS,
+    XNYZIP_CHUNK_CONTAINER,
 )
 from src.field_export import export_triplet_for_xnyzip
 from src.lcp_codec import (
@@ -43,7 +44,7 @@ from src.raw_codecs import (
 from src.runtime import (
     read_raw,
     require_output_path,
-    resolve_lcp_chunk_workers,
+    resolve_velocity_chunk_workers,
     write_json,
 )
 from src.xnyzip_codec import (
@@ -52,6 +53,7 @@ from src.xnyzip_codec import (
     XNYZIP_ORDER_DTYPE,
     XNYZIP_QUANTIZER,
     XNYZIP_STORAGE_MODE,
+    compress_chunked_xnyzip_triplet,
     compress_xnyzip_triplet,
     read_xnyzip_permutation,
 )
@@ -94,7 +96,7 @@ class CompressionSettings:
             sort_by_id=sort_by_id,
             velocity_chunk_size=chunk_size,
             configured_chunk_workers=configured_workers,
-            effective_chunk_workers=resolve_lcp_chunk_workers(
+            effective_chunk_workers=resolve_velocity_chunk_workers(
                 configured_workers
             ),
             force=bool(args.force),
@@ -367,15 +369,29 @@ class CompressionPipeline:
             self.manifest["error_bounds"]["velocities_xnyzip_abs"]
         )
         started = time.perf_counter()
-        compress_xnyzip_triplet(
-            self.tools,
-            interleaved_path,
-            self.artifacts["velocities"],
-            self.count,
-            l2_error_bound,
-            order_path,
-            self.settings.force,
-        )
+        chunk_metadata = None
+        if self.settings.velocity_chunk_size:
+            chunk_metadata = compress_chunked_xnyzip_triplet(
+                self.tools,
+                interleaved_path,
+                self.artifacts["velocities"],
+                self.count,
+                self.settings.velocity_chunk_size,
+                l2_error_bound,
+                order_path,
+                self.settings.force,
+                self.settings.effective_chunk_workers,
+            )
+        else:
+            compress_xnyzip_triplet(
+                self.tools,
+                interleaved_path,
+                self.artifacts["velocities"],
+                self.count,
+                l2_error_bound,
+                order_path,
+                self.settings.force,
+            )
         self.manifest.setdefault("timing", {})[
             "velocity_xnyzip_compress_wall_seconds"
         ] = time.perf_counter() - started
@@ -385,6 +401,7 @@ class CompressionPipeline:
             VELOCITY_FIELDS,
             self.artifacts["velocities"],
             l2_error_bound,
+            chunk_size=self.settings.velocity_chunk_size,
         )
         velocity_field["preprocessed_interleaved"] = interleaved_metadata
         self.compressed_fields["velocities"] = velocity_field
@@ -398,24 +415,36 @@ class CompressionPipeline:
             self.count,
             self.settings.force,
         )
-        order_field.update(
-            {
-                "uncompressed_storage_dtype": str(XNYZIP_ORDER_DTYPE),
-                "compressed_bits_per_particle": (
-                    8.0 * float(order_field["bytes"]) / self.count
-                    if self.count
-                    else 0.0
-                ),
-                "chunk_size": 0,
-                "chunk_count": 1,
-                "index_scope": "global",
-                "order_bits_per_particle": velocity_order_bits(self.count),
-                "order_mapping": (
-                    "xnyzip_velocity_sorted_index_to_"
-                    "xnyzip_position_sorted_row"
-                ),
-            }
-        )
+        order_metadata = {
+            "uncompressed_storage_dtype": str(XNYZIP_ORDER_DTYPE),
+            "compressed_bits_per_particle": (
+                8.0 * float(order_field["bytes"]) / self.count
+                if self.count
+                else 0.0
+            ),
+            "chunk_size": self.settings.velocity_chunk_size,
+            "chunk_count": (
+                (self.count + self.settings.velocity_chunk_size - 1)
+                // self.settings.velocity_chunk_size
+                if self.settings.velocity_chunk_size
+                else 1
+            ),
+            "index_scope": (
+                "chunk_local"
+                if self.settings.velocity_chunk_size
+                else "global"
+            ),
+            "order_bits_per_particle": velocity_order_bits(
+                self.settings.velocity_chunk_size or self.count
+            ),
+            "order_mapping": (
+                "xnyzip_velocity_sorted_index_to_"
+                "xnyzip_position_sorted_row"
+            ),
+        }
+        if chunk_metadata is not None:
+            order_metadata.update(chunk_metadata)
+        order_field.update(order_metadata)
         self.compressed_fields["velocity_order"] = order_field
         self.manifest["ordering"]["velocities"] = {
             "mapping": (
@@ -423,8 +452,8 @@ class CompressionPipeline:
                 "xnyzip_position_sorted_row"
             ),
             "field": "velocity_order",
-            "index_scope": "global",
-            "chunk_size": 0,
+            "index_scope": order_metadata["index_scope"],
+            "chunk_size": self.settings.velocity_chunk_size,
         }
 
     def _compress_lcp_velocities(self, order: CanonicalOrder) -> None:
@@ -645,9 +674,10 @@ class CompressionPipeline:
         source_fields: Tuple[str, str, str],
         compressed_path: str,
         l2_error_bound: float,
+        chunk_size: int = 0,
     ) -> Dict[str, Any]:
         path = Path(compressed_path)
-        return {
+        metadata = {
             "field": field_name,
             "codec": "xnyzip",
             "dtype": "float32",
@@ -668,6 +698,23 @@ class CompressionPipeline:
             "path": str(path),
             "bytes": path.stat().st_size,
         }
+        if field_name == "velocities":
+            metadata.update(
+                {
+                    "chunk_size": chunk_size,
+                    "chunk_count": (
+                        (self.count + chunk_size - 1) // chunk_size
+                        if chunk_size
+                        else 1
+                    ),
+                    "container": (
+                        XNYZIP_CHUNK_CONTAINER
+                        if chunk_size
+                        else "native_xnyzip"
+                    ),
+                }
+            )
+        return metadata
 
     def _finalize(self, started: float) -> None:
         chunk_size = self.settings.velocity_chunk_size
@@ -687,6 +734,11 @@ class CompressionPipeline:
             ),
         }
         if (
+            self.settings.velocity_codec == "xnyzip"
+            and chunk_size
+        ):
+            self.manifest["format_version"] = 6
+        elif (
             self.settings.position_codec == "xnyzip"
             or self.settings.velocity_codec == "xnyzip"
         ):
@@ -712,18 +764,24 @@ def _validate_chunk_configuration(
 ) -> None:
     if chunk_size < 0:
         raise RuntimeError("--vel-chunk-size must be non-negative.")
-    if chunk_size > MAX_INT32_ORDER_VALUES:
+    if (
+        position_codec == "lcp"
+        and velocity_codec == "lcp"
+        and chunk_size > MAX_INT32_ORDER_VALUES
+    ):
         raise RuntimeError(
             "--vel-chunk-size cannot exceed 2^31 when using int32 order indices."
         )
     if workers < 0:
         raise RuntimeError("--vel-chunk-workers must be non-negative.")
-    if chunk_size and not (
-        position_codec == "lcp" and velocity_codec == "lcp"
-    ):
+    chunked_pair = (
+        position_codec == velocity_codec
+        and position_codec in ("lcp", "xnyzip")
+    )
+    if chunk_size and not chunked_pair:
         raise RuntimeError(
             "--vel-chunk-size is only supported when both position and "
-            "velocity compressors are lcp."
+            "velocity compressors are lcp or both are xnyzip."
         )
 
 
@@ -745,6 +803,7 @@ __all__ = [
     "CompressionSettings",
     "compress",
     "compress_chunked_lcp_triplet",
+    "compress_chunked_xnyzip_triplet",
     "compress_integer_raw",
     "compress_lcp_triplet",
     "compress_lcp_triplet_batch",

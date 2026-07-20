@@ -38,10 +38,13 @@ from src.raw_codecs import (
 from src.runtime import (
     read_json,
     require_output_path,
-    resolve_lcp_chunk_workers,
+    resolve_velocity_chunk_workers,
     write_json,
 )
-from src.xnyzip_codec import run_xnyzip_decompress
+from src.xnyzip_codec import (
+    run_chunked_xnyzip_decompress,
+    run_xnyzip_decompress,
+)
 
 
 class DecompressionPipeline:
@@ -184,20 +187,40 @@ class DecompressionPipeline:
                     "sidecar metadata."
                 )
             started = time.perf_counter()
-            run_xnyzip_decompress(
-                self.tools,
-                self.compressed_artifacts["velocities"],
-                self.output_paths,
-                VELOCITY_FIELDS,
-                self.count,
-                float(
-                    self.manifest["error_bounds"][
-                        "velocities_xnyzip_abs"
-                    ]
-                ),
-                self.decompressed_dir / "velocities.xnyzip.f32.raw",
-                self.args.force,
-            )
+            velocity_field = self.fields["velocities"]
+            chunk_size = int(velocity_field.get("chunk_size", 0))
+            if chunk_size:
+                run_chunked_xnyzip_decompress(
+                    self.tools,
+                    self.compressed_artifacts["velocities"],
+                    self.output_paths,
+                    VELOCITY_FIELDS,
+                    self.count,
+                    chunk_size,
+                    float(
+                        self.manifest["error_bounds"][
+                            "velocities_xnyzip_abs"
+                        ]
+                    ),
+                    resolve_velocity_chunk_workers(
+                        int(getattr(self.args, "vel_chunk_workers", 0))
+                    ),
+                )
+            else:
+                run_xnyzip_decompress(
+                    self.tools,
+                    self.compressed_artifacts["velocities"],
+                    self.output_paths,
+                    VELOCITY_FIELDS,
+                    self.count,
+                    float(
+                        self.manifest["error_bounds"][
+                            "velocities_xnyzip_abs"
+                        ]
+                    ),
+                    self.decompressed_dir / "velocities.xnyzip.f32.raw",
+                    self.args.force,
+                )
             self.manifest.setdefault("timing", {})[
                 "velocity_xnyzip_decompress_wall_seconds"
             ] = time.perf_counter() - started
@@ -230,7 +253,7 @@ class DecompressionPipeline:
                 float(
                     self.manifest["error_bounds"]["velocities_lcp_abs"]
                 ),
-                resolve_lcp_chunk_workers(
+                resolve_velocity_chunk_workers(
                     int(getattr(self.args, "vel_chunk_workers", 0))
                 ),
             )
@@ -294,6 +317,7 @@ __all__ = [
     "recombine_h5",
     "restore_attr",
     "run_chunked_lcp_decompress",
+    "run_chunked_xnyzip_decompress",
     "run_lcp_decompress",
     "run_lcp_decompress_batch",
     "velocity_compressor_from_manifest",

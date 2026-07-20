@@ -245,7 +245,8 @@ def _add_runtime_arguments(
         type=int,
         default=defaults["vel_chunk_workers"],
         help=(
-            "Parallel native LCP workers for chunked velocities; 0 selects "
+            "Parallel native workers for chunked LCP or XnYZip velocities; "
+            "0 selects "
             "up to 16 workers automatically (default: %(default)s)."
         ),
     )
@@ -318,8 +319,8 @@ def _add_compression_arguments(
         type=int,
         default=defaults["vel_chunk_size"],
         help=(
-            "Particles per independent velocity LCP chunk; 0 disables "
-            "chunking (default: %(default)s)."
+            "Particles per independent velocity LCP or XnYZip chunk; 0 "
+            "disables chunking (default: %(default)s)."
         ),
     )
     parser.add_argument(
