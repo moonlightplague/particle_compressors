@@ -31,6 +31,14 @@ XNYZIP_EXE = (
     / "build"
     / "XnYZip"
 )
+LCP_EXE = (
+    Path(__file__).resolve().parents[1]
+    / "tools"
+    / "LCP"
+    / "build"
+    / "bin"
+    / "lcp"
+)
 
 
 def _source_fields() -> dict[str, np.ndarray]:
@@ -111,7 +119,7 @@ def _args(root: Path, velocity_codec: str) -> SimpleNamespace:
 
 
 class XnYZipConfigurationTests(unittest.TestCase):
-    def test_only_supported_xnyzip_combinations_are_accepted(self) -> None:
+    def test_supported_xnyzip_combinations_are_accepted(self) -> None:
         self.assertIn("xnyzip", AVAILABLE_COMPRESSORS["pos_compressor"])
         self.assertIn("xnyzip", AVAILABLE_COMPRESSORS["vel_compressor"])
         for velocity_codec in ("sz3", "szo", "xnyzip"):
@@ -122,12 +130,24 @@ class XnYZipConfigurationTests(unittest.TestCase):
             self.assertEqual(settings.velocity_codec, velocity_codec)
             self.assertFalse(settings.sort_by_id)
 
-        for position_codec in ("lcp", "sz3", "szo"):
+        lcp_xnyzip = CompressionSettings.from_args(
+            SimpleNamespace(
+                **{
+                    **vars(_args(Path("unused"), "xnyzip")),
+                    "pos_compressor": "lcp",
+                }
+            )
+        )
+        self.assertEqual(lcp_xnyzip.position_codec, "lcp")
+        self.assertEqual(lcp_xnyzip.velocity_codec, "xnyzip")
+        self.assertFalse(lcp_xnyzip.sort_by_id)
+
+        for position_codec in ("sz3", "szo"):
             with self.subTest(position_codec=position_codec):
                 with self.assertRaisesRegex(
                     RuntimeError,
                     "--vel-compressor xnyzip requires "
-                    "--pos-compressor xnyzip",
+                    "--pos-compressor lcp or xnyzip",
                 ):
                     CompressionSettings.from_args(
                         SimpleNamespace(
@@ -138,40 +158,47 @@ class XnYZipConfigurationTests(unittest.TestCase):
                         )
                     )
 
-    def test_all_xnyzip_accepts_velocity_chunk_settings(self) -> None:
-        args = SimpleNamespace(
-            **{
-                **vars(_args(Path("unused"), "xnyzip")),
-                "vel_chunk_size": 32768,
-                "vel_chunk_workers": 4,
-            }
-        )
-        settings = CompressionSettings.from_args(args)
-        self.assertEqual(settings.velocity_chunk_size, 32768)
-        self.assertEqual(settings.configured_chunk_workers, 4)
-        self.assertEqual(settings.effective_chunk_workers, 4)
-
-    def test_cli_rejects_xnyzip_velocities_without_xnyzip_positions(
+    def test_xnyzip_velocities_accept_chunk_settings_after_vector_positions(
         self,
     ) -> None:
-        stderr = StringIO()
-        with redirect_stderr(stderr):
-            result = particle_main.main(
-                [
-                    "compress",
-                    "missing.h5",
-                    "--pos-compressor",
-                    "sz3",
-                    "--vel-compressor",
-                    "xnyzip",
-                ]
-            )
-        self.assertEqual(result, 2)
-        self.assertIn(
-            "error: --vel-compressor xnyzip requires "
-            "--pos-compressor xnyzip.",
-            stderr.getvalue(),
-        )
+        for position_codec in ("lcp", "xnyzip"):
+            with self.subTest(position_codec=position_codec):
+                args = SimpleNamespace(
+                    **{
+                        **vars(_args(Path("unused"), "xnyzip")),
+                        "pos_compressor": position_codec,
+                        "vel_chunk_size": 32768,
+                        "vel_chunk_workers": 4,
+                    }
+                )
+                settings = CompressionSettings.from_args(args)
+                self.assertEqual(settings.velocity_chunk_size, 32768)
+                self.assertEqual(settings.configured_chunk_workers, 4)
+                self.assertEqual(settings.effective_chunk_workers, 4)
+
+    def test_cli_rejects_xnyzip_velocities_with_fieldwise_positions(
+        self,
+    ) -> None:
+        for position_codec in ("sz3", "szo"):
+            with self.subTest(position_codec=position_codec):
+                stderr = StringIO()
+                with redirect_stderr(stderr):
+                    result = particle_main.main(
+                        [
+                            "compress",
+                            "missing.h5",
+                            "--pos-compressor",
+                            position_codec,
+                            "--vel-compressor",
+                            "xnyzip",
+                        ]
+                    )
+                self.assertEqual(result, 2)
+                self.assertIn(
+                    "error: --vel-compressor xnyzip requires "
+                    "--pos-compressor lcp or xnyzip.",
+                    stderr.getvalue(),
+                )
 
     def test_artifacts_use_combined_xnyzip_streams(self) -> None:
         root = Path("/tmp/compressed")
@@ -195,6 +222,21 @@ class XnYZipConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(
             Path(all_xnyzip["velocity_order"]).name,
+            "velocity_order.pco",
+        )
+
+        lcp_xnyzip = build_compressed_artifacts(
+            root,
+            "lcp",
+            "xnyzip",
+        )
+        self.assertEqual(Path(lcp_xnyzip["positions"]).name, "positions.lcp")
+        self.assertEqual(
+            Path(lcp_xnyzip["velocities"]).name,
+            "velocities.xnyzip",
+        )
+        self.assertEqual(
+            Path(lcp_xnyzip["velocity_order"]).name,
             "velocity_order.pco",
         )
 
@@ -352,6 +394,153 @@ class ChunkedXnYZipCodecTests(unittest.TestCase):
 
 
 class XnYZipOrderingTests(unittest.TestCase):
+    def test_lcp_position_order_is_applied_before_id_and_xnyzip_compression(
+        self,
+    ) -> None:
+        source = _source_fields()
+        count = len(source["id"])
+        position_order = np.array([2, 0, 4, 1, 3], dtype=np.int32)
+        velocity_order = np.array([1, 4, 0, 3, 2], dtype=np.uint64)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "preprocessed").mkdir()
+            (root / "compressed").mkdir()
+            raw_paths = _write_preprocessed(
+                root / "preprocessed",
+                source,
+            )
+            artifacts = build_compressed_artifacts(
+                root / "compressed",
+                "lcp",
+                "xnyzip",
+            )
+            manifest = {
+                "count": count,
+                "fields": {
+                    logical: {"dtype": str(values.dtype)}
+                    for logical, values in source.items()
+                },
+                "error_bounds": {
+                    "positions_lcp_abs": 0.1,
+                    "velocities_xnyzip_abs": 0.05,
+                },
+                "artifacts": {
+                    "preprocessed": raw_paths,
+                    "compressed": artifacts,
+                },
+                "compressed_fields": {},
+                "sizes": {"selected_original_payload_bytes": 160},
+            }
+            captured_integer = {}
+
+            def fake_lcp(
+                tools,
+                input_paths,
+                compressed_path,
+                particle_count,
+                bound,
+                order_path,
+                force,
+            ):
+                self.assertEqual(particle_count, count)
+                Path(compressed_path).write_bytes(b"positions")
+                position_order.tofile(order_path)
+
+            def fake_xnyzip(
+                tools,
+                input_path,
+                compressed_path,
+                particle_count,
+                bound,
+                order_path,
+                force,
+            ):
+                self.assertEqual(particle_count, count)
+                np.testing.assert_array_equal(
+                    np.fromfile(input_path, dtype=np.float32).reshape(-1, 3),
+                    np.column_stack(
+                        [
+                            source[field][position_order]
+                            for field in VELOCITY_FIELDS
+                        ]
+                    ),
+                )
+                Path(compressed_path).write_bytes(b"velocities")
+                velocity_order.tofile(order_path)
+                return velocity_order
+
+            def fake_integer(
+                codec,
+                raw_path,
+                dtype,
+                compressed_path,
+                field_name,
+                *unused,
+            ):
+                captured_integer[field_name] = np.fromfile(
+                    raw_path,
+                    dtype=np.dtype(dtype),
+                )
+                Path(compressed_path).write_bytes(b"integer")
+                return {
+                    "field": field_name,
+                    "codec": codec,
+                    "dtype": dtype,
+                    "count": count,
+                    "path": compressed_path,
+                    "bytes": 7,
+                }
+
+            args = SimpleNamespace(
+                work_dir=str(root),
+                force=False,
+                lossless="pcodec",
+                pos_compressor="lcp",
+                vel_compressor="xnyzip",
+                vel_chunk_size=0,
+                vel_chunk_workers=0,
+                sort=False,
+            )
+            with patch(
+                "src.compress.compress_lcp_triplet",
+                side_effect=fake_lcp,
+            ), patch(
+                "src.compress.compress_xnyzip_triplet",
+                side_effect=fake_xnyzip,
+            ), patch(
+                "src.compress.compress_integer_raw",
+                side_effect=fake_integer,
+            ), patch("src.compress.update_compressed_size_metrics"):
+                result = compress(
+                    args,
+                    manifest,
+                    raw_paths,
+                    ToolPaths(Path("lcp"), Path("xnyzip")),
+                )
+
+            np.testing.assert_array_equal(
+                captured_integer["id"],
+                source["id"][position_order],
+            )
+            np.testing.assert_array_equal(
+                captured_integer["velocity_order"],
+                velocity_order,
+            )
+            self.assertEqual(
+                result["ordering"]["reconstructed_rows"]["mapping"],
+                "lcp_position_sorted",
+            )
+            self.assertEqual(
+                result["ordering"]["velocities"]["mapping"],
+                "xnyzip_velocity_sorted_index_to_lcp_position_sorted_row",
+            )
+            self.assertEqual(
+                result["compressed_fields"]["velocity_order"][
+                    "order_mapping"
+                ],
+                "xnyzip_velocity_sorted_index_to_lcp_position_sorted_row",
+            )
+
     def test_fieldwise_velocities_receive_the_xnyzip_position_order(
         self,
     ) -> None:
@@ -799,10 +988,37 @@ class XnYZipNativeRoundtripTests(unittest.TestCase):
             with self.subTest(chunk_size=chunk_size):
                 self._assert_native_roundtrip(source, chunk_size)
 
+    @unittest.skipUnless(
+        LCP_EXE.is_file(),
+        "LCP executable has not been built",
+    )
+    def test_lcp_positions_and_xnyzip_velocities_preserve_rows(
+        self,
+    ) -> None:
+        count = 257
+        rng = np.random.default_rng(20260720)
+        source = {
+            "x": rng.uniform(-10.0, 10.0, count).astype(np.float32),
+            "y": rng.uniform(-20.0, 20.0, count).astype(np.float32),
+            "z": rng.uniform(-30.0, 30.0, count).astype(np.float32),
+            "vx": rng.normal(size=count).astype(np.float32),
+            "vy": rng.normal(size=count).astype(np.float32),
+            "vz": rng.normal(size=count).astype(np.float32),
+            "id": np.arange(2000, 2000 + count, dtype=np.uint64),
+        }
+        for chunk_size in (0, 64):
+            with self.subTest(chunk_size=chunk_size):
+                self._assert_native_roundtrip(
+                    source,
+                    chunk_size,
+                    position_codec="lcp",
+                )
+
     def _assert_native_roundtrip(
         self,
         source: dict[str, np.ndarray],
         chunk_size: int,
+        position_codec: str = "xnyzip",
     ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -820,7 +1036,7 @@ class XnYZipNativeRoundtripTests(unittest.TestCase):
                 "--xnyzip",
                 str(XNYZIP_EXE),
                 "--pos-compressor",
-                "xnyzip",
+                position_codec,
                 "--vel-compressor",
                 "xnyzip",
                 "--pos-abs-eb",
@@ -881,28 +1097,47 @@ class XnYZipNativeRoundtripTests(unittest.TestCase):
                 "r",
             ) as reconstructed:
                 reconstructed_ids = reconstructed["id"][:]
-                source_rows = reconstructed_ids - 1000
+                source_rows = reconstructed_ids - source["id"][0]
                 np.testing.assert_array_equal(
                     reconstructed_ids,
                     source["id"][source_rows],
                 )
-                for fields, bound in (
-                    (POSITION_FIELDS, 0.1),
-                    (VELOCITY_FIELDS, 0.05),
-                ):
-                    difference = np.column_stack(
-                        [
-                            reconstructed[field][:]
-                            - source[field][source_rows]
-                            for field in fields
-                        ]
-                    )
+                position_difference = np.column_stack(
+                    [
+                        reconstructed[field][:]
+                        - source[field][source_rows]
+                        for field in POSITION_FIELDS
+                    ]
+                )
+                if position_codec == "xnyzip":
                     self.assertLessEqual(
                         float(
                             np.linalg.norm(
-                                difference,
+                                position_difference,
                                 axis=1,
                             ).max(initial=0.0)
                         ),
-                        bound + 1e-6,
+                        0.1 + 1e-6,
                     )
+                else:
+                    self.assertLessEqual(
+                        float(np.abs(position_difference).max(initial=0.0)),
+                        0.1 + 1e-6,
+                    )
+
+                velocity_difference = np.column_stack(
+                    [
+                        reconstructed[field][:]
+                        - source[field][source_rows]
+                        for field in VELOCITY_FIELDS
+                    ]
+                )
+                self.assertLessEqual(
+                    float(
+                        np.linalg.norm(
+                            velocity_difference,
+                            axis=1,
+                        ).max(initial=0.0)
+                    ),
+                    0.05 + 1e-6,
+                )

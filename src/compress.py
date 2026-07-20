@@ -334,6 +334,9 @@ class CompressionPipeline:
                 "Position-ordered XnYZip velocities require a canonical "
                 "order."
             )
+        velocity_mapping = (
+            f"xnyzip_velocity_sorted_index_to_{order.mapping}_row"
+        )
 
         interleaved_path, interleaved_metadata = (
             export_ordered_triplet_for_xnyzip(
@@ -425,20 +428,14 @@ class CompressionPipeline:
             "order_bits_per_particle": velocity_order_bits(
                 self.settings.velocity_chunk_size or self.count
             ),
-            "order_mapping": (
-                "xnyzip_velocity_sorted_index_to_"
-                "xnyzip_position_sorted_row"
-            ),
+            "order_mapping": velocity_mapping,
         }
         if chunk_metadata is not None:
             order_metadata.update(chunk_metadata)
         order_field.update(order_metadata)
         self.compressed_fields["velocity_order"] = order_field
         self.manifest["ordering"]["velocities"] = {
-            "mapping": (
-                "xnyzip_velocity_sorted_index_to_"
-                "xnyzip_position_sorted_row"
-            ),
+            "mapping": velocity_mapping,
             "field": "velocity_order",
             "index_scope": order_metadata["index_scope"],
             "chunk_size": self.settings.velocity_chunk_size,
@@ -763,13 +760,16 @@ def _validate_chunk_configuration(
     if workers < 0:
         raise RuntimeError("--vel-chunk-workers must be non-negative.")
     chunked_pair = (
-        position_codec == velocity_codec
-        and position_codec in ("lcp", "xnyzip")
+        (position_codec == "lcp" and velocity_codec == "lcp")
+        or (
+            position_codec in ("lcp", "xnyzip")
+            and velocity_codec == "xnyzip"
+        )
     )
     if chunk_size and not chunked_pair:
         raise RuntimeError(
-            "--vel-chunk-size is only supported when both position and "
-            "velocity compressors are lcp or both are xnyzip."
+            "--vel-chunk-size is only supported for lcp velocities with "
+            "lcp positions or xnyzip velocities with lcp/xnyzip positions."
         )
 
 

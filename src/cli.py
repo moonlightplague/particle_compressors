@@ -55,9 +55,13 @@ def validate_compressor_combination(
         raise RuntimeError(
             "--vel-compressor lcp requires --pos-compressor lcp."
         )
-    if velocity_codec == "xnyzip" and position_codec != "xnyzip":
+    if (
+        velocity_codec == "xnyzip"
+        and position_codec not in ("lcp", "xnyzip")
+    ):
         raise RuntimeError(
-            "--vel-compressor xnyzip requires --pos-compressor xnyzip."
+            "--vel-compressor xnyzip requires --pos-compressor lcp or "
+            "xnyzip."
         )
 
 
@@ -363,7 +367,7 @@ def _add_compression_arguments(
         default=defaults["vel_compressor"],
         help=(
             "Velocity triplet compressor; lcp requires lcp positions and "
-            "xnyzip requires xnyzip positions "
+            "xnyzip requires lcp or xnyzip positions "
             "(default: %(default)s)."
         ),
     )

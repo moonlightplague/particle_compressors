@@ -10,7 +10,8 @@ advanced:
   pos_rel_eb: null
   vel_abs_eb: null
   vel_rel_eb: null
-  # 0 disables velocity chunking. Positive values require all-LCP or all-XnYZip.
+  # 0 disables velocity chunking. Positive values support LCP velocities with
+  # LCP positions, or XnYZip velocities with LCP/XnYZip positions.
   vel_chunk_size: 0
   # 0 selects up to 16 workers automatically for chunked velocities.
   vel_chunk_workers: 0

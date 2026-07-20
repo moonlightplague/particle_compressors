@@ -485,13 +485,19 @@ def _validate_preprocess_args(args: argparse.Namespace) -> None:
     if workers < 0:
         raise RuntimeError("--vel-chunk-workers must be non-negative.")
     chunked_pair = (
-        args.pos_compressor == args.vel_compressor
-        and args.pos_compressor in ("lcp", "xnyzip")
+        (
+            args.pos_compressor == "lcp"
+            and args.vel_compressor == "lcp"
+        )
+        or (
+            args.pos_compressor in ("lcp", "xnyzip")
+            and args.vel_compressor == "xnyzip"
+        )
     )
     if chunk_size and not chunked_pair:
         raise RuntimeError(
-            "--vel-chunk-size is only supported when both --pos-compressor "
-            "and --vel-compressor are lcp or both are xnyzip."
+            "--vel-chunk-size is only supported for lcp velocities with "
+            "lcp positions or xnyzip velocities with lcp/xnyzip positions."
         )
 
 

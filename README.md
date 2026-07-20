@@ -146,7 +146,23 @@ python main.py roundtrip data/sample.h5 \
   --force
 ```
 
-It can also compress both triplets:
+It can also compress velocities after LCP positions:
+
+```bash
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs_lcp_xnyzip \
+  --pos-compressor lcp \
+  --vel-compressor xnyzip \
+  --pos-rel-eb 1e-3 \
+  --vel-rel-eb 1e-3 \
+  --force
+```
+
+In this combination, the pipeline reads LCP's position order and applies it to
+the IDs and all three velocity fields before compression. It then interleaves
+the position-ordered velocity fields for XnYZip.
+
+XnYZip can also compress both triplets:
 
 ```bash
 python main.py roundtrip data/sample.h5 \
@@ -169,16 +185,17 @@ record the requested and observed maximum per-particle L2 error.
 Like LCP, XnYZip sorts particles during compression. Its position order becomes
 the canonical package row order, and the pipeline applies it to IDs and
 velocities before their compressors run. The temporary position order is not
-packaged. With all-XnYZip compression, the independently sorted velocity stream
-uses a losslessly pcodec-compressed `velocity_order.pco` sidecar containing
-`uint64` indices. `--vel-compressor xnyzip` therefore requires
+packaged. When XnYZip compresses velocities after either LCP or XnYZip
+positions, the independently sorted velocity stream uses a losslessly
+pcodec-compressed `velocity_order.pco` sidecar containing `uint64` indices.
+`--vel-compressor xnyzip` therefore requires `--pos-compressor lcp` or
 `--pos-compressor xnyzip`.
 
 ## Chunked Velocities
 
-When both position and velocity triplets use the same vector compressor,
-independently compress contiguous chunks of the position-ordered velocity rows
-with:
+When LCP compresses both triplets, or XnYZip compresses velocities after LCP or
+XnYZip positions, independently compress contiguous chunks of the
+position-ordered velocity rows with:
 
 ```bash
 python main.py roundtrip data/sample.h5 \
@@ -192,9 +209,10 @@ python main.py roundtrip data/sample.h5 \
 ```
 
 `--vel-chunk-size 0` disables chunking and retains the native monolithic
-stream. A positive value is valid when both triplets use LCP or both use
-XnYZip. Each velocity order index is then local to its chunk, so its unsigned
-range needs at most `ceil(log2(chunk_size))` bits instead of
+stream. A positive value is valid for LCP velocities with LCP positions, or
+XnYZip velocities with LCP/XnYZip positions. Each velocity order index is then
+local to its chunk, so its unsigned range needs at most
+`ceil(log2(chunk_size))` bits instead of
 `ceil(log2(particle_count))`. The raw sidecar uses `int32` for LCP and `uint64`
 for XnYZip; pcodec bit-packs its non-negative range. The manifest records both
 the theoretical width (`order_bits_per_particle`) and the actual pcodec size
@@ -206,8 +224,8 @@ short final chunk is encoded separately. Decompression validates every local
 permutation, expands it to the corresponding position-ordered row range, and
 then recombines the particle fields.
 
-For all-XnYZip compression, `velocities.xnyzip` is similarly a framed container
-of independent native XnYZip streams, one per velocity chunk.
+For XnYZip velocity compression, `velocities.xnyzip` is similarly a framed
+container of independent native XnYZip streams, one per velocity chunk.
 
 `--vel-chunk-workers 0` automatically uses up to sixteen independent native
 workers for chunk compression and decompression. Set it to `1` to minimize
