@@ -32,8 +32,8 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lossless": "pcodec",
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
-    "pos_compressor": ("lcp", "xynzip", "sz3", "szo"),
-    "vel_compressor": ("sz3", "szo", "lcp", "xynzip"),
+    "pos_compressor": ("lcp", "xnyzip", "sz3", "szo"),
+    "vel_compressor": ("sz3", "szo", "lcp", "xnyzip"),
     "lossless": ("pcodec",),
 }
 NULLABLE_NUMBER_KEYS = (
@@ -55,9 +55,9 @@ def validate_compressor_combination(
         raise RuntimeError(
             "--vel-compressor lcp requires --pos-compressor lcp."
         )
-    if velocity_codec == "xynzip" and position_codec != "xynzip":
+    if velocity_codec == "xnyzip" and position_codec != "xnyzip":
         raise RuntimeError(
-            "--vel-compressor xynzip requires --pos-compressor xynzip."
+            "--vel-compressor xnyzip requires --pos-compressor xnyzip."
         )
 
 
@@ -362,7 +362,7 @@ def _add_compression_arguments(
         default=defaults["vel_compressor"],
         help=(
             "Velocity triplet compressor; lcp requires lcp positions and "
-            "xynzip requires xynzip positions "
+            "xnyzip requires xnyzip positions "
             "(default: %(default)s)."
         ),
     )

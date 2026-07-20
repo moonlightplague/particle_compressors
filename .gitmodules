@@ -9,4 +9,4 @@
 	url = https://github.com/BingluCS/SZo.git
 [submodule "tools/XnYZip"]
 	path = tools/XnYZip
-	url = https://github.com/moonlightplague/XnYZip.git
+	url = git@github.com:moonlightplague/XnYZip.git

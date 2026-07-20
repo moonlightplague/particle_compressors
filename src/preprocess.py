@@ -155,7 +155,7 @@ class PreprocessingPipeline:
         )
         self.raw_paths.update(position_paths)
         self.statistics["positions"] = position_stats
-        if self.args.pos_compressor == "xynzip":
+        if self.args.pos_compressor == "xnyzip":
             xnyzip_path, xnyzip_stats = export_positions_for_xnyzip(
                 position_paths,
                 self.workspace.raw / "positions.xnyzip.f32.raw",
@@ -202,7 +202,7 @@ class PreprocessingPipeline:
             )
             self.raw_paths[logical] = raw_path
             stats["preprocess_cast_max_abs"] = 0.0
-            if self.args.vel_compressor in ("lcp", "xynzip"):
+            if self.args.vel_compressor in ("lcp", "xnyzip"):
                 vector_codec = self.args.vel_compressor
                 vector_path, cast_error = export_float32_for_lcp(
                     raw_path,
@@ -240,7 +240,7 @@ class PreprocessingPipeline:
             manifest["error_bounds"]["velocities_lcp_abs"] = float(
                 manifest["field_error_bounds"]["vx"]["compressor_abs"]
             )
-        if self.args.vel_compressor == "xynzip":
+        if self.args.vel_compressor == "xnyzip":
             manifest["error_bounds"]["velocities_xnyzip_abs"] = float(
                 manifest["field_error_bounds"]["velocities_xnyzip"][
                     "compressor_abs"
@@ -256,8 +256,8 @@ class PreprocessingPipeline:
                 None,
             )
         if (
-            self.args.pos_compressor == "xynzip"
-            or self.args.vel_compressor == "xynzip"
+            self.args.pos_compressor == "xnyzip"
+            or self.args.vel_compressor == "xnyzip"
         ):
             manifest["tools"]["xnyzip"] = str(self.tools.xnyzip)
         manifest["artifacts"] = {
@@ -270,7 +270,7 @@ class PreprocessingPipeline:
         }
         manifest["order_dtype"] = (
             "uint64"
-            if self.args.pos_compressor == "xynzip"
+            if self.args.pos_compressor == "xnyzip"
             else "int32"
         )
         manifest["compressed_fields"] = {}
@@ -401,13 +401,13 @@ def build_compressed_artifacts(
 ) -> Dict[str, str]:
     validate_compressor_combination(position_codec, velocity_codec)
     artifacts = {"id": str(compressed_dir / "id.pco")}
-    if position_codec in ("lcp", "xynzip"):
+    if position_codec in ("lcp", "xnyzip"):
         artifacts["positions"] = str(
             compressed_dir
             / (
                 "positions.lcp"
                 if position_codec == "lcp"
-                else "positions.xynzip"
+                else "positions.xnyzip"
             )
         )
     else:
@@ -418,13 +418,13 @@ def build_compressed_artifacts(
                 for field in POSITION_FIELDS
             }
         )
-    if velocity_codec in ("lcp", "xynzip"):
+    if velocity_codec in ("lcp", "xnyzip"):
         artifacts["velocities"] = str(
             compressed_dir
             / (
                 "velocities.lcp"
                 if velocity_codec == "lcp"
-                else "velocities.xynzip"
+                else "velocities.xnyzip"
             )
         )
         artifacts["velocity_order"] = str(

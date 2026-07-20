@@ -190,7 +190,7 @@ class HDF5Recombiner:
     def _velocity_order(self) -> Optional[np.ndarray]:
         velocity_codec = velocity_compressor_from_manifest(self.manifest)
         if (
-            velocity_codec not in ("lcp", "xynzip")
+            velocity_codec not in ("lcp", "xnyzip")
             or "velocity_order" not in self.paths
         ):
             return None

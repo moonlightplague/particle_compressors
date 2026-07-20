@@ -114,7 +114,7 @@ class DecompressionPipeline:
             paths["order"] = str(
                 self.decompressed_dir / f"order.{order_dtype.name}.raw"
             )
-        if self.velocity_codec in ("lcp", "xynzip"):
+        if self.velocity_codec in ("lcp", "xnyzip"):
             for logical in VELOCITY_FIELDS:
                 paths[logical] = str(
                     self.decompressed_dir / f"{logical}.f32.raw"
@@ -140,7 +140,7 @@ class DecompressionPipeline:
                 ),
             )
             return
-        if self.position_codec == "xynzip":
+        if self.position_codec == "xnyzip":
             run_xnyzip_decompress(
                 self.tools,
                 self.compressed_artifacts["positions"],
@@ -152,7 +152,7 @@ class DecompressionPipeline:
                         "positions_xnyzip_abs"
                     ]
                 ),
-                self.decompressed_dir / "positions.xynzip.f32.raw",
+                self.decompressed_dir / "positions.xnyzip.f32.raw",
                 self.args.force,
             )
             return
@@ -177,7 +177,7 @@ class DecompressionPipeline:
         )
 
     def _decompress_velocities(self) -> None:
-        if self.velocity_codec == "xynzip":
+        if self.velocity_codec == "xnyzip":
             if "velocity_order" not in self.fields:
                 raise RuntimeError(
                     "XnYZip velocity package is missing its velocity_order "
@@ -195,7 +195,7 @@ class DecompressionPipeline:
                         "velocities_xnyzip_abs"
                     ]
                 ),
-                self.decompressed_dir / "velocities.xynzip.f32.raw",
+                self.decompressed_dir / "velocities.xnyzip.f32.raw",
                 self.args.force,
             )
             self.manifest.setdefault("timing", {})[

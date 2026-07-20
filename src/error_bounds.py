@@ -157,10 +157,10 @@ def resolve_error_bounds(
         position_preprocess_errors,
         position_diagonal,
         subtract_absolute_preprocess=(
-            args.pos_compressor == "xynzip"
+            args.pos_compressor == "xnyzip"
         ),
     )
-    if args.pos_compressor == "xynzip" and position_vector_abs <= 0.0:
+    if args.pos_compressor == "xnyzip" and position_vector_abs <= 0.0:
         raise RuntimeError(
             "The requested position error bound leaves no positive XnYZip "
             "L2 compressor bound after float32 preprocessing."
@@ -193,7 +193,7 @@ def resolve_error_bounds(
         },
         velocity_diagonal,
     )
-    if args.vel_compressor == "xynzip" and velocity_vector_abs <= 0.0:
+    if args.vel_compressor == "xnyzip" and velocity_vector_abs <= 0.0:
         raise RuntimeError(
             "The requested velocity error bound leaves no positive XnYZip "
             "L2 compressor bound after float32 preprocessing."

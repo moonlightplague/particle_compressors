@@ -27,11 +27,13 @@ def read_xnyzip_permutation(order_path: str, count: int) -> np.ndarray:
         raise RuntimeError(
             "XnYZip order is not a valid index range for this particle count."
         )
-    if np.unique(order).size != count:
+    seen = np.zeros(count, dtype=np.bool_)
+    seen[order] = True
+    if not bool(seen.all()):
         raise RuntimeError(
             "XnYZip order is not a permutation of the particle rows."
         )
-    return order.astype(np.intp, copy=False)
+    return order
 
 
 def compress_xnyzip_triplet(
@@ -42,7 +44,7 @@ def compress_xnyzip_triplet(
     l2_error_bound: float,
     order_path: Path,
     force: bool,
-) -> None:
+) -> np.ndarray:
     bound = _positive_l2_bound(l2_error_bound)
     _validate_interleaved_size(Path(input_path), count, "input")
     compressed = Path(compressed_path)
@@ -64,7 +66,7 @@ def compress_xnyzip_triplet(
     )
     if not compressed.is_file() or not compressed.stat().st_size:
         raise RuntimeError("XnYZip did not produce a compressed stream.")
-    read_xnyzip_permutation(str(order_path), count)
+    return read_xnyzip_permutation(str(order_path), count)
 
 
 def run_xnyzip_decompress(

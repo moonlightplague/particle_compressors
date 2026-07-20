@@ -76,8 +76,8 @@ class CompressionSettings:
         sort_requested = bool(getattr(args, "sort", False))
         sort_by_id = (
             sort_requested
-            and position_codec not in ("lcp", "xynzip")
-            and velocity_codec not in ("lcp", "xynzip")
+            and position_codec not in ("lcp", "xnyzip")
+            and velocity_codec not in ("lcp", "xnyzip")
         )
         chunk_size = int(getattr(args, "vel_chunk_size", 0))
         configured_workers = int(getattr(args, "vel_chunk_workers", 0))
@@ -135,7 +135,7 @@ class CompressionPipeline:
     def _select_canonical_order(self) -> CanonicalOrder:
         if self.settings.position_codec == "lcp":
             return self._compress_canonical_positions()
-        if self.settings.position_codec == "xynzip":
+        if self.settings.position_codec == "xnyzip":
             return self._compress_canonical_xnyzip_positions()
         if self.settings.sort_by_id:
             return self._id_sorted_order()
@@ -198,7 +198,7 @@ class CompressionPipeline:
         l2_error_bound = float(
             self.manifest["error_bounds"]["positions_xnyzip_abs"]
         )
-        compress_xnyzip_triplet(
+        order = compress_xnyzip_triplet(
             self.tools,
             self.raw_paths["positions_xnyzip"],
             compressed_path,
@@ -207,6 +207,8 @@ class CompressionPipeline:
             order_path,
             self.settings.force,
         )
+        if order is None:
+            order = read_xnyzip_permutation(str(order_path), self.count)
         self.compressed_fields["positions"] = (
             self._xnyzip_field_metadata(
                 "positions",
@@ -216,11 +218,11 @@ class CompressionPipeline:
             )
         )
         return CanonicalOrder(
-            mapping="xynzip_position_sorted",
+            mapping="xnyzip_position_sorted",
             field="positions",
             artifact="position_order",
             artifact_dtype=str(XNYZIP_ORDER_DTYPE),
-            values=read_xnyzip_permutation(str(order_path), self.count),
+            values=order,
         )
 
     def _record_ordering(self, order: CanonicalOrder) -> None:
@@ -275,7 +277,7 @@ class CompressionPipeline:
         )
 
     def _compress_positions(self, order: CanonicalOrder) -> None:
-        if self.settings.position_codec in ("lcp", "xynzip"):
+        if self.settings.position_codec in ("lcp", "xnyzip"):
             self.manifest["ordering"]["positions"] = {
                 "mapping": order.mapping
             }
@@ -303,7 +305,7 @@ class CompressionPipeline:
         if self.settings.velocity_codec == "lcp":
             self._compress_lcp_velocities(order)
             return
-        if self.settings.velocity_codec == "xynzip":
+        if self.settings.velocity_codec == "xnyzip":
             self._compress_xnyzip_velocities(order)
             return
 
@@ -331,7 +333,7 @@ class CompressionPipeline:
 
         def reorder_velocity(logical: str) -> Tuple[str, str]:
             return logical, reorder_raw(
-                self.raw_paths[f"{logical}_xynzip"],
+                self.raw_paths[f"{logical}_xnyzip"],
                 "float32",
                 self.preprocessed_dir
                 / f"{logical}.{order.mapping}.float32.raw",
@@ -352,7 +354,7 @@ class CompressionPipeline:
                 ordered_paths,
                 VELOCITY_FIELDS,
                 self.preprocessed_dir
-                / "velocities.xynzip.canonical.f32.raw",
+                / "velocities.xnyzip.canonical.f32.raw",
                 self.count,
                 self.settings.force,
             )
@@ -409,16 +411,16 @@ class CompressionPipeline:
                 "index_scope": "global",
                 "order_bits_per_particle": velocity_order_bits(self.count),
                 "order_mapping": (
-                    "xynzip_velocity_sorted_index_to_"
-                    "xynzip_position_sorted_row"
+                    "xnyzip_velocity_sorted_index_to_"
+                    "xnyzip_position_sorted_row"
                 ),
             }
         )
         self.compressed_fields["velocity_order"] = order_field
         self.manifest["ordering"]["velocities"] = {
             "mapping": (
-                "xynzip_velocity_sorted_index_to_"
-                "xynzip_position_sorted_row"
+                "xnyzip_velocity_sorted_index_to_"
+                "xnyzip_position_sorted_row"
             ),
             "field": "velocity_order",
             "index_scope": "global",
@@ -647,7 +649,7 @@ class CompressionPipeline:
         path = Path(compressed_path)
         return {
             "field": field_name,
-            "codec": "xynzip",
+            "codec": "xnyzip",
             "dtype": "float32",
             "source_dtypes": {
                 logical: self.manifest["fields"][logical]["dtype"]
@@ -685,8 +687,8 @@ class CompressionPipeline:
             ),
         }
         if (
-            self.settings.position_codec == "xynzip"
-            or self.settings.velocity_codec == "xynzip"
+            self.settings.position_codec == "xnyzip"
+            or self.settings.velocity_codec == "xnyzip"
         ):
             self.manifest["format_version"] = 5
         else:

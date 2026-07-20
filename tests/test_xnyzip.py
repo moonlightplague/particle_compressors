@@ -17,6 +17,7 @@ from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
 from src.hdf5_io import recombine_h5
 from src.models import ToolPaths
 from src.preprocess import build_compressed_artifacts
+from src.xnyzip_codec import read_xnyzip_permutation
 
 
 XNYZIP_EXE = (
@@ -50,7 +51,7 @@ def _write_preprocessed(
         values.tofile(path)
         raw_paths[logical] = str(path)
         if logical in VELOCITY_FIELDS:
-            raw_paths[f"{logical}_xynzip"] = str(path)
+            raw_paths[f"{logical}_xnyzip"] = str(path)
 
     positions = directory / "positions.xnyzip.f32.raw"
     np.column_stack(
@@ -83,7 +84,7 @@ def _manifest(
             "preprocessed": {},
             "compressed": build_compressed_artifacts(
                 root / "compressed",
-                "xynzip",
+                "xnyzip",
                 velocity_codec,
             ),
         },
@@ -97,7 +98,7 @@ def _args(root: Path, velocity_codec: str) -> SimpleNamespace:
         work_dir=str(root),
         force=False,
         lossless="pcodec",
-        pos_compressor="xynzip",
+        pos_compressor="xnyzip",
         vel_compressor=velocity_codec,
         vel_chunk_size=0,
         vel_chunk_workers=0,
@@ -107,13 +108,13 @@ def _args(root: Path, velocity_codec: str) -> SimpleNamespace:
 
 class XnYZipConfigurationTests(unittest.TestCase):
     def test_only_supported_xnyzip_combinations_are_accepted(self) -> None:
-        self.assertIn("xynzip", AVAILABLE_COMPRESSORS["pos_compressor"])
-        self.assertIn("xynzip", AVAILABLE_COMPRESSORS["vel_compressor"])
-        for velocity_codec in ("sz3", "szo", "xynzip"):
+        self.assertIn("xnyzip", AVAILABLE_COMPRESSORS["pos_compressor"])
+        self.assertIn("xnyzip", AVAILABLE_COMPRESSORS["vel_compressor"])
+        for velocity_codec in ("sz3", "szo", "xnyzip"):
             settings = CompressionSettings.from_args(
                 _args(Path("unused"), velocity_codec)
             )
-            self.assertEqual(settings.position_codec, "xynzip")
+            self.assertEqual(settings.position_codec, "xnyzip")
             self.assertEqual(settings.velocity_codec, velocity_codec)
             self.assertFalse(settings.sort_by_id)
 
@@ -121,13 +122,13 @@ class XnYZipConfigurationTests(unittest.TestCase):
             with self.subTest(position_codec=position_codec):
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "--vel-compressor xynzip requires "
-                    "--pos-compressor xynzip",
+                    "--vel-compressor xnyzip requires "
+                    "--pos-compressor xnyzip",
                 ):
                     CompressionSettings.from_args(
                         SimpleNamespace(
                             **{
-                                **vars(_args(Path("unused"), "xynzip")),
+                                **vars(_args(Path("unused"), "xnyzip")),
                                 "pos_compressor": position_codec,
                             }
                         )
@@ -145,22 +146,22 @@ class XnYZipConfigurationTests(unittest.TestCase):
                     "--pos-compressor",
                     "sz3",
                     "--vel-compressor",
-                    "xynzip",
+                    "xnyzip",
                 ]
             )
         self.assertEqual(result, 2)
         self.assertIn(
-            "error: --vel-compressor xynzip requires "
-            "--pos-compressor xynzip.",
+            "error: --vel-compressor xnyzip requires "
+            "--pos-compressor xnyzip.",
             stderr.getvalue(),
         )
 
     def test_artifacts_use_combined_xnyzip_streams(self) -> None:
         root = Path("/tmp/compressed")
-        fieldwise = build_compressed_artifacts(root, "xynzip", "sz3")
+        fieldwise = build_compressed_artifacts(root, "xnyzip", "sz3")
         self.assertEqual(
             Path(fieldwise["positions"]).name,
-            "positions.xynzip",
+            "positions.xnyzip",
         )
         self.assertNotIn("velocity_order", fieldwise)
         for logical in VELOCITY_FIELDS:
@@ -168,17 +169,54 @@ class XnYZipConfigurationTests(unittest.TestCase):
 
         all_xnyzip = build_compressed_artifacts(
             root,
-            "xynzip",
-            "xynzip",
+            "xnyzip",
+            "xnyzip",
         )
         self.assertEqual(
             Path(all_xnyzip["velocities"]).name,
-            "velocities.xynzip",
+            "velocities.xnyzip",
         )
         self.assertEqual(
             Path(all_xnyzip["velocity_order"]).name,
             "velocity_order.pco",
         )
+
+
+class XnYZipPermutationTests(unittest.TestCase):
+    def test_uint64_permutation_is_returned_without_dtype_conversion(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "order.u64.raw"
+            expected = np.array([2, 0, 3, 1], dtype=np.uint64)
+            expected.tofile(path)
+
+            actual = read_xnyzip_permutation(str(path), expected.size)
+
+            self.assertEqual(actual.dtype, np.dtype("uint64"))
+            np.testing.assert_array_equal(actual, expected)
+
+    def test_duplicate_index_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "order.u64.raw"
+            np.array([0, 1, 1], dtype=np.uint64).tofile(path)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "not a permutation",
+            ):
+                read_xnyzip_permutation(str(path), 3)
+
+    def test_out_of_range_index_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "order.u64.raw"
+            np.array([0, 1, 3], dtype=np.uint64).tofile(path)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "not a valid index range",
+            ):
+                read_xnyzip_permutation(str(path), 3)
 
 
 class XnYZipOrderingTests(unittest.TestCase):
@@ -297,7 +335,7 @@ class XnYZipOrderingTests(unittest.TestCase):
             self.assertEqual(result["format_version"], 5)
             self.assertEqual(
                 result["ordering"]["reconstructed_rows"]["mapping"],
-                "xynzip_position_sorted",
+                "xnyzip_position_sorted",
             )
 
     def test_all_xnyzip_stores_the_secondary_velocity_order(self) -> None:
@@ -313,7 +351,7 @@ class XnYZipOrderingTests(unittest.TestCase):
                 root / "preprocessed",
                 source,
             )
-            manifest = _manifest(root, source, "xynzip")
+            manifest = _manifest(root, source, "xnyzip")
             manifest["artifacts"]["preprocessed"] = raw_paths
             captured_integer = {}
             compressed_calls = 0
@@ -382,7 +420,7 @@ class XnYZipOrderingTests(unittest.TestCase):
                 side_effect=fake_integer,
             ), patch("src.compress.update_compressed_size_metrics"):
                 result = compress(
-                    _args(root, "xynzip"),
+                    _args(root, "xnyzip"),
                     manifest,
                     raw_paths,
                     ToolPaths(Path("lcp"), Path("xnyzip")),
@@ -403,7 +441,7 @@ class XnYZipOrderingTests(unittest.TestCase):
             )
             self.assertEqual(
                 result["compressed_fields"]["velocities"]["codec"],
-                "xynzip",
+                "xnyzip",
             )
             self.assertEqual(
                 result["ordering"]["velocities"]["index_scope"],
@@ -446,16 +484,16 @@ class XnYZipOrderingTests(unittest.TestCase):
                 "position_scale": {"value": 1.0},
                 "fields": fields,
                 "compressors": {
-                    "positions": "xynzip",
-                    "velocities": "xynzip",
+                    "positions": "xnyzip",
+                    "velocities": "xnyzip",
                 },
                 "compressed_fields": {
                     "positions": {
-                        "codec": "xynzip",
+                        "codec": "xnyzip",
                         "dtype": "float32",
                     },
                     "velocities": {
-                        "codec": "xynzip",
+                        "codec": "xnyzip",
                         "dtype": "float32",
                     },
                     "velocity_order": {
@@ -514,9 +552,9 @@ class XnYZipNativeRoundtripTests(unittest.TestCase):
                         "--xnyzip",
                         str(XNYZIP_EXE),
                         "--pos-compressor",
-                        "xynzip",
+                        "xnyzip",
                         "--vel-compressor",
-                        "xynzip",
+                        "xnyzip",
                         "--pos-abs-eb",
                         "0.1",
                         "--vel-abs-eb",

@@ -144,7 +144,7 @@ def component_compression_ratios(
     )
     position_bytes = (
         int(components.get("compressed/positions.lcp", 0))
-        + int(components.get("compressed/positions.xynzip", 0))
+        + int(components.get("compressed/positions.xnyzip", 0))
         + position_order_bytes
         + compressed_bytes_with_prefixes(
             components,
@@ -153,7 +153,7 @@ def component_compression_ratios(
     )
     velocity_lcp_bytes = int(
         components.get("compressed/velocities.lcp", 0)
-    ) + int(components.get("compressed/velocities.xynzip", 0))
+    ) + int(components.get("compressed/velocities.xnyzip", 0))
     velocity_order_bytes = compressed_bytes_with_prefixes(
         components,
         ("compressed/velocity_order.",),
@@ -216,7 +216,7 @@ def field_group_compression_ratios(
         components,
         (
             "compressed/velocities.lcp",
-            "compressed/velocities.xynzip",
+            "compressed/velocities.xnyzip",
             "compressed/velocity_order.",
             "compressed/vx.",
             "compressed/vy.",
@@ -239,9 +239,9 @@ def print_component_summary(report: Mapping[str, Any]) -> None:
 
     fieldwise_triplets = (
         position_compressor_from_manifest(report)
-        not in ("lcp", "xynzip")
+        not in ("lcp", "xnyzip")
         and velocity_compressor_from_manifest(report)
-        not in ("lcp", "xynzip")
+        not in ("lcp", "xnyzip")
     )
     names = list(POSITION_FIELDS) if fieldwise_triplets else ["xyz"]
     if ratios["order"]["compressed_bytes"] > 0:
@@ -489,9 +489,9 @@ def _compute_xnyzip_vector_metrics(
     count: int,
 ) -> Dict[str, Dict[str, Any]]:
     triplets = []
-    if position_compressor_from_manifest(manifest) == "xynzip":
+    if position_compressor_from_manifest(manifest) == "xnyzip":
         triplets.append(("positions", POSITION_FIELDS, "lcp_units"))
-    if velocity_compressor_from_manifest(manifest) == "xynzip":
+    if velocity_compressor_from_manifest(manifest) == "xnyzip":
         triplets.append(("velocities", VELOCITY_FIELDS, "source_units"))
 
     results = {}
@@ -607,7 +607,7 @@ def _position_error_target(
     field_bound: Mapping[str, Any],
     manifest: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    if position_compressor_from_manifest(manifest) == "xynzip":
+    if position_compressor_from_manifest(manifest) == "xnyzip":
         vector_bound = manifest["field_error_bounds"][
             "positions_xnyzip"
         ]
@@ -664,7 +664,7 @@ def _velocity_error_target(
     field_bound: Mapping[str, Any],
     manifest: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    if velocity_compressor_from_manifest(manifest) == "xynzip":
+    if velocity_compressor_from_manifest(manifest) == "xnyzip":
         vector_bound = manifest["field_error_bounds"][
             "velocities_xnyzip"
         ]

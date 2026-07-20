@@ -72,8 +72,8 @@ def velocity_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
     compressed_fields = manifest.get("compressed_fields", {})
     if compressed_fields.get("velocities", {}).get("codec") == "lcp":
         return "lcp"
-    if compressed_fields.get("velocities", {}).get("codec") == "xynzip":
-        return "xynzip"
+    if compressed_fields.get("velocities", {}).get("codec") == "xnyzip":
+        return "xnyzip"
     if _all_fields_use_codec(compressed_fields, VELOCITY_FIELDS, "szo"):
         return "szo"
     return "sz3"
@@ -83,8 +83,8 @@ def position_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
     compressed_fields = manifest.get("compressed_fields", {})
     if compressed_fields.get("positions", {}).get("codec") == "lcp":
         return "lcp"
-    if compressed_fields.get("positions", {}).get("codec") == "xynzip":
-        return "xynzip"
+    if compressed_fields.get("positions", {}).get("codec") == "xnyzip":
+        return "xnyzip"
     if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "pysz"):
         return "sz3"
     if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "szo"):
@@ -93,7 +93,7 @@ def position_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
         path = str(
             manifest["artifacts"]["compressed"]["positions"]
         )
-        return "xynzip" if path.endswith(".xynzip") else "lcp"
+        return "xnyzip" if path.endswith(".xnyzip") else "lcp"
 
     configured = manifest.get("compressors", {}).get("positions")
     return str(configured) if configured else "lcp"

@@ -15,7 +15,7 @@ advanced:
   # 0 selects up to 16 workers automatically for chunked velocity LCP.
   vel_chunk_workers: 0
   id_abs_eb: 0.0
-  pos_compressor: szo
+  pos_compressor: xnyzip
   vel_compressor: szo
   lossless: pcodec
 
