@@ -3,9 +3,10 @@ set -euo pipefail
 
 cd tools/LCP
 cmake -B build -DCMAKE_INSTALL_PREFIX:PATH=build
-cmake --build build --target lcp
-cmake --install build
-cd ../..
+cd build
+make lcp
+make install
+cd ../../..
 
 python -m pip install -r requirements.txt
 
