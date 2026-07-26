@@ -64,6 +64,8 @@ The Python implementation is separated by responsibility:
 - `raw_codecs.py` adapts pcodec, SZ3, and SZO field streams.
 - `lcp_codec.py` owns native LCP commands and the chunked velocity container;
   `xnyzip_codec.py` owns native XnYZip commands and its `uint64` order files.
+- `huffman_encode.py` provides the canonical delta-Huffman transform used for
+  LCP block-ID sidecars.
 - `field_export.py`, `error_bounds.py`, and `hdf5_io.py` handle source
   conversion, bound selection, and HDF5 reconstruction.
 - `manifest.py`, `metrics.py`, and `runtime.py` contain package metadata,
@@ -130,6 +132,34 @@ compressed velocities. Consequently no order sidecar is stored, while every
 reconstructed row still contains the corresponding ID, position, and velocity.
 When both triplets use LCP, position order is canonical and the independently
 sorted velocity stream still requires `velocity_order.pco`.
+
+### Blockwise LCP Velocity Order
+
+Use LCP's packed block-local velocity order instead of its global `-ord`
+permutation with:
+
+```bash
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs_lcp_blockwise \
+  --pos-compressor lcp \
+  --vel-compressor lcp \
+  --blockwise-ord \
+  --rel-eb 1e-3 \
+  --force
+```
+
+This mode stores `velocity_order.pco` and `velocity_block_ids.pco`. LCP writes
+the first as packed block-local ranks and the second as one spatial block ID
+per particle. Block IDs use `uint32` when possible and automatically widen to
+`uint64` when required. Before pcodec compression, they are transformed to
+same-width modulo deltas and canonical Huffman-coded. During decompression the
+pipeline reverses pcodec and Huffman coding, then invokes LCP with
+`--decompress-with-order` and `--blockwise-ord`; LCP restores the velocity
+triplet to the canonical position-sorted row order before HDF5 reconstruction.
+
+`--blockwise-ord` requires both `--pos-compressor lcp` and
+`--vel-compressor lcp`. It is mutually exclusive with `--vel-chunk-size`
+because LCP's blockwise order interface supports single-frame calls only.
 
 ## XnYZip Compression
 
@@ -277,7 +307,8 @@ already determines the pipeline's canonical particle order.
 ## Integer Compression
 
 IDs are reconstructed exactly with pcodec. When both triplets use LCP or both
-use XnYZip, pcodec also compresses the velocity permutation sidecar.
+use XnYZip, pcodec also compresses the velocity permutation sidecar. Blockwise
+LCP additionally uses pcodec for the Huffman-coded block-ID sidecar.
 
 ## Error Bounds
 

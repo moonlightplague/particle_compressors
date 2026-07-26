@@ -195,6 +195,8 @@ class HDF5Recombiner:
         ):
             return None
         field = self.manifest["compressed_fields"]["velocity_order"]
+        if field.get("applied_during_lcp_decompression"):
+            return None
         return read_lcp_order(
             self.paths["velocity_order"],
             np.dtype(field["dtype"]),

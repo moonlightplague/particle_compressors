@@ -328,6 +328,16 @@ def _add_compression_arguments(
         ),
     )
     parser.add_argument(
+        "--blockwise-ord",
+        action="store_true",
+        help=(
+            "Use LCP's packed block-local velocity order plus a "
+            "Huffman-coded block-ID sidecar. Requires LCP for both "
+            "positions and velocities and cannot be combined with "
+            "--vel-chunk-size."
+        ),
+    )
+    parser.add_argument(
         "--id-abs-eb",
         type=float,
         default=defaults["id_abs_eb"],

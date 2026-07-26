@@ -247,6 +247,14 @@ class PreprocessingPipeline:
                 getattr(self.args, "vel_chunk_workers", 0)
             ),
         }
+        manifest["blockwise_order"] = {
+            "enabled": bool(getattr(self.args, "blockwise_ord", False)),
+            "field": (
+                "velocities"
+                if getattr(self.args, "blockwise_ord", False)
+                else None
+            ),
+        }
         if self.args.vel_compressor == "lcp":
             manifest["error_bounds"]["velocities_lcp_abs"] = float(
                 manifest["field_error_bounds"]["vx"]["compressor_abs"]
@@ -277,6 +285,7 @@ class PreprocessingPipeline:
                 self.workspace.compressed,
                 self.args.pos_compressor,
                 self.args.vel_compressor,
+                bool(getattr(self.args, "blockwise_ord", False)),
             ),
         }
         manifest["order_dtype"] = (
@@ -409,6 +418,7 @@ def build_compressed_artifacts(
     compressed_dir: Path,
     position_codec: str,
     velocity_codec: str,
+    blockwise_order: bool = False,
 ) -> Dict[str, str]:
     validate_compressor_combination(position_codec, velocity_codec)
     artifacts = {"id": str(compressed_dir / "id.pco")}
@@ -441,6 +451,10 @@ def build_compressed_artifacts(
         artifacts["velocity_order"] = str(
             compressed_dir / "velocity_order.pco"
         )
+        if blockwise_order:
+            artifacts["velocity_block_ids"] = str(
+                compressed_dir / "velocity_block_ids.pco"
+            )
     else:
         extension = _lossy_extension(velocity_codec)
         artifacts.update(
@@ -472,6 +486,18 @@ def _validate_preprocess_args(args: argparse.Namespace) -> None:
     )
     chunk_size = int(getattr(args, "vel_chunk_size", 0))
     workers = int(getattr(args, "vel_chunk_workers", 0))
+    blockwise_order = bool(getattr(args, "blockwise_ord", False))
+    if blockwise_order and (
+        args.pos_compressor != "lcp" or args.vel_compressor != "lcp"
+    ):
+        raise RuntimeError(
+            "--blockwise-ord requires --pos-compressor lcp and "
+            "--vel-compressor lcp."
+        )
+    if blockwise_order and chunk_size:
+        raise RuntimeError(
+            "--blockwise-ord cannot be combined with --vel-chunk-size."
+        )
     if chunk_size < 0:
         raise RuntimeError("--vel-chunk-size must be non-negative.")
     if (

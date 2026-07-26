@@ -25,6 +25,7 @@ from src.constants import (
 from src.field_export import (
     export_ordered_triplet_for_xnyzip,
 )
+from src.huffman_encode import huffman_encode_file
 from src.lcp_codec import (
     compress_chunked_lcp_triplet,
     compress_lcp_triplet,
@@ -68,6 +69,7 @@ class CompressionSettings:
     velocity_chunk_size: int
     configured_chunk_workers: int
     effective_chunk_workers: int
+    blockwise_order: bool
     force: bool
     sort_requested: bool = False
     sort_by_id: bool = False
@@ -85,11 +87,13 @@ class CompressionSettings:
         )
         chunk_size = int(getattr(args, "vel_chunk_size", 0))
         configured_workers = int(getattr(args, "vel_chunk_workers", 0))
+        blockwise_order = bool(getattr(args, "blockwise_ord", False))
         _validate_chunk_configuration(
             position_codec,
             velocity_codec,
             chunk_size,
             configured_workers,
+            blockwise_order,
         )
         return cls(
             position_codec=position_codec,
@@ -101,6 +105,7 @@ class CompressionSettings:
             effective_chunk_workers=resolve_velocity_chunk_workers(
                 configured_workers
             ),
+            blockwise_order=blockwise_order,
             force=bool(args.force),
         )
 
@@ -458,12 +463,23 @@ class CompressionPipeline:
             ),
             "field": "velocity_order",
             "index_scope": (
-                "chunk_local"
-                if self.settings.velocity_chunk_size
-                else "global"
+                "block_local_packed"
+                if self.settings.blockwise_order
+                else (
+                    "chunk_local"
+                    if self.settings.velocity_chunk_size
+                    else "global"
+                )
             ),
             "chunk_size": self.settings.velocity_chunk_size,
+            "applied_during_lcp_decompression": (
+                self.settings.blockwise_order
+            ),
         }
+        if self.settings.blockwise_order:
+            self.manifest["ordering"]["velocities"][
+                "block_id_field"
+            ] = "velocity_block_ids"
 
     def _compress_secondary_lcp_velocities(
         self,
@@ -492,16 +508,35 @@ class CompressionPipeline:
         for logical, path in ordered_paths.items():
             self.raw_paths[f"{logical}_canonical_ordered"] = path
 
-        order_path = self.preprocessed_dir / "velocity_order.i32.raw"
+        order_dtype = "uint32" if self.settings.blockwise_order else "int32"
+        order_path = (
+            self.preprocessed_dir
+            / f"velocity_order.{np.dtype(order_dtype).name}.raw"
+        )
         self.raw_paths["velocity_order"] = str(order_path)
+        block_id_path = (
+            self.preprocessed_dir / "velocity_block_ids.raw"
+            if self.settings.blockwise_order
+            else None
+        )
+        if block_id_path is not None:
+            self.raw_paths["velocity_block_ids"] = str(block_id_path)
         chunk_metadata = self._run_secondary_velocity_compressor(
             ordered_paths,
             order_path,
+            block_id_path,
         )
+        if block_id_path is not None:
+            self._compress_blockwise_velocity_sidecars(
+                order_path,
+                block_id_path,
+            )
+            return
+
         order_field = compress_integer_raw(
             self.args.lossless,
             str(order_path),
-            "int32",
+            order_dtype,
             self.artifacts["velocity_order"],
             "velocity_order",
             self.count,
@@ -516,6 +551,7 @@ class CompressionPipeline:
         self,
         ordered_paths: Dict[str, str],
         order_path: Path,
+        block_id_path: Optional[Path] = None,
     ) -> Optional[Dict[str, int]]:
         started = time.perf_counter()
         inputs = tuple(ordered_paths[field] for field in VELOCITY_FIELDS)
@@ -544,11 +580,88 @@ class CompressionPipeline:
                 abs_error_bound,
                 order_path,
                 self.settings.force,
+                block_id_path,
             )
         self.manifest.setdefault("timing", {})[
             "velocity_lcp_compress_wall_seconds"
         ] = time.perf_counter() - started
         return chunk_metadata
+
+    def _compress_blockwise_velocity_sidecars(
+        self,
+        order_path: Path,
+        block_id_path: Path,
+    ) -> None:
+        order_bytes = order_path.stat().st_size
+        if order_bytes % np.dtype("uint32").itemsize:
+            raise RuntimeError(
+                "LCP blockwise order file contains a partial uint32 word."
+            )
+        order_word_count = order_bytes // np.dtype("uint32").itemsize
+        order_field = compress_integer_raw(
+            self.args.lossless,
+            str(order_path),
+            "uint32",
+            self.artifacts["velocity_order"],
+            "velocity_order",
+            order_word_count,
+            self.settings.force,
+        )
+        order_field.update(
+            {
+                "order_encoding": "lcp_blockwise_packed",
+                "word_bits": 32,
+                "packed_word_count": order_word_count,
+                "particle_count": self.count,
+                "uncompressed_bytes": order_bytes,
+                "index_scope": "block_local_packed",
+                "chunk_size": 0,
+                "chunk_count": 1,
+                "applied_during_lcp_decompression": True,
+                "block_id_field": "velocity_block_ids",
+                "compressed_bits_per_particle": (
+                    8.0 * float(order_field["bytes"]) / self.count
+                    if self.count
+                    else 0.0
+                ),
+            }
+        )
+        self.compressed_fields["velocity_order"] = order_field
+
+        huffman_path = (
+            self.preprocessed_dir / "velocity_block_ids.huffman.u8.raw"
+        )
+        huffman_started = time.perf_counter()
+        huffman_metadata = huffman_encode_file(
+            block_id_path,
+            huffman_path,
+            self.settings.force,
+            expected_count=self.count,
+        )
+        self.manifest.setdefault("timing", {})[
+            "velocity_block_id_huffman_encode_wall_seconds"
+        ] = time.perf_counter() - huffman_started
+        self.raw_paths["velocity_block_ids_huffman"] = str(huffman_path)
+
+        block_id_field = compress_integer_raw(
+            self.args.lossless,
+            str(huffman_path),
+            "uint8",
+            self.artifacts["velocity_block_ids"],
+            "velocity_block_ids",
+            huffman_path.stat().st_size,
+            self.settings.force,
+        )
+        block_id_field.update(
+            {
+                "preprocessor": huffman_metadata,
+                "decoded_dtype": huffman_metadata["symbol_dtype"],
+                "decoded_count": self.count,
+                "decoded_bytes": block_id_path.stat().st_size,
+                "applied_during_lcp_decompression": True,
+            }
+        )
+        self.compressed_fields["velocity_block_ids"] = block_id_field
 
     def _velocity_order_metadata(
         self,
@@ -718,7 +831,9 @@ class CompressionPipeline:
                 else 1
             ),
         }
-        if (
+        if self.settings.blockwise_order:
+            self.manifest["format_version"] = 7
+        elif (
             self.settings.velocity_codec == "xnyzip"
             and chunk_size
         ):
@@ -746,7 +861,19 @@ def _validate_chunk_configuration(
     velocity_codec: str,
     chunk_size: int,
     workers: int,
+    blockwise_order: bool = False,
 ) -> None:
+    if blockwise_order and (
+        position_codec != "lcp" or velocity_codec != "lcp"
+    ):
+        raise RuntimeError(
+            "--blockwise-ord requires --pos-compressor lcp and "
+            "--vel-compressor lcp."
+        )
+    if blockwise_order and chunk_size:
+        raise RuntimeError(
+            "--blockwise-ord cannot be combined with --vel-chunk-size."
+        )
     if chunk_size < 0:
         raise RuntimeError("--vel-chunk-size must be non-negative.")
     if (

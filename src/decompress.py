@@ -15,6 +15,7 @@ from src.hdf5_io import (
     recombine_h5,
     restore_attr,
 )
+from src.huffman_encode import huffman_decode_file
 from src.lcp_codec import (
     read_lcp_order,
     run_chunked_lcp_decompress,
@@ -128,6 +129,18 @@ class DecompressionPipeline:
                 self.decompressed_dir
                 / f"velocity_order.{order_dtype.name}.raw"
             )
+        if "velocity_block_ids" in self.fields:
+            block_id_field = self.fields["velocity_block_ids"]
+            encoded_dtype = np.dtype(block_id_field["dtype"])
+            decoded_dtype = np.dtype(block_id_field["decoded_dtype"])
+            paths["velocity_block_ids_huffman"] = str(
+                self.decompressed_dir
+                / f"velocity_block_ids.huffman.{encoded_dtype.name}.raw"
+            )
+            paths["velocity_block_ids"] = str(
+                self.decompressed_dir
+                / f"velocity_block_ids.{decoded_dtype.name}.raw"
+            )
         return paths
 
     def _decompress_positions(self) -> None:
@@ -240,6 +253,54 @@ class DecompressionPipeline:
             return
 
         velocity_field = self.fields["velocities"]
+        blockwise_order = (
+            self.fields.get("velocity_order", {}).get("order_encoding")
+            == "lcp_blockwise_packed"
+        )
+        if blockwise_order:
+            if "velocity_block_ids" not in self.fields:
+                raise RuntimeError(
+                    "Blockwise LCP velocity package is missing its "
+                    "velocity_block_ids sidecar metadata."
+                )
+            decompress_integer_raw(
+                self.fields["velocity_order"],
+                self.output_paths["velocity_order"],
+                self.args.force,
+            )
+            decompress_integer_raw(
+                self.fields["velocity_block_ids"],
+                self.output_paths["velocity_block_ids_huffman"],
+                self.args.force,
+            )
+            huffman_started = time.perf_counter()
+            huffman_decode_file(
+                Path(self.output_paths["velocity_block_ids_huffman"]),
+                Path(self.output_paths["velocity_block_ids"]),
+                self.args.force,
+                expected_count=self.count,
+            )
+            self.manifest.setdefault("timing", {})[
+                "velocity_block_id_huffman_decode_wall_seconds"
+            ] = time.perf_counter() - huffman_started
+            started = time.perf_counter()
+            run_lcp_decompress(
+                self.tools,
+                self.compressed_artifacts["velocities"],
+                self.output_paths,
+                VELOCITY_FIELDS,
+                self.count,
+                float(
+                    self.manifest["error_bounds"]["velocities_lcp_abs"]
+                ),
+                Path(self.output_paths["velocity_order"]),
+                Path(self.output_paths["velocity_block_ids"]),
+            )
+            self.manifest.setdefault("timing", {})[
+                "velocity_lcp_decompress_wall_seconds"
+            ] = time.perf_counter() - started
+            return
+
         chunk_size = int(velocity_field.get("chunk_size", 0))
         if chunk_size:
             started = time.perf_counter()

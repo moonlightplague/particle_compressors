@@ -4,7 +4,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Callable, Dict, Mapping, Tuple
+from typing import BinaryIO, Callable, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -68,25 +68,28 @@ def compress_lcp_triplet(
     abs_error_bound: float,
     order_path: Path,
     force: bool,
+    block_id_path: Optional[Path] = None,
 ) -> None:
     require_output_path(Path(compressed_path), force)
     require_output_path(order_path, force)
-    run_command(
-        [
-            str(tools.lcp),
-            "-i",
-            *input_paths,
-            "-z",
-            compressed_path,
-            "-1",
-            str(count),
-            "-eb",
-            str(abs_error_bound),
-            "-ord",
-            "32",
-            str(order_path),
-        ]
-    )
+    command = [
+        str(tools.lcp),
+        "-i",
+        *input_paths,
+        "-z",
+        compressed_path,
+        "-1",
+        str(count),
+        "-eb",
+        str(abs_error_bound),
+        "-ord",
+        "32",
+        str(order_path),
+    ]
+    if block_id_path is not None:
+        require_output_path(block_id_path, force)
+        command.extend(["--blockwise-ord", str(block_id_path)])
+    run_command(command)
 
 
 def compress_lcp_triplet_batch(
@@ -131,20 +134,35 @@ def run_lcp_decompress(
     fields: FieldTriplet,
     count: int,
     abs_error_bound: float,
+    order_path: Optional[Path] = None,
+    block_id_path: Optional[Path] = None,
 ) -> None:
-    run_command(
-        [
-            str(tools.lcp),
-            "-z",
-            compressed_path,
-            "-o",
-            *(output_paths[field] for field in fields),
-            "-1",
-            str(count),
-            "-eb",
-            str(abs_error_bound),
-        ]
-    )
+    if (order_path is None) != (block_id_path is None):
+        raise RuntimeError(
+            "Blockwise LCP decompression requires both order sidecars."
+        )
+    command = [
+        str(tools.lcp),
+        "-z",
+        compressed_path,
+        "-o",
+        *(output_paths[field] for field in fields),
+        "-1",
+        str(count),
+        "-eb",
+        str(abs_error_bound),
+    ]
+    if order_path is not None:
+        command.extend(
+            [
+                "--decompress-with-order",
+                "32",
+                str(order_path),
+                "--blockwise-ord",
+                str(block_id_path),
+            ]
+        )
+    run_command(command)
 
 
 def run_lcp_decompress_batch(

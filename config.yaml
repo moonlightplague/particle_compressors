@@ -16,8 +16,8 @@ advanced:
   # 0 selects up to 16 workers automatically for chunked velocities.
   vel_chunk_workers: 0
   id_abs_eb: 0.0
-  pos_compressor: xnyzip
-  vel_compressor: szo
+  pos_compressor: lcp
+  vel_compressor: lcp
   lossless: pcodec
 
   # Integer position conversion used before float32 triplet compression.

@@ -161,7 +161,10 @@ def component_compression_ratios(
     ) + int(components.get("compressed/velocities.xnyzip", 0))
     velocity_order_bytes = compressed_bytes_with_prefixes(
         components,
-        ("compressed/velocity_order.",),
+        (
+            "compressed/velocity_order.",
+            "compressed/velocity_block_ids.",
+        ),
     )
     count = report_count(report)
     order_bytes = int(order_dtype_from_manifest(report).itemsize * count)
@@ -177,6 +180,27 @@ def component_compression_ratios(
             )
         ).itemsize
         * count
+    )
+    velocity_order_original_bytes = int(
+        velocity_order_field.get(
+            "uncompressed_bytes",
+            velocity_order_original_bytes,
+        )
+    )
+    velocity_block_id_field = report.get("compressed_fields", {}).get(
+        "velocity_block_ids",
+        {},
+    )
+    velocity_order_original_bytes += int(
+        velocity_block_id_field.get(
+            "decoded_bytes",
+            (
+                np.dtype(
+                    velocity_block_id_field.get("decoded_dtype", "uint8")
+                ).itemsize
+                * int(velocity_block_id_field.get("decoded_count", 0))
+            ),
+        )
     )
 
     entries = {
@@ -223,6 +247,7 @@ def field_group_compression_ratios(
             "compressed/velocities.lcp",
             "compressed/velocities.xnyzip",
             "compressed/velocity_order.",
+            "compressed/velocity_block_ids.",
             "compressed/vx.",
             "compressed/vy.",
             "compressed/vz.",
@@ -370,6 +395,9 @@ def compute_metrics(
     count = int(manifest["count"])
     metrics: Dict[str, Any] = {
         "fields": {},
+        "compressed_fields": dict(
+            manifest.get("compressed_fields", {})
+        ),
         "error_bound_consistency": {},
         "compressors": dict(manifest.get("compressors", {})),
         "particle_sort": dict(manifest.get("particle_sort", {})),

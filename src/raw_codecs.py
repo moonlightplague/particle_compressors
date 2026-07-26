@@ -32,7 +32,10 @@ def compress_pcodec_raw(
     require_output_path(output, force)
 
     values = np.ascontiguousarray(read_raw(raw_path, data_type, count))
-    payload = standalone.simple_compress(values, chunk_config_type())
+    chunk_config = chunk_config_type()
+    if data_type.itemsize == 1:
+        chunk_config.enable_8_bit = True
+    payload = standalone.simple_compress(values, chunk_config)
     output.write_bytes(payload)
     return _field_metadata(
         field_name,
