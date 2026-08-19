@@ -87,6 +87,10 @@ def compress_szo_raw(
     config = config_type((encoded_count,))
     config.errorBoundMode = error_bound_mode.ABS
     config.absErrorBound = float(abs_error_bound)
+    # Older bindings did not initialize this property; current SZO configs
+    # deliberately retain their INTERP_LORENZO default.
+    if getattr(config, "cmprAlgo", None) is None:
+        config.cmprAlgo = algorithm.LORENZO_REG
     try:
         compressed, _ = szo.compress(encoded, config, copy=True)
     except Exception as exc:

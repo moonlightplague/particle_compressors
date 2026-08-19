@@ -30,6 +30,9 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "pos_compressor": "lcp",
     "vel_compressor": "sz3",
     "lossless": "pcodec",
+    "lattice_layout": False,
+    "lattice_min_occupancy": 0.8,
+    "lattice_axis_search": True,
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
     "pos_compressor": ("lcp", "xnyzip", "sz3", "szo"),
@@ -142,6 +145,19 @@ def _validated_advanced_config(
         defaults["vel_chunk_workers"],
         "vel_chunk_workers",
     )
+    for key in ("lattice_layout", "lattice_axis_search"):
+        if not isinstance(defaults[key], bool):
+            raise RuntimeError(
+                f"config value advanced.{key} must be a boolean."
+            )
+    defaults["lattice_min_occupancy"] = _required_number(
+        defaults["lattice_min_occupancy"],
+        "lattice_min_occupancy",
+    )
+    if not 0.0 < defaults["lattice_min_occupancy"] <= 1.0:
+        raise RuntimeError(
+            "config value advanced.lattice_min_occupancy must be in (0, 1]."
+        )
     defaults["position_scale"] = _choice(
         defaults["position_scale"],
         "position_scale",
@@ -387,6 +403,35 @@ def _add_compression_arguments(
         help=(
             "Stably sort particles by ascending ID before compression when "
             "neither triplet compressor establishes a canonical row order."
+        ),
+    )
+    parser.add_argument(
+        "--lattice-layout",
+        action=argparse.BooleanOptionalAction,
+        default=defaults["lattice_layout"],
+        help=(
+            "Use an ID-derived periodic dense 3-D layout for fieldwise "
+            "position and velocity codecs; implies ID sorting and falls back "
+            "to the normal sorted layout when occupancy is too low "
+            "(default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--lattice-min-occupancy",
+        type=float,
+        default=defaults["lattice_min_occupancy"],
+        help=(
+            "Minimum occupied fraction for --lattice-layout "
+            "(default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--lattice-axis-search",
+        action=argparse.BooleanOptionalAction,
+        default=defaults["lattice_axis_search"],
+        help=(
+            "Try all six dense-axis orders and retain the smallest field "
+            "payload when using --lattice-layout (default: %(default)s)."
         ),
     )
     parser.add_argument(

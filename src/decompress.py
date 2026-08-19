@@ -15,6 +15,11 @@ from src.hdf5_io import (
     recombine_h5,
     restore_attr,
 )
+from src.lattice_layout import (
+    LATTICE_LAYOUT_NAME,
+    DenseLatticeLayout,
+    lattice_layout_from_metadata,
+)
 from src.huffman_encode import huffman_decode_file
 from src.lcp_codec import (
     read_lcp_order,
@@ -36,8 +41,10 @@ from src.raw_codecs import (
     decompress_pysz_raw,
     decompress_szo_raw,
 )
+from src.shaped_codecs import decompress_shaped_lossy_raw
 from src.runtime import (
     read_json,
+    read_raw,
     require_output_path,
     resolve_velocity_chunk_workers,
     write_json,
@@ -75,13 +82,14 @@ class DecompressionPipeline:
         self.output_h5 = self.work_dir / "reconstructed.h5"
         require_output_path(self.output_h5, args.force)
         self.output_paths = self._build_output_paths()
+        self._decoded_lattice: DenseLatticeLayout | None = None
         for path in self.output_paths.values():
             require_output_path(Path(path), args.force)
 
     def run(self) -> Dict[str, Any]:
         started = time.perf_counter()
-        self._decompress_positions()
         self._decompress_integer_fields()
+        self._decompress_positions()
         self._decompress_velocities()
 
         recombine_started = time.perf_counter()
@@ -173,11 +181,7 @@ class DecompressionPipeline:
             )
             return
         for logical in POSITION_FIELDS:
-            decompress_lossy_raw(
-                self.fields[logical],
-                self.output_paths[logical],
-                self.args.force,
-            )
+            self._decompress_fieldwise(logical)
 
     def _decompress_integer_fields(self) -> None:
         if "order" in self.fields:
@@ -245,11 +249,7 @@ class DecompressionPipeline:
             return
         if self.velocity_codec != "lcp":
             for logical in VELOCITY_FIELDS:
-                decompress_lossy_raw(
-                    self.fields[logical],
-                    self.output_paths[logical],
-                    self.args.force,
-                )
+                self._decompress_fieldwise(logical)
             return
 
         velocity_field = self.fields["velocities"]
@@ -339,6 +339,77 @@ class DecompressionPipeline:
                 self.output_paths["velocity_order"],
                 self.args.force,
             )
+
+    def _decompress_fieldwise(self, logical: str) -> None:
+        field = self.fields[logical]
+        if field.get("spatial_layout") != LATTICE_LAYOUT_NAME:
+            decompress_lossy_raw(
+                field,
+                self.output_paths[logical],
+                self.args.force,
+            )
+            return
+
+        dtype = np.dtype(field["dtype"])
+        dense_path = (
+            self.decompressed_dir
+            / f"{logical}.lattice-encoded.{dtype.name}.raw"
+        )
+        decompress_shaped_lossy_raw(
+            field,
+            str(dense_path),
+            self.args.force,
+        )
+        layout = self._lattice_for_decode()
+        dense_values = read_raw(
+            str(dense_path),
+            dtype,
+            layout.dense_count,
+        )
+        wrap_offsets = None
+        if "lattice_wrap_field" in field:
+            wrap_field = field["lattice_wrap_field"]
+            wrap_dtype = np.dtype(wrap_field["dtype"])
+            wrap_path = (
+                self.decompressed_dir
+                / f"{logical}.lattice-wrap.{wrap_dtype.name}.raw"
+            )
+            decompress_integer_raw(
+                wrap_field,
+                str(wrap_path),
+                self.args.force,
+            )
+            wrap_offsets = read_raw(
+                str(wrap_path),
+                wrap_dtype,
+                self.count,
+            )
+        decoded = layout.decode_field(
+            dense_values,
+            logical,
+            str(field.get("lattice_transform", "identity")),
+            dtype,
+            wrap_offsets,
+        )
+        output = Path(self.output_paths[logical])
+        require_output_path(output, self.args.force)
+        decoded.tofile(output)
+
+    def _lattice_for_decode(self) -> DenseLatticeLayout:
+        if self._decoded_lattice is not None:
+            return self._decoded_lattice
+        metadata = self.manifest.get("lattice_layout", {})
+        id_dtype = np.dtype(self.manifest["fields"]["id"]["dtype"])
+        sorted_ids = read_raw(
+            self.output_paths["id"],
+            id_dtype,
+            self.count,
+        )
+        self._decoded_lattice = lattice_layout_from_metadata(
+            sorted_ids,
+            metadata,
+        )
+        return self._decoded_lattice
 
     def _finalize(self, started: float, recombine_seconds: float) -> None:
         timing = self.manifest.setdefault("timing", {})

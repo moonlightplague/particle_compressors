@@ -12,7 +12,7 @@ from src.constants import POSITION_FIELDS
 from src.metrics import field_group_compression_ratios
 
 
-MAX_AUTOMATIC_FILE_WORKERS = 16
+MAX_AUTOMATIC_FILE_WORKERS = 128
 FIELD_GROUPS = ("positions", "id", "velocities")
 
 

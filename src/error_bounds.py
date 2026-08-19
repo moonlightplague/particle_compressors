@@ -226,6 +226,17 @@ def resolve_error_bounds(
         position_ranges,
         "lcp_units",
     )
+    if args.pos_compressor in ("sz3", "szo"):
+        for field in POSITION_FIELDS:
+            requested = float(base_position.abs_by_field[field])
+            field_bounds[field]["compressor_abs"] = (
+                max(
+                    0.0,
+                    requested - position_preprocess_errors[field],
+                )
+                if base_position.mode == "relative"
+                else requested
+            )
     field_bounds["positions_xnyzip"] = {
         "mode": base_position.mode,
         "abs": vector_requested_abs,

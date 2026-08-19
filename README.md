@@ -62,6 +62,8 @@ The Python implementation is separated by responsibility:
 - `preprocess.py`, `compress.py`, and `decompress.py` orchestrate pipeline
   stages.
 - `raw_codecs.py` adapts pcodec, SZ3, and SZO field streams.
+- `lattice_layout.py` infers periodic ID lattices and implements reversible
+  dense-field transforms; `shaped_codecs.py` adds adaptive 3-D codec layouts.
 - `lcp_codec.py` owns native LCP commands and the chunked velocity container;
   `xnyzip_codec.py` owns native XnYZip commands and its `uint64` order files.
 - `huffman_encode.py` provides the canonical delta-Huffman transform used for
@@ -303,6 +305,68 @@ the recorded temporary permutation to compare each row with its source
 particle. Without `--sort`, the current input-order pipeline is unchanged. The
 flag is ignored when positions use LCP or XnYZip because that compressor
 already determines the pipeline's canonical particle order.
+
+## Optimized Periodic Lattice Layout
+
+For snapshots whose IDs encode cells of a periodic cubic mesh, enable the
+optimized dense 3-D package layout with `--lattice-layout`:
+
+```bash
+python main.py roundtrip data/dat_2.1.h5 \
+  --work-dir particle_pipeline_runs/dat_2.1_lattice \
+  --pos-compressor szo \
+  --vel-compressor szo \
+  --lossless pcodec \
+  --rel-eb 1e-3 \
+  --sort --lattice-layout \
+  --force
+```
+
+The mode derives zero- or one-based lattice coordinates from ID, unwraps each
+mesh axis at its largest periodic gap, and scatters fields into the resulting
+dense box. Positions are stored as lattice residuals; small lossless pcodec
+sidecars preserve which side of the periodic seam each value belongs to.
+Unoccupied cells receive interpolation-only values and are discarded during
+decoding. SZO or SZ3 then sees spatially adjacent 3-D values instead of a flat
+ID-sorted stream. By default the compressor tries all six axis orders, then
+the reversals of the best order, and records the smallest orientation for each
+field.
+
+The optimization requires both triplets to use fieldwise SZO or SZ3, a numeric
+root `nsidemesh` attribute, unique IDs that fit an `nsidemesh^3` zero- or
+one-based lattice, normalized positions in the periodic domain, and a dense
+box occupancy of at least `--lattice-min-occupancy` (default `0.8`). It implies
+ID sorting. If inference or the occupancy check fails, the manifest records
+the reason and compression safely falls back to the ordinary ID-sorted
+fieldwise path. Existing packages and runs without `--lattice-layout` retain
+their previous format and behavior. Use `--no-lattice-axis-search` to encode
+the native dense axis order only when compression time matters more than the
+last fraction of payload CR.
+
+On the repository's full `data/dat_2.1.h5` input at relative error `1e-3`, the
+measured packaged payload (including the manifest and all sidecars) was:
+
+| Method | Compressed bytes | Payload CR | All bounds satisfied |
+| --- | ---: | ---: | --- |
+| SZO/SZO + ID sort | 86,490,985 | 19.9632 | Yes |
+| SZO/SZO + periodic lattice layout | 62,200,005 | 27.7595 | Yes |
+
+This is a 28.08% payload-size reduction and a 39.05% CR increase for that
+snapshot. Adaptive orientation raises compression work; in the same run the
+compression stage took 30.85 seconds versus 7.51 seconds for the flat sorted
+baseline.
+
+The benchmark drivers in `experiments/` reproduce the searches used to choose
+the layout. They compare SZO/SZ3, one-dimensional and dense layouts, hole-fill
+strategies, axis orientations, slab sizes, and error-safe coupled predictors.
+For example:
+
+```bash
+python -m experiments.periodic_layout_search data/dat_2.1.h5 \
+  --axes --output /tmp/periodic-layout.json
+python -m experiments.orientation_search data/dat_2.1.h5 \
+  --output /tmp/orientation-search.json
+```
 
 ## Integer Compression
 
