@@ -4,3 +4,6 @@
 [submodule "tools/SZo"]
 	path = tools/SZo
 	url = https://github.com/BingluCS/SZo.git
+[submodule "tools/SPERR"]
+	path = tools/SPERR
+	url = git@github.com:moonlightplague/SPERR.git
