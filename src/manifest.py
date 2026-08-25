@@ -4,8 +4,6 @@ import math
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
-import numpy as np
-
 from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
 from src.runtime import json_size_bytes
 
@@ -52,59 +50,29 @@ def update_compressed_size_metrics(
         components["manifest.json"] = rendered_manifest_bytes
 
 
-def order_dtype_from_manifest(manifest: Mapping[str, Any]) -> np.dtype:
-    field = manifest.get("compressed_fields", {}).get("order", {})
-    dtype = np.dtype(field.get("dtype", manifest.get("order_dtype", "int64")))
-    if dtype not in (
-        np.dtype("int32"),
-        np.dtype("int64"),
-        np.dtype("uint64"),
-    ):
-        raise RuntimeError(f"Unsupported order dtype in manifest: {dtype}.")
-    return dtype
-
-
-def velocity_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
-    configured = manifest.get("compressors", {}).get("velocities")
-    if configured:
+def lossy_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
+    configured = manifest.get("compressors", {}).get("lossy")
+    compressed_fields = manifest.get("compressed_fields", {})
+    lossy_fields = (*POSITION_FIELDS, *VELOCITY_FIELDS)
+    codecs = {
+        compressed_fields.get(field, {}).get("codec")
+        for field in lossy_fields
+    }
+    if configured in ("szo", "sz3"):
+        if compressed_fields:
+            expected_codec = "szo" if configured == "szo" else "pysz"
+            if codecs != {expected_codec}:
+                raise RuntimeError(
+                    "Manifest lossy field metadata does not match its "
+                    "configured compressor."
+                )
         return str(configured)
 
-    compressed_fields = manifest.get("compressed_fields", {})
-    if compressed_fields.get("velocities", {}).get("codec") == "lcp":
-        return "lcp"
-    if compressed_fields.get("velocities", {}).get("codec") == "xnyzip":
-        return "xnyzip"
-    if _all_fields_use_codec(compressed_fields, VELOCITY_FIELDS, "szo"):
+    if codecs == {"szo"}:
         return "szo"
-    return "sz3"
-
-
-def position_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
-    compressed_fields = manifest.get("compressed_fields", {})
-    if compressed_fields.get("positions", {}).get("codec") == "lcp":
-        return "lcp"
-    if compressed_fields.get("positions", {}).get("codec") == "xnyzip":
-        return "xnyzip"
-    if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "pysz"):
+    if codecs == {"pysz"}:
         return "sz3"
-    if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "szo"):
-        return "szo"
-    if "positions" in manifest.get("artifacts", {}).get("compressed", {}):
-        path = str(
-            manifest["artifacts"]["compressed"]["positions"]
-        )
-        return "xnyzip" if path.endswith(".xnyzip") else "lcp"
-
-    configured = manifest.get("compressors", {}).get("positions")
-    return str(configured) if configured else "lcp"
-
-
-def _all_fields_use_codec(
-    compressed_fields: Mapping[str, Any],
-    fields: tuple[str, str, str],
-    codec: str,
-) -> bool:
-    return all(
-        compressed_fields.get(logical, {}).get("codec") == codec
-        for logical in fields
+    raise RuntimeError(
+        "Manifest does not select one supported lossy compressor for all "
+        "position and velocity fields."
     )

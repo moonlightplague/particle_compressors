@@ -1,9 +1,4 @@
-"""N-dimensional fieldwise codec adapters used by lattice packages.
-
-The legacy adapters remain the implementation for ordinary one-dimensional
-streams.  This module adds dense shapes, adaptive 3-D axis selection, and the
-inverse transpose needed during decompression without changing old packages.
-"""
+"""N-dimensional lossy-codec adapters used by lattice packages."""
 
 from __future__ import annotations
 
@@ -14,8 +9,13 @@ from typing import Any, Dict, Iterator, Mapping, Tuple
 
 import numpy as np
 
-import src.raw_codecs as legacy
-from src.runtime import read_raw, require_output_path
+from src.raw_codecs import require_float_dtype
+from src.runtime import (
+    load_pysz,
+    load_pyszo,
+    read_raw,
+    require_output_path,
+)
 
 
 def compress_shaped_lossy_raw(
@@ -64,12 +64,12 @@ def decompress_shaped_lossy_raw(
 ) -> None:
     codec = str(field.get("codec"))
     if codec == "szo":
-        data_type = legacy._require_float_dtype(
+        data_type = require_float_dtype(
             field["dtype"],
             str(field["field"]),
             "SZO decompression",
         )
-        szo, _, _, _ = legacy.load_pyszo()
+        szo, _, _, _ = load_pyszo()
         _decompress_shaped(
             field,
             out_path,
@@ -84,12 +84,12 @@ def decompress_shaped_lossy_raw(
         )
         return
     if codec == "pysz":
-        data_type = legacy._require_float_dtype(
+        data_type = require_float_dtype(
             field["dtype"],
             str(field["field"]),
             "pysz decompression",
         )
-        pysz, _, _ = legacy.load_pysz()
+        pysz, _, _ = load_pysz()
         _decompress_shaped(
             field,
             out_path,
@@ -119,14 +119,14 @@ def _compress_shaped_szo(
     encoded_shape: Tuple[int, int, int],
     axis_search: bool,
 ) -> Dict[str, Any]:
-    data_type = legacy._require_float_dtype(
+    data_type = require_float_dtype(
         dtype,
         field_name,
         "SZO compression",
     )
     output = Path(compressed_path)
     require_output_path(output, force)
-    szo, config_type, error_bound_mode, algorithms = legacy.load_pyszo()
+    szo, config_type, error_bound_mode, algorithms = load_pyszo()
     values = _read_shaped(raw_path, data_type, encoded_shape)
     best_payload = None
     best_permutation = tuple(range(values.ndim))
@@ -200,14 +200,14 @@ def _compress_shaped_sz3(
     encoded_shape: Tuple[int, int, int],
     axis_search: bool,
 ) -> Dict[str, Any]:
-    data_type = legacy._require_float_dtype(
+    data_type = require_float_dtype(
         dtype,
         field_name,
         "pysz compression",
     )
     output = Path(compressed_path)
     require_output_path(output, force)
-    pysz, config_type, error_bound_mode = legacy.load_pysz()
+    pysz, config_type, error_bound_mode = load_pysz()
     values = _read_shaped(raw_path, data_type, encoded_shape)
     best_payload = None
     best_permutation = tuple(range(values.ndim))
@@ -402,9 +402,3 @@ def _decompress_shaped(
     output = Path(out_path)
     require_output_path(output, force)
     np.ascontiguousarray(restored).tofile(output)
-
-
-__all__ = [
-    "compress_shaped_lossy_raw",
-    "decompress_shaped_lossy_raw",
-]

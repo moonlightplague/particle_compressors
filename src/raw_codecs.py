@@ -77,7 +77,7 @@ def compress_szo_raw(
     abs_error_bound: float,
     force: bool,
 ) -> Dict[str, Any]:
-    data_type = _require_float_dtype(dtype, field_name, "SZO compression")
+    data_type = require_float_dtype(dtype, field_name, "SZO compression")
     output = Path(compressed_path)
     require_output_path(output, force)
     szo, config_type, error_bound_mode, algorithm = load_pyszo()
@@ -124,7 +124,7 @@ def compress_pysz_raw(
     abs_error_bound: float,
     force: bool,
 ) -> Dict[str, Any]:
-    data_type = _require_float_dtype(dtype, field_name, "pysz compression")
+    data_type = require_float_dtype(dtype, field_name, "pysz compression")
     output = Path(compressed_path)
     require_output_path(output, force)
     pysz, config_type, error_bound_mode = load_pysz()
@@ -225,7 +225,7 @@ def decompress_szo_raw(
     out_path: str,
     force: bool,
 ) -> None:
-    data_type = _require_float_dtype(
+    data_type = require_float_dtype(
         field["dtype"],
         str(field["field"]),
         "SZO decompression",
@@ -246,7 +246,7 @@ def decompress_pysz_raw(
     out_path: str,
     force: bool,
 ) -> None:
-    data_type = _require_float_dtype(
+    data_type = require_float_dtype(
         field["dtype"],
         str(field["field"]),
         "pysz decompression",
@@ -314,7 +314,11 @@ def _field_metadata(
     }
 
 
-def _require_float_dtype(dtype: Any, field_name: str, operation: str) -> np.dtype:
+def require_float_dtype(
+    dtype: Any,
+    field_name: str,
+    operation: str,
+) -> np.dtype:
     data_type = np.dtype(dtype)
     if data_type not in FLOAT_DTYPES:
         raise RuntimeError(

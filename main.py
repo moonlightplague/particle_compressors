@@ -18,7 +18,7 @@ from src.batch import (
     print_batch_summary,
     resolve_file_workers,
 )
-from src.cli import build_parser, validate_compressor_combination
+from src.cli import build_parser
 from src.compress import compress
 from src.decompress import decompress
 from src.metrics import (
@@ -26,7 +26,6 @@ from src.metrics import (
     print_component_summary,
     print_summary,
 )
-from src.models import ToolPaths
 from src.preprocess import preprocess
 from src.runtime import read_json, write_json
 
@@ -59,8 +58,8 @@ class PipelineApplication:
         self._print_package_paths()
 
     def _compress(self) -> None:
-        manifest, raw_paths, tools = preprocess(self.args)
-        manifest = compress(self.args, manifest, raw_paths, tools)
+        manifest, raw_paths = preprocess(self.args)
+        manifest = compress(self.args, manifest, raw_paths)
         self._print_package_paths()
         print(
             "payload_CR = "
@@ -69,13 +68,7 @@ class PipelineApplication:
         print_component_summary(manifest)
 
     def _decompress(self) -> None:
-        manifest = decompress(
-            self.args,
-            ToolPaths(
-                lcp=Path(self.args.lcp),
-                xnyzip=Path(self.args.xnyzip),
-            ),
-        )
+        manifest = decompress(self.args)
         self._clean_raw_if_requested()
         print(
             "reconstructed_h5 = "
@@ -83,9 +76,9 @@ class PipelineApplication:
         )
 
     def _roundtrip(self) -> None:
-        manifest, raw_paths, tools = preprocess(self.args)
-        manifest = compress(self.args, manifest, raw_paths, tools)
-        manifest = decompress(self.args, tools)
+        manifest, raw_paths = preprocess(self.args)
+        manifest = compress(self.args, manifest, raw_paths)
+        manifest = decompress(self.args)
         metrics = compute_metrics(
             Path(self.args.input_h5).resolve(),
             Path(manifest["artifacts"]["reconstructed_h5"]).resolve(),
@@ -231,47 +224,16 @@ def clean_raw_directories(work_dir: Path) -> None:
             shutil.rmtree(path)
 
 
-def default_work_dir_for_args(args: argparse.Namespace) -> Path:
-    """Return the legacy data/error-bound-derived work directory."""
-
-    if args.pos_rel_eb is not None or args.vel_rel_eb is not None:
-        labels = []
-        if args.pos_rel_eb is not None:
-            labels.append(f"posrel{args.pos_rel_eb:g}")
-        if args.vel_rel_eb is not None:
-            labels.append(f"velrel{args.vel_rel_eb:g}")
-        suffix = "_".join(labels)
-    elif args.rel_eb is not None:
-        suffix = f"rel{args.rel_eb:g}"
-    else:
-        suffix = f"eb{args.abs_eb:g}"
-    if args.limit is not None:
-        suffix += f"_n{args.limit}"
-    return (
-        Path("particle_pipeline_runs")
-        / f"{Path(args.input_h5).name}.{suffix}"
-    )
-
-
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser(argv)
     args = parser.parse_args(argv)
     try:
-        if hasattr(args, "pos_compressor"):
-            validate_compressor_combination(
-                args.pos_compressor,
-                args.vel_compressor,
-            )
         if hasattr(args, "input_h5") and Path(args.input_h5).is_dir():
             return DirectoryPipelineApplication(args).run()
         return PipelineApplication(args).run()
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-
-
-# Backwards-compatible name.
-maybe_clean_raw = clean_raw_directories
 
 
 if __name__ == "__main__":

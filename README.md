@@ -1,16 +1,15 @@
 # Particle Compressors
 
-Particle Compressors is a command-line pipeline for compressing particle data
-stored in HDF5. It combines specialized codecs for each component of a particle
-record, reconstructs the original HDF5 layout, and can calculate roundtrip error
-and compression metrics. The pipeline preserves dataset names, dtypes, dataset attributes, and root HDF5
-attributes in the reconstructed file.
+Particle Compressors is a command-line pipeline for lossy compression of
+particle data stored in HDF5. One selected codec, SZO or SZ3, compresses all
+six position and velocity fields. Particle IDs remain lossless through
+pcodec. Roundtrip reconstruction preserves dataset paths, dtypes, dataset
+attributes, and root HDF5 attributes.
 
 ## Input Format
 
-The input must be an HDF5 file containing seven one-dimensional datasets with
-the same length. Dataset basenames are matched case-insensitively using these
-aliases:
+The input must contain seven one-dimensional datasets with the same length.
+Dataset basenames are matched case-insensitively.
 
 | Logical field | Accepted dataset basenames | Required dtype |
 | --- | --- | --- |
@@ -22,366 +21,180 @@ aliases:
 | VY | `vy`, `vely`, `velocity_y` | `float32` or `float64` |
 | VZ | `vz`, `velz`, `velocity_z` | `float32` or `float64` |
 
-Datasets may be located in HDF5 groups; matching uses only the final component
-of each dataset path.
+Datasets may be inside HDF5 groups; matching uses the final path component.
 
-## Requirements
+## Requirements and Installation
 
-- Python with development headers; Python 3.13 is known to work. Conda environment is recommended.
-- A C++20-capable compiler, CMake, and Make for LCP and XnYZip
+- Python with development headers; Python 3.13 is known to work
 - Rust and Cargo for the local pcodec Python extension
-- Git submodules initialized for `tools/LCP`, `tools/XnYZip`, `tools/SZo`,
-  and `tools/pcodec`
-
-## Installation
-
-Clone or initialize the native-code submodules:
+- Initialized `tools/SZo` and `tools/pcodec` submodules
 
 ```bash
 git submodule update --init --recursive
-```
-
-Setup conda env:
-```bash
 conda create -n compressor python=3.13
 conda activate compressor
-```
-
-From the repository root, the included installation script builds LCP and
-XnYZip and installs the Python dependencies into the active Python
-environment:
-
-```bash
 bash install.sh
 ```
 
-## Code Structure
-
-The Python implementation is separated by responsibility:
-
-- `preprocess.py`, `compress.py`, and `decompress.py` orchestrate pipeline
-  stages.
-- `raw_codecs.py` adapts pcodec, SZ3, and SZO field streams.
-- `lattice_layout.py` infers periodic ID lattices and implements reversible
-  dense-field transforms; `shaped_codecs.py` adds adaptive 3-D codec layouts.
-- `lcp_codec.py` owns native LCP commands and the chunked velocity container;
-  `xnyzip_codec.py` owns native XnYZip commands and its `uint64` order files.
-- `huffman_encode.py` provides the canonical delta-Huffman transform used for
-  LCP block-ID sidecars.
-- `field_export.py`, `error_bounds.py`, and `hdf5_io.py` handle source
-  conversion, bound selection, and HDF5 reconstruction.
-- `manifest.py`, `metrics.py`, and `runtime.py` contain package metadata,
-  reporting, and low-level runtime utilities.
-- `helpers.py` is a compatibility facade for integrations using the original
-  helper API; new code should import the focused modules directly.
-
+The installation script installs the pinned Python dependencies, the local
+SZO Python binding, and the editable pcodec extension.
 
 ## Quick Start
 
-Start with a limited roundtrip to validate the environment and input schema:
-
-
-Run the full file with relative error bound of `1e-3`:
+Run a complete SZO roundtrip with a relative error bound of `1e-3`:
 
 ```bash
 python main.py roundtrip data/sample.h5 \
-  --config config.yaml \
-  --work-dir particle_pipeline_runs \
-  --rel-eb 1e-3 \
-  --force 
-```
-
-Use a distinct work directory for each input/error-bound combination. Existing
-outputs are rejected unless `--force` is supplied.
-
-To process every `.h5` file directly inside a directory, pass the directory in
-place of a single input file:
-
-```bash
-python main.py roundtrip data/snapshots \
-  --work-dir particle_pipeline_runs/snapshots \
-  --rel-eb 1e-3 \
-  --file-workers 0 \
-  --force
-```
-
-Directory inputs run in parallel processes. `--file-workers 0` automatically
-uses up to 16 workers; a positive value sets an explicit cap. Each input keeps
-the normal single-file pipeline and writes to a separate subdirectory named
-after the source file, such as `particle_pipeline_runs/snapshots/step_01.h5`.
-Per-file console metrics are printed as usual, and the batch root receives
-`batch_metrics.json` with byte-weighted total compression ratio, aggregate
-stage timings, observed batch wall time, throughput, per-file statistics, and
-separate byte-weighted total CRs for positions, IDs, and velocities. It also
-records per-field `max_abs`, `mse`, and `psnr` quality metrics for each
-roundtrip.
-Directory globbing is non-recursive and matches the `.h5` extension exactly.
-
-With `--pos-compressor lcp --vel-compressor sz3`, the compressed directory
-contains `positions.lcp`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`, without
-an LCP order sidecar. If both triplets use LCP, `velocity_order.pco` is also
-stored. `--vel-compressor lcp` requires `--pos-compressor lcp`; configurations
-that combine LCP velocities with fieldwise-compressed positions are rejected.
-Except for optional velocity LCP or XnYZip chunking, the pipeline does not
-split fields into parts. Preprocessing, reconstruction, and metrics therefore
-still load a complete field into memory at once. Manifests produced by the
-older part-based format are not accepted by this format.
-
-LCP sorts its input triplet before encoding it. When only positions use LCP,
-the pipeline adopts the LCP-sorted position order as the reconstructed particle
-order and applies the same temporary permutation to the ID and fieldwise-
-compressed velocities. Consequently no order sidecar is stored, while every
-reconstructed row still contains the corresponding ID, position, and velocity.
-When both triplets use LCP, position order is canonical and the independently
-sorted velocity stream still requires `velocity_order.pco`.
-
-### Blockwise LCP Velocity Order
-
-Use LCP's packed block-local velocity order instead of its global `-ord`
-permutation with:
-
-```bash
-python main.py roundtrip data/sample.h5 \
-  --work-dir particle_pipeline_runs_lcp_blockwise \
-  --pos-compressor lcp \
-  --vel-compressor lcp \
-  --blockwise-ord \
+  --work-dir particle_pipeline_runs/sample-szo \
+  --lossy-compressor szo \
   --rel-eb 1e-3 \
   --force
 ```
 
-This mode stores `velocity_order.pco` and `velocity_block_ids.pco`. LCP writes
-the first as packed block-local ranks and the second as one spatial block ID
-per particle. Block IDs use `uint32` when possible and automatically widen to
-`uint64` when required. Before pcodec compression, they are transformed to
-same-width modulo deltas and canonical Huffman-coded. During decompression the
-pipeline reverses pcodec and Huffman coding, then invokes LCP with
-`--decompress-with-order` and `--blockwise-ord`; LCP restores the velocity
-triplet to the canonical position-sorted row order before HDF5 reconstruction.
-
-`--blockwise-ord` requires both `--pos-compressor lcp` and
-`--vel-compressor lcp`. It is mutually exclusive with `--vel-chunk-size`
-because LCP's blockwise order interface supports single-frame calls only.
-
-## XnYZip Compression
-
-XnYZip is available as a position compressor with fieldwise SZ3 or SZo
-velocities:
+Select SZ3 for every lossy field with:
 
 ```bash
 python main.py roundtrip data/sample.h5 \
-  --work-dir particle_pipeline_runs_xnyzip \
-  --pos-compressor xnyzip \
-  --vel-compressor sz3 \
-  --pos-rel-eb 1e-3 \
-  --vel-rel-eb 1e-3 \
-  --force
-```
-
-It can also compress velocities after LCP positions:
-
-```bash
-python main.py roundtrip data/sample.h5 \
-  --work-dir particle_pipeline_runs_lcp_xnyzip \
-  --pos-compressor lcp \
-  --vel-compressor xnyzip \
-  --pos-rel-eb 1e-3 \
-  --vel-rel-eb 1e-3 \
-  --force
-```
-
-In this combination, the pipeline reads LCP's position order and applies it to
-the IDs and all three velocity fields before compression. It then interleaves
-the position-ordered velocity fields for XnYZip.
-
-XnYZip can also compress both triplets:
-
-```bash
-python main.py roundtrip data/sample.h5 \
-  --work-dir particle_pipeline_runs_all_xnyzip \
-  --pos-compressor xnyzip \
-  --vel-compressor xnyzip \
-  --pos-rel-eb 1e-3 \
-  --vel-rel-eb 1e-3 \
-  --force
-```
-
-The CLI spelling is `xnyzip`, matching the native project and executable name
-XnYZip. The pipeline interleaves each triplet as
-`x1,y1,z1,x2,y2,z2,...` float32 data before invoking the native compressor.
-Unlike the per-axis L-infinity bounds used by the other triplet paths, the
-XnYZip bound is an L2 bound. Relative bounds are therefore derived from the
-three-dimensional bounding-box diagonal. The manifest and roundtrip metrics
-record the requested and observed maximum per-particle L2 error.
-
-Like LCP, XnYZip sorts particles during compression. Its position order becomes
-the canonical package row order, and the pipeline applies it to IDs and
-velocities before their compressors run. The temporary position order is not
-packaged. When XnYZip compresses velocities after either LCP or XnYZip
-positions, the independently sorted velocity stream uses a losslessly
-pcodec-compressed `velocity_order.pco` sidecar containing `uint64` indices.
-`--vel-compressor xnyzip` therefore requires `--pos-compressor lcp` or
-`--pos-compressor xnyzip`.
-
-## Chunked Velocities
-
-When LCP compresses both triplets, or XnYZip compresses velocities after LCP or
-XnYZip positions, independently compress contiguous chunks of the
-position-ordered velocity rows with:
-
-```bash
-python main.py roundtrip data/sample.h5 \
-  --work-dir particle_pipeline_runs_lcp_chunked \
-  --pos-compressor lcp \
-  --vel-compressor lcp \
-  --lossless pcodec \
-  --vel-chunk-size 4096 \
-  --vel-chunk-workers 0 \
-  --force
-```
-
-`--vel-chunk-size 0` disables chunking and retains the native monolithic
-stream. A positive value is valid for LCP velocities with LCP positions, or
-XnYZip velocities with LCP/XnYZip positions. Each velocity order index is then
-local to its chunk, so its unsigned range needs at most
-`ceil(log2(chunk_size))` bits instead of
-`ceil(log2(particle_count))`. The raw sidecar uses `int32` for LCP and `uint64`
-for XnYZip; pcodec bit-packs its non-negative range. The manifest records both
-the theoretical width (`order_bits_per_particle`) and the actual pcodec size
-(`compressed_bits_per_particle`).
-
-`velocities.lcp` is a framed chunk container in this mode. Equal-sized chunks
-are batched into native LCP calls with temporal prediction disabled, while a
-short final chunk is encoded separately. Decompression validates every local
-permutation, expands it to the corresponding position-ordered row range, and
-then recombines the particle fields.
-
-For XnYZip velocity compression, `velocities.xnyzip` is similarly a framed
-container of independent native XnYZip streams, one per velocity chunk.
-
-`--vel-chunk-workers 0` automatically uses up to sixteen independent native
-workers for chunk compression and decompression. Set it to `1` to minimize
-temporary disk and memory pressure, or to a specific positive value to cap CPU
-parallelism. Results are written to the container in particle order, so the
-compressed archive is deterministic across worker counts.
-
-## SZO Lossy Compression
-
-SZO is available as a lossy alternative to SZ3 for either positions,
-velocities, or both:
-
-```bash
-python main.py roundtrip data/sample.h5 \
-  --work-dir particle_pipeline_runs_szo \
-  --pos-compressor szo \
-  --vel-compressor szo \
-  --lossless pcodec \
+  --work-dir particle_pipeline_runs/sample-sz3 \
+  --lossy-compressor sz3 \
   --rel-eb 1e-3 \
   --force
 ```
 
-The same `--pos-abs-eb`, `--pos-rel-eb`, `--vel-abs-eb`, and `--vel-rel-eb`
-selection rules used by SZ3 apply to SZO. SZO field streams use the `.szo`
-extension. IDs and the optional all-LCP permutation sidecar remain lossless
-pcodec streams.
+`--lossy-compressor` is the single codec selector and accepts only `szo` or
+`sz3`. The resulting compressed directory contains `id.pco` plus one stream
+per lossy field. SZO streams use `.szo`; SZ3 streams use `.psz`.
 
-## Optional ID Sorting
+Use a distinct work directory for each input and error-bound combination.
+Existing outputs are rejected unless `--force` is supplied.
 
-When both position and velocity triplets use fieldwise SZ3 or SZO compression,
-pass `--sort` to stably sort every particle field by ascending ID before the
-fields are sent to their compressors:
+## Pipeline Commands
+
+- `preprocess` exports raw fields and writes the initial manifest.
+- `compress` preprocesses and writes the compressed package.
+- `decompress` reconstructs an HDF5 file from an existing package.
+- `roundtrip` compresses, reconstructs, and writes quality metrics.
+
+For a small environment check, add `--limit N`. Add `--clean-raw` to remove
+the `preprocessed` and `decompressed` working directories after a roundtrip.
+
+## Error Bounds
+
+`--rel-eb` derives a separate absolute bound from each field range.
+`--abs-eb` applies one default absolute bound. Position- and velocity-specific
+options override the default:
+
+- `--pos-rel-eb` or `--pos-abs-eb` for `x`, `y`, and `z`
+- `--vel-rel-eb` or `--vel-abs-eb` for `vx`, `vy`, and `vz`
+
+Relative and absolute options for the same field group are mutually
+exclusive. Integer IDs are always reconstructed exactly; `--id-abs-eb` only
+sets their expected metric bound.
+
+Position data is converted to float32 compressor units before lossy coding.
+`--position-scale` controls that conversion:
+
+- `auto` uses the configured root attribute for integer positions when it is
+  present, otherwise a scale of one.
+- `raw` always uses a scale of one.
+- `attr` requires the attribute named by `--position-scale-attr`.
+- `value` requires an explicit `--position-scale-value`.
+
+The manifest records preprocessing cast error and the adjusted compressor
+bound for each position field.
+
+## Stable ID Sorting
+
+Use `--sort` to stably sort particles by ascending ID before compression:
 
 ```bash
 python main.py roundtrip data/sample.h5 \
-  --work-dir particle_pipeline_runs_sorted \
-  --pos-compressor sz3 \
-  --vel-compressor szo \
+  --work-dir particle_pipeline_runs/sample-sorted \
+  --lossy-compressor szo \
   --sort \
   --force
 ```
 
-The reconstructed rows remain in ascending-ID order, and roundtrip metrics use
-the recorded temporary permutation to compare each row with its source
-particle. Without `--sort`, the current input-order pipeline is unchanged. The
-flag is ignored when positions use LCP or XnYZip because that compressor
-already determines the pipeline's canonical particle order.
+The same permutation is applied to IDs, positions, and velocities, so every
+reconstructed row retains particle correspondence. The sorted row order is
+the package order. Metrics compare the matching source rows using the
+temporary sort permutation, or by unique particle ID after `--clean-raw`.
 
-## Optimized Periodic Lattice Layout
+## Periodic Lattice Layout
 
-For snapshots whose IDs encode cells of a periodic cubic mesh, enable the
-optimized dense 3-D package layout with `--lattice-layout`:
+`--lattice-layout` enables an ID-derived dense 3-D transform before SZO or SZ3
+compression and implies stable ID sorting:
 
 ```bash
-python main.py roundtrip data/dat_2.1.h5 \
-  --work-dir particle_pipeline_runs/dat_2.1_lattice \
-  --pos-compressor szo \
-  --vel-compressor szo \
-  --lossless pcodec \
-  --rel-eb 1e-3 \
-  --sort --lattice-layout \
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs/sample-lattice \
+  --lossy-compressor szo \
+  --lattice-layout \
+  --lattice-min-occupancy 0.8 \
   --force
 ```
 
-The mode derives zero- or one-based lattice coordinates from ID, unwraps each
-mesh axis at its largest periodic gap, and scatters fields into the resulting
-dense box. Positions are stored as lattice residuals; small lossless pcodec
-sidecars preserve which side of the periodic seam each value belongs to.
-Unoccupied cells receive interpolation-only values and are discarded during
-decoding. SZO or SZ3 then sees spatially adjacent 3-D values instead of a flat
-ID-sorted stream. By default the compressor tries all six axis orders, then
-the reversals of the best order, and records the smallest orientation for each
-field.
+The layout uses the root `nsidemesh` attribute and periodic particle IDs to
+infer the dense lattice. If inference fails or occupancy is below
+`--lattice-min-occupancy`, the pipeline retains the sorted flat-field path.
+`--lattice-axis-search` tries all six dense-axis orders and stores the smallest
+payload for each field; disable it with `--no-lattice-axis-search`.
 
-The optimization requires both triplets to use fieldwise SZO or SZ3, a numeric
-root `nsidemesh` attribute, unique IDs that fit an `nsidemesh^3` zero- or
-one-based lattice, normalized positions in the periodic domain, and a dense
-box occupancy of at least `--lattice-min-occupancy` (default `0.8`). It implies
-ID sorting. If inference or the occupancy check fails, the manifest records
-the reason and compression safely falls back to the ordinary ID-sorted
-fieldwise path. Existing packages and runs without `--lattice-layout` retain
-their previous format and behavior. Use `--no-lattice-axis-search` to encode
-the native dense axis order only when compression time matters more than the
-last fraction of payload CR.
+Position fields may use a reversible periodic residual transform. Any wrap
+offsets are stored losslessly with pcodec. The compressor bound is reduced by
+the measured transform roundoff guard so the requested final bound remains
+valid.
 
-On the repository's full `data/dat_2.1.h5` input at relative error `1e-3`, the
-measured packaged payload (including the manifest and all sidecars) was:
+## Directory Batches
 
-| Method | Compressed bytes | Payload CR | All bounds satisfied |
-| --- | ---: | ---: | --- |
-| SZO/SZO + ID sort | 86,490,985 | 19.9632 | Yes |
-| SZO/SZO + periodic lattice layout | 62,200,005 | 27.7595 | Yes |
-
-This is a 28.08% payload-size reduction and a 39.05% CR increase for that
-snapshot. Adaptive orientation raises compression work; in the same run the
-compression stage took 30.85 seconds versus 7.51 seconds for the flat sorted
-baseline.
-
-The benchmark drivers in `experiments/` reproduce the searches used to choose
-the layout. They compare SZO/SZ3, one-dimensional and dense layouts, hole-fill
-strategies, axis orientations, slab sizes, and error-safe coupled predictors.
-For example:
+Pass a directory instead of a file to process its direct `.h5` children:
 
 ```bash
-python -m experiments.periodic_layout_search data/dat_2.1.h5 \
-  --axes --output /tmp/periodic-layout.json
-python -m experiments.orientation_search data/dat_2.1.h5 \
-  --output /tmp/orientation-search.json
+python main.py roundtrip data/snapshots \
+  --work-dir particle_pipeline_runs/snapshots \
+  --lossy-compressor sz3 \
+  --file-workers 0 \
+  --force
 ```
 
-## Integer Compression
+Directory discovery is non-recursive and matches the lowercase `.h5`
+extension exactly. `--file-workers 0` selects up to 128 processes; a positive
+value sets an explicit cap. Each input gets an isolated package directory.
+The batch root receives `batch_metrics.json` with byte-weighted total and
+field-group compression ratios, aggregate stage timings, throughput, per-file
+statistics, and per-field quality metrics.
 
-IDs are reconstructed exactly with pcodec. When both triplets use LCP or both
-use XnYZip, pcodec also compresses the velocity permutation sidecar. Blockwise
-LCP additionally uses pcodec for the Huffman-coded block-ID sidecar.
+## Package Contents
 
-## Error Bounds
+A compressed package contains:
 
-The default `--rel-eb 1e-3` applies to positions and velocities.
-Position- and velocity-specific bounds can be supplied through
-`--pos-abs-eb`, `--pos-rel-eb`, `--vel-abs-eb`, and `--vel-rel-eb`. A
-field-class-specific value takes precedence over the global `--abs-eb` or
-`--rel-eb`. LCP accepts one bound for the velocity triplet, so the strictest
-derived `vx`/`vy`/`vz` bound is used. XnYZip accepts one L2 bound for an entire
-triplet. Do not set both absolute and relative bounds for the same field class.
-IDs are always reconstructed exactly with pcodec. `id_abs_eb` only defines the
-expected ID error used by metrics and defaults to zero.
+- `manifest.json` with schema, attributes, bounds, codecs, ordering, layout,
+  sizes, and timings
+- `compressed/id.pco`
+- six `.szo` or six `.psz` lossy field streams
+- optional pcodec streams for lattice wrap offsets
+
+A completed roundtrip also contains `reconstructed.h5` and `metrics.json`.
+Metrics include maximum absolute error, MSE, RMSE, normalized RMSE, PSNR,
+bound consistency, exact ID matching, component compression ratios, and total
+payload compression ratio.
+
+## Configuration
+
+Advanced defaults live under `advanced` in `config.yaml`. Command-line options
+override those defaults. Unknown configuration keys are rejected to catch
+stale or misspelled settings.
+
+## Code Structure
+
+- `preprocess.py`, `compress.py`, and `decompress.py` orchestrate stages.
+- `raw_codecs.py` adapts pcodec, SZ3, and SZO field streams.
+- `lattice_layout.py` implements periodic dense transforms.
+- `shaped_codecs.py` chooses adaptive 3-D codec layouts.
+- `field_export.py`, `error_bounds.py`, and `hdf5_io.py` handle source
+  conversion, bound selection, and HDF5 reconstruction.
+- `manifest.py`, `metrics.py`, `batch.py`, and `runtime.py` contain package
+  metadata, reporting, batch aggregation, and shared runtime utilities.
+
+The scripts under `experiments/` explore payload and lattice-layout choices;
+see `experiments/README.md` for entry points.

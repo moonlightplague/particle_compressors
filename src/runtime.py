@@ -1,17 +1,13 @@
-"""Filesystem, subprocess, and optional dependency utilities."""
+"""Filesystem and optional dependency utilities."""
 
 import ctypes
 import importlib.util
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 import numpy as np
-
-from src.models import ToolPaths
 
 
 def repo_root() -> Path:
@@ -41,18 +37,6 @@ def json_size_bytes(payload: Mapping[str, Any]) -> int:
 
 def read_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def run_command(argv: List[str]) -> None:
-    process = subprocess.run(argv, text=True, capture_output=True)
-    if process.returncode == 0:
-        return
-    raise RuntimeError(
-        "Command failed with exit code "
-        f"{process.returncode}: {' '.join(argv)}\n"
-        f"stdout:\n{process.stdout}\n"
-        f"stderr:\n{process.stderr}"
-    )
 
 
 def load_pcodec() -> Tuple[Any, Any]:
@@ -119,35 +103,3 @@ def read_raw(path: str, dtype: np.dtype, count: int) -> np.ndarray:
             f"Unexpected EOF reading {path}; expected {count}, got {data.size}."
         )
     return data
-
-
-def resolve_velocity_chunk_workers(configured: int) -> int:
-    configured = int(configured)
-    if configured < 0:
-        raise RuntimeError("Velocity chunk workers must be non-negative.")
-    if configured:
-        return configured
-    return min(16, os.cpu_count() or 1)
-
-
-def resolve_lcp_chunk_workers(configured: int) -> int:
-    """Compatibility alias for the codec-neutral worker resolver."""
-
-    return resolve_velocity_chunk_workers(configured)
-
-
-__all__ = [
-    "ToolPaths",
-    "json_size_bytes",
-    "load_pcodec",
-    "load_pysz",
-    "load_pyszo",
-    "read_json",
-    "read_raw",
-    "repo_root",
-    "require_output_path",
-    "resolve_lcp_chunk_workers",
-    "resolve_velocity_chunk_workers",
-    "run_command",
-    "write_json",
-]

@@ -1,18 +1,9 @@
 """Small immutable models shared by pipeline stages."""
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
-
-
-@dataclass(frozen=True)
-class ToolPaths:
-    """Paths to native executables used by the pipeline."""
-
-    lcp: Path
-    xnyzip: Optional[Path] = None
 
 
 @dataclass(frozen=True)
@@ -31,7 +22,6 @@ class ErrorBoundSelection:
     mode: str
     abs_by_field: Dict[str, float]
     relative: Optional[float] = None
-    compressor_abs: Optional[float] = None
 
 
 @dataclass(frozen=True)

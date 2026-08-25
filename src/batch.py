@@ -320,7 +320,7 @@ def _file_quality_metrics(
             "mse": display_field["mse"],
             "psnr": display_field["psnr"],
             "units": (
-                "lcp_units"
+                "compressor_units"
                 if logical in POSITION_FIELDS and display_field is field
                 else "source_units"
             ),

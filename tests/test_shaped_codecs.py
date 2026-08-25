@@ -60,7 +60,7 @@ class ShapedCodecTests(unittest.TestCase):
             output_path = root / "decoded.raw"
             values.tofile(raw_path)
             with patch(
-                "src.raw_codecs.load_pyszo",
+                "src.shaped_codecs.load_pyszo",
                 return_value=(
                     FakeSZo,
                     FakeConfig,

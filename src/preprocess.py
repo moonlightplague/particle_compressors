@@ -11,38 +11,17 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 import h5py
 import numpy as np
 
-from src.cli import validate_compressor_combination
-from src.constants import (
-    LOGICAL_ORDER,
-    MAX_INT32_ORDER_VALUES,
-    POSITION_FIELDS,
-    VELOCITY_FIELDS,
-)
-from src.error_bounds import (
-    ResolvedErrorBounds,
-    resolve_error_bounds,
-    select_relative_or_absolute,
-    serialize_error_bound_selection,
-    validate_error_bound,
-)
+from src.constants import LOGICAL_ORDER, POSITION_FIELDS, VELOCITY_FIELDS
+from src.error_bounds import ResolvedErrorBounds, resolve_error_bounds
 from src.field_export import (
-    export_float32_for_lcp,
     export_float_field,
     export_id_for_pcodec,
-    export_positions_for_lcp,
-    export_positions_for_xnyzip,
-    finalize_numeric_stats,
+    export_positions,
     get_selected_count,
     resolve_position_scale,
-    update_numeric_stats,
-    update_numeric_stats_int,
 )
-from src.hdf5_io import (
-    as_jsonable_attr,
-    collect_attrs,
-    resolve_fields,
-)
-from src.models import ErrorBoundSelection, PositionScale, ToolPaths
+from src.hdf5_io import collect_attributes, resolve_fields, serialize_attribute
+from src.models import PositionScale
 from src.runtime import write_json
 
 
@@ -80,14 +59,6 @@ class PreprocessingPipeline:
             raise RuntimeError(
                 f"Input HDF5 file does not exist: {self.input_h5}"
             )
-        self.tools = ToolPaths(
-            lcp=Path(args.lcp),
-            xnyzip=(
-                Path(args.xnyzip)
-                if getattr(args, "xnyzip", None) is not None
-                else None
-            ),
-        )
         self.workspace = PreprocessWorkspace.prepare(
             args.work_dir,
             bool(args.force),
@@ -95,7 +66,7 @@ class PreprocessingPipeline:
         self.raw_paths: Dict[str, str] = {}
         self.statistics: Dict[str, Any] = {}
 
-    def run(self) -> Tuple[Dict[str, Any], Dict[str, str], ToolPaths]:
+    def run(self) -> Tuple[Dict[str, Any], Dict[str, str]]:
         started = time.perf_counter()
         with h5py.File(self.input_h5, "r") as source:
             fields = resolve_fields(source)
@@ -123,7 +94,6 @@ class PreprocessingPipeline:
                 self.args.limit,
                 position_scale,
                 bounds,
-                self.tools,
             )
             selected_payload_bytes = _selected_payload_bytes(
                 source,
@@ -136,7 +106,7 @@ class PreprocessingPipeline:
             selected_payload_bytes,
             started,
         )
-        return manifest, self.raw_paths, self.tools
+        return manifest, self.raw_paths
 
     def _export_fields(
         self,
@@ -145,36 +115,16 @@ class PreprocessingPipeline:
         count: int,
         position_scale: PositionScale,
     ) -> None:
-        xnyzip_position_path = (
-            self.workspace.raw / "positions.xnyzip.f32.raw"
-            if self.args.pos_compressor == "xnyzip"
-            else None
-        )
-        position_paths, position_stats = export_positions_for_lcp(
+        position_paths, position_stats = export_positions(
             source,
             fields,
             self.workspace.raw,
             count,
             position_scale,
             self.args.force,
-            xnyzip_output=xnyzip_position_path,
         )
         self.raw_paths.update(position_paths)
         self.statistics["positions"] = position_stats
-        if xnyzip_position_path is not None:
-            self.raw_paths["positions_xnyzip"] = str(
-                xnyzip_position_path
-            )
-            self.statistics["positions_xnyzip"] = {
-                "dtype": "float32",
-                "shape": [count, 3],
-                "layout": "xyz_interleaved",
-                "fields": list(POSITION_FIELDS),
-                "file_bytes": (
-                    count * 3 * np.dtype(np.float32).itemsize
-                ),
-                "interleaved_during_position_export": True,
-            }
         self._export_id(source, fields, count)
         self._export_velocities(source, fields, count)
 
@@ -212,19 +162,6 @@ class PreprocessingPipeline:
                 self.args.force,
             )
             self.raw_paths[logical] = raw_path
-            stats["preprocess_cast_max_abs"] = 0.0
-            if self.args.vel_compressor in ("lcp", "xnyzip"):
-                vector_codec = self.args.vel_compressor
-                vector_path, cast_error = export_float32_for_lcp(
-                    raw_path,
-                    dtype,
-                    self.workspace.raw
-                    / f"{logical}.{vector_codec}.f32.raw",
-                    count,
-                    self.args.force,
-                )
-                self.raw_paths[f"{logical}_{vector_codec}"] = vector_path
-                stats["preprocess_cast_max_abs"] = cast_error
             velocity_stats[logical] = stats
         self.statistics["velocities"] = velocity_stats
 
@@ -234,65 +171,17 @@ class PreprocessingPipeline:
         selected_payload_bytes: int,
         started: float,
     ) -> None:
-        chunk_size = int(getattr(self.args, "vel_chunk_size", 0))
         manifest["compressors"] = {
-            "positions": self.args.pos_compressor,
-            "velocities": self.args.vel_compressor,
+            "lossy": self.args.lossy_compressor,
             "lossless": self.args.lossless,
         }
-        manifest["velocity_chunking"] = {
-            "chunk_size": chunk_size,
-            "enabled": bool(chunk_size),
-            "configured_workers": int(
-                getattr(self.args, "vel_chunk_workers", 0)
-            ),
-        }
-        manifest["blockwise_order"] = {
-            "enabled": bool(getattr(self.args, "blockwise_ord", False)),
-            "field": (
-                "velocities"
-                if getattr(self.args, "blockwise_ord", False)
-                else None
-            ),
-        }
-        if self.args.vel_compressor == "lcp":
-            manifest["error_bounds"]["velocities_lcp_abs"] = float(
-                manifest["field_error_bounds"]["vx"]["compressor_abs"]
-            )
-        if self.args.vel_compressor == "xnyzip":
-            manifest["error_bounds"]["velocities_xnyzip_abs"] = float(
-                manifest["field_error_bounds"]["velocities_xnyzip"][
-                    "compressor_abs"
-                ]
-            )
-        else:
-            manifest["error_bounds"].pop(
-                "velocities_xnyzip_abs",
-                None,
-            )
-            manifest["field_error_bounds"].pop(
-                "velocities_xnyzip",
-                None,
-            )
-        if (
-            self.args.pos_compressor == "xnyzip"
-            or self.args.vel_compressor == "xnyzip"
-        ):
-            manifest["tools"]["xnyzip"] = str(self.tools.xnyzip)
         manifest["artifacts"] = {
             "preprocessed": self.raw_paths,
             "compressed": build_compressed_artifacts(
                 self.workspace.compressed,
-                self.args.pos_compressor,
-                self.args.vel_compressor,
-                bool(getattr(self.args, "blockwise_ord", False)),
+                self.args.lossy_compressor,
             ),
         }
-        manifest["order_dtype"] = (
-            "uint64"
-            if self.args.pos_compressor == "xnyzip"
-            else "int32"
-        )
         manifest["compressed_fields"] = {}
         manifest["preprocess"] = self.statistics
         manifest["sizes"] = {
@@ -316,7 +205,6 @@ def _make_manifest(
     limit: Optional[int],
     position_scale: PositionScale,
     bounds: ResolvedErrorBounds,
-    tools: ToolPaths,
 ) -> Dict[str, Any]:
     datasets = {
         logical: {
@@ -324,13 +212,13 @@ def _make_manifest(
             "dtype": str(h5[h5_path].dtype),
             "shape": list(h5[h5_path].shape),
             "selected_shape": [count],
-            "attrs": collect_attrs(h5[h5_path]),
+            "attrs": collect_attributes(h5[h5_path]),
         }
         for logical, h5_path in fields.items()
     }
-    root_attributes = collect_attrs(h5)
+    root_attributes = collect_attributes(h5)
     if limit is not None and "npart" in root_attributes:
-        root_attributes["npart"] = as_jsonable_attr(
+        root_attributes["npart"] = serialize_attribute(
             np.asarray(
                 count,
                 dtype=np.asarray(h5.attrs["npart"]).dtype,
@@ -349,15 +237,8 @@ def _make_manifest(
             "value": position_scale.value,
             "attr": position_scale.attr,
         },
-        "error_bounds": {
-            "positions_lcp_abs": bounds.position_lcp_abs,
-            "positions_xnyzip_abs": bounds.position_vector_abs,
-            "velocities_sz3_abs": bounds.velocity_abs,
-            "id_sz3_abs": bounds.id_abs,
-        },
         "field_error_bounds": bounds.fields,
         "tools": {
-            "lcp": str(tools.lcp),
             "pcodec": package_version("pcodec"),
             "pysz": package_version("pysz"),
             "pyszo": package_version("pyszo"),
@@ -365,105 +246,18 @@ def _make_manifest(
     }
 
 
-def make_manifest(
-    input_h5: Path,
-    h5: h5py.File,
-    fields: Mapping[str, str],
-    count: int,
-    limit: Optional[int],
-    position_scale: PositionScale,
-    position_abs: float,
-    position_vector_abs: float,
-    velocity_abs: float,
-    id_abs: float,
-    field_error_bounds: Mapping[str, Mapping[str, Any]],
-    tools: ToolPaths,
-) -> Dict[str, Any]:
-    """Compatibility wrapper for the original manifest-builder signature."""
-
-    bounds = ResolvedErrorBounds(
-        position=ErrorBoundSelection(
-            "manifest",
-            {},
-            compressor_abs=position_abs,
-        ),
-        velocity=ErrorBoundSelection(
-            "manifest",
-            {},
-            compressor_abs=velocity_abs,
-        ),
-        position_lcp_abs=position_abs,
-        position_vector_abs=position_vector_abs,
-        velocity_abs=velocity_abs,
-        velocity_vector_abs=velocity_abs,
-        id_abs=id_abs,
-        fields={
-            name: dict(payload)
-            for name, payload in field_error_bounds.items()
-        },
-    )
-    return _make_manifest(
-        input_h5,
-        h5,
-        fields,
-        count,
-        limit,
-        position_scale,
-        bounds,
-        tools,
-    )
-
-
 def build_compressed_artifacts(
     compressed_dir: Path,
-    position_codec: str,
-    velocity_codec: str,
-    blockwise_order: bool = False,
+    lossy_compressor: str,
 ) -> Dict[str, str]:
-    validate_compressor_combination(position_codec, velocity_codec)
-    artifacts = {"id": str(compressed_dir / "id.pco")}
-    if position_codec in ("lcp", "xnyzip"):
-        artifacts["positions"] = str(
-            compressed_dir
-            / (
-                "positions.lcp"
-                if position_codec == "lcp"
-                else "positions.xnyzip"
-            )
-        )
-    else:
-        extension = _lossy_extension(position_codec)
-        artifacts.update(
-            {
-                field: str(compressed_dir / f"{field}.{extension}")
-                for field in POSITION_FIELDS
-            }
-        )
-    if velocity_codec in ("lcp", "xnyzip"):
-        artifacts["velocities"] = str(
-            compressed_dir
-            / (
-                "velocities.lcp"
-                if velocity_codec == "lcp"
-                else "velocities.xnyzip"
-            )
-        )
-        artifacts["velocity_order"] = str(
-            compressed_dir / "velocity_order.pco"
-        )
-        if blockwise_order:
-            artifacts["velocity_block_ids"] = str(
-                compressed_dir / "velocity_block_ids.pco"
-            )
-    else:
-        extension = _lossy_extension(velocity_codec)
-        artifacts.update(
-            {
-                field: str(compressed_dir / f"{field}.{extension}")
-                for field in VELOCITY_FIELDS
-            }
-        )
-    return artifacts
+    extension = _lossy_extension(lossy_compressor)
+    return {
+        "id": str(compressed_dir / "id.pco"),
+        **{
+            field: str(compressed_dir / f"{field}.{extension}")
+            for field in (*POSITION_FIELDS, *VELOCITY_FIELDS)
+        },
+    }
 
 
 def package_version(name: str) -> Optional[str]:
@@ -475,55 +269,14 @@ def package_version(name: str) -> Optional[str]:
 
 def preprocess(
     args: argparse.Namespace,
-) -> Tuple[Dict[str, Any], Dict[str, str], ToolPaths]:
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
     return PreprocessingPipeline(args).run()
 
 
 def _validate_preprocess_args(args: argparse.Namespace) -> None:
-    validate_compressor_combination(
-        args.pos_compressor,
-        args.vel_compressor,
-    )
-    chunk_size = int(getattr(args, "vel_chunk_size", 0))
-    workers = int(getattr(args, "vel_chunk_workers", 0))
-    blockwise_order = bool(getattr(args, "blockwise_ord", False))
-    if blockwise_order and (
-        args.pos_compressor != "lcp" or args.vel_compressor != "lcp"
-    ):
+    if args.lossy_compressor not in ("szo", "sz3"):
         raise RuntimeError(
-            "--blockwise-ord requires --pos-compressor lcp and "
-            "--vel-compressor lcp."
-        )
-    if blockwise_order and chunk_size:
-        raise RuntimeError(
-            "--blockwise-ord cannot be combined with --vel-chunk-size."
-        )
-    if chunk_size < 0:
-        raise RuntimeError("--vel-chunk-size must be non-negative.")
-    if (
-        args.pos_compressor == "lcp"
-        and args.vel_compressor == "lcp"
-        and chunk_size > MAX_INT32_ORDER_VALUES
-    ):
-        raise RuntimeError(
-            "--vel-chunk-size cannot exceed 2^31 when using int32 order indices."
-        )
-    if workers < 0:
-        raise RuntimeError("--vel-chunk-workers must be non-negative.")
-    chunked_pair = (
-        (
-            args.pos_compressor == "lcp"
-            and args.vel_compressor == "lcp"
-        )
-        or (
-            args.pos_compressor in ("lcp", "xnyzip")
-            and args.vel_compressor == "xnyzip"
-        )
-    )
-    if chunk_size and not chunked_pair:
-        raise RuntimeError(
-            "--vel-chunk-size is only supported for lcp velocities with "
-            "lcp positions or xnyzip velocities with lcp/xnyzip positions."
+            "--lossy-compressor must be one of: szo, sz3."
         )
 
 
@@ -543,36 +296,3 @@ def _lossy_extension(codec: str) -> str:
         return {"sz3": "psz", "szo": "szo"}[codec]
     except KeyError as exc:
         raise RuntimeError(f"Unsupported lossy compressor: {codec}.") from exc
-
-
-# Backwards-compatible names retained for existing callers.
-export_float_for_pysz = export_float_field
-
-
-__all__ = [
-    "ErrorBoundSelection",
-    "PositionScale",
-    "PreprocessingPipeline",
-    "PreprocessWorkspace",
-    "ResolvedErrorBounds",
-    "build_compressed_artifacts",
-    "export_float32_for_lcp",
-    "export_float_field",
-    "export_float_for_pysz",
-    "export_id_for_pcodec",
-    "export_positions_for_lcp",
-    "export_positions_for_xnyzip",
-    "finalize_numeric_stats",
-    "get_selected_count",
-    "make_manifest",
-    "package_version",
-    "preprocess",
-    "resolve_error_bounds",
-    "resolve_fields",
-    "resolve_position_scale",
-    "select_relative_or_absolute",
-    "serialize_error_bound_selection",
-    "update_numeric_stats",
-    "update_numeric_stats_int",
-    "validate_error_bound",
-]

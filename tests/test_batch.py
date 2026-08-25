@@ -117,11 +117,13 @@ class BatchPipelineTests(unittest.TestCase):
         }
         first.report["fields"] = fields
         first.report["sizes"]["compressed_components_bytes"] = {
-            "compressed/positions.lcp": 20,
-            "compressed/order.pco": 10,
+            "compressed/x.szo": 10,
+            "compressed/y.szo": 10,
+            "compressed/z.szo": 10,
             "compressed/id.pco": 10,
-            "compressed/velocities.lcp": 25,
-            "compressed/velocity_order.pco": 5,
+            "compressed/vx.szo": 10,
+            "compressed/vy.szo": 10,
+            "compressed/vz.szo": 10,
         }
         second.report["fields"] = fields
         second.report["sizes"]["compressed_components_bytes"] = {
@@ -216,7 +218,7 @@ class BatchPipelineTests(unittest.TestCase):
                 "max_abs": 0.01,
                 "mse": 0.0001,
                 "psnr": 60.0,
-                "units": "lcp_units",
+                "units": "compressor_units",
             },
         )
         self.assertEqual(
@@ -275,9 +277,7 @@ class BatchPipelineTests(unittest.TestCase):
                 str(outputs),
                 "--file-workers",
                 "2",
-                "--pos-compressor",
-                "sz3",
-                "--vel-compressor",
+                "--lossy-compressor",
                 "sz3",
                 "--force",
             ]

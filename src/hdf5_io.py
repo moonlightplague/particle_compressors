@@ -1,22 +1,12 @@
 """HDF5 schema discovery, attribute transport, and reconstruction."""
 
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping
 
 import h5py
 import numpy as np
 
-from src.constants import (
-    FIELD_ALIASES,
-    LOGICAL_ORDER,
-    POSITION_FIELDS,
-    VELOCITY_FIELDS,
-)
-from src.lcp_codec import read_lcp_order
-from src.manifest import (
-    order_dtype_from_manifest,
-    velocity_compressor_from_manifest,
-)
+from src.constants import FIELD_ALIASES, LOGICAL_ORDER, POSITION_FIELDS
 from src.runtime import read_raw
 
 
@@ -33,7 +23,11 @@ def resolve_fields(h5: h5py.File) -> Dict[str, str]:
     resolved = {}
     for logical, aliases in FIELD_ALIASES.items():
         matched = next(
-            (available[alias.lower()] for alias in aliases if alias.lower() in available),
+            (
+                available[alias.lower()]
+                for alias in aliases
+                if alias.lower() in available
+            ),
             None,
         )
         if matched is None:
@@ -107,8 +101,6 @@ class HDF5Recombiner:
         self.output_h5 = output_h5
         self.count = int(manifest["count"])
         self.position_scale = float(manifest["position_scale"]["value"])
-        self.position_order = self._position_order()
-        self.velocity_order = self._velocity_order()
 
     def run(self) -> None:
         with h5py.File(self.output_h5, "w") as output:
@@ -127,19 +119,8 @@ class HDF5Recombiner:
         )
         apply_attributes(dataset, field.get("attrs", {}))
 
-        if logical == "id":
-            dataset[:] = read_raw(
-                self.paths[logical],
-                target_dtype,
-                self.count,
-            )
-        elif logical in POSITION_FIELDS:
-            dataset[:] = self._reconstructed_position(
-                logical,
-                target_dtype,
-            )
-        elif logical in VELOCITY_FIELDS and self.velocity_order is not None:
-            dataset[:] = self._reordered_velocity(logical, target_dtype)
+        if logical in POSITION_FIELDS:
+            dataset[:] = self._reconstructed_position(logical, target_dtype)
         else:
             dataset[:] = read_raw(
                 self.paths[logical],
@@ -161,64 +142,7 @@ class HDF5Recombiner:
         if np.issubdtype(target_dtype, np.integer):
             limits = np.iinfo(target_dtype)
             values = np.clip(np.rint(values), limits.min, limits.max)
-        converted = values.astype(target_dtype)
-        return self._restore_order(converted, self.position_order)
-
-    def _reordered_velocity(
-        self,
-        logical: str,
-        target_dtype: np.dtype,
-    ) -> np.ndarray:
-        decoded = read_raw(
-            self.paths[logical],
-            np.dtype("float32"),
-            self.count,
-        )
-        converted = decoded.astype(target_dtype)
-        return self._restore_order(converted, self.velocity_order)
-
-    def _position_order(self) -> Optional[np.ndarray]:
-        if "order" not in self.paths:
-            return None
-        return read_lcp_order(
-            self.paths["order"],
-            order_dtype_from_manifest(self.manifest),
-            self.count,
-            "LCP position order sidecar",
-        )
-
-    def _velocity_order(self) -> Optional[np.ndarray]:
-        velocity_codec = velocity_compressor_from_manifest(self.manifest)
-        if (
-            velocity_codec not in ("lcp", "xnyzip")
-            or "velocity_order" not in self.paths
-        ):
-            return None
-        field = self.manifest["compressed_fields"]["velocity_order"]
-        if field.get("applied_during_lcp_decompression"):
-            return None
-        return read_lcp_order(
-            self.paths["velocity_order"],
-            np.dtype(field["dtype"]),
-            self.count,
-            (
-                "LCP velocity order sidecar"
-                if velocity_codec == "lcp"
-                else "XnYZip velocity order sidecar"
-            ),
-            int(field.get("chunk_size", 0)),
-        )
-
-    @staticmethod
-    def _restore_order(
-        values: np.ndarray,
-        order: Optional[np.ndarray],
-    ) -> np.ndarray:
-        if order is None:
-            return values
-        restored = np.empty_like(values)
-        restored[order] = values
-        return restored
+        return values.astype(target_dtype)
 
 
 def recombine_h5(
@@ -227,10 +151,3 @@ def recombine_h5(
     output_h5: Path,
 ) -> None:
     HDF5Recombiner(manifest, decompressed_paths, output_h5).run()
-
-
-# Backwards-compatible names.
-as_jsonable_attr = serialize_attribute
-collect_attrs = collect_attributes
-restore_attr = restore_attribute
-apply_attrs = apply_attributes

@@ -1,7 +1,6 @@
 """Convert HDF5 particle datasets into compressor-ready raw streams."""
 
 import math
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -10,7 +9,7 @@ import numpy as np
 
 from src.constants import POSITION_FIELDS
 from src.models import PositionScale
-from src.runtime import read_raw, require_output_path
+from src.runtime import require_output_path
 
 
 def update_numeric_stats(
@@ -107,7 +106,9 @@ def get_selected_count(
     fields: Mapping[str, str],
     limit: Optional[int],
 ) -> int:
-    sizes = {logical: int(h5[path].shape[0]) for logical, path in fields.items()}
+    sizes = {
+        logical: int(h5[path].shape[0]) for logical, path in fields.items()
+    }
     unique_sizes = set(sizes.values())
     if len(unique_sizes) != 1:
         raise RuntimeError(
@@ -121,29 +122,19 @@ def get_selected_count(
     return count
 
 
-def export_positions_for_lcp(
+def export_positions(
     h5: h5py.File,
     fields: Mapping[str, str],
     output_dir: Path,
     count: int,
     scale: PositionScale,
     force: bool,
-    xnyzip_output: Optional[Path] = None,
 ) -> Tuple[Dict[str, str], Dict[str, Dict[str, float]]]:
     paths = {}
     statistics = {}
     output_dir.mkdir(parents=True, exist_ok=True)
-    xnyzip_interleaved = None
-    if xnyzip_output is not None:
-        require_output_path(xnyzip_output, force)
-        xnyzip_interleaved = np.memmap(
-            xnyzip_output,
-            dtype=np.float32,
-            mode="w+",
-            shape=(count, 3),
-        )
 
-    for axis, logical in enumerate(POSITION_FIELDS):
+    for logical in POSITION_FIELDS:
         dataset = h5[fields[logical]]
         output = output_dir / f"{logical}.f32.raw"
         require_output_path(output, force)
@@ -152,8 +143,6 @@ def export_positions_for_lcp(
         scaled64 = source.astype(np.float64, copy=False) / scale.value
         scaled32 = scaled64.astype(np.float32)
         scaled32.tofile(output)
-        if xnyzip_interleaved is not None:
-            xnyzip_interleaved[:, axis] = scaled32
         cast_error = float(
             np.abs(scaled32.astype(np.float64) - scaled64).max(initial=0.0)
         )
@@ -169,125 +158,18 @@ def export_positions_for_lcp(
         paths[logical] = str(output)
         statistics[logical] = {
             "scale": scale.value,
-            "preprocess_cast_max_abs_in_lcp_units": cast_error,
-            "preprocess_cast_max_abs_in_original_fixed_point_units": (
+            "preprocess_cast_max_abs_in_compressor_units": cast_error,
+            "preprocess_cast_max_abs_in_original_units": (
                 cast_error * scale.value
             ),
-            "min_in_lcp_units": field_stats["float_min"],
-            "max_in_lcp_units": field_stats["float_max"],
-            "range_in_lcp_units": field_stats["float_range"],
-            "min_in_int_units": field_stats["int_min"],
-            "max_in_int_units": field_stats["int_max"],
-            "range_in_int_units": field_stats["int_range"],
+            "min_in_compressor_units": field_stats["float_min"],
+            "max_in_compressor_units": field_stats["float_max"],
+            "range_in_compressor_units": field_stats["float_range"],
+            "min_in_original_units": field_stats["int_min"],
+            "max_in_original_units": field_stats["int_max"],
+            "range_in_original_units": field_stats["int_range"],
         }
-    if xnyzip_interleaved is not None:
-        xnyzip_interleaved.flush()
-        del xnyzip_interleaved
     return paths, statistics
-
-
-def export_positions_for_xnyzip(
-    position_paths: Mapping[str, str],
-    output: Path,
-    count: int,
-    force: bool,
-) -> Tuple[str, Dict[str, Any]]:
-    return export_triplet_for_xnyzip(
-        position_paths,
-        POSITION_FIELDS,
-        output,
-        count,
-        force,
-    )
-
-
-def export_triplet_for_xnyzip(
-    field_paths: Mapping[str, str],
-    fields: Tuple[str, str, str],
-    output: Path,
-    count: int,
-    force: bool,
-) -> Tuple[str, Dict[str, Any]]:
-    require_output_path(output, force)
-    interleaved = np.memmap(
-        output,
-        dtype=np.float32,
-        mode="w+",
-        shape=(count, 3),
-    )
-    for axis, logical in enumerate(fields):
-        values = np.memmap(
-            field_paths[logical],
-            dtype=np.float32,
-            mode="r",
-        )
-        if values.size != count:
-            raise RuntimeError(
-                f"XnYZip triplet export expected {count} values in "
-                f"{field_paths[logical]}, got {values.size}."
-            )
-        interleaved[:, axis] = values
-        del values
-    interleaved.flush()
-    del interleaved
-    return str(output), {
-        "dtype": "float32",
-        "shape": [count, 3],
-        "layout": "xyz_interleaved",
-        "fields": list(fields),
-        "file_bytes": count * 3 * np.dtype(np.float32).itemsize,
-    }
-
-
-def export_ordered_triplet_for_xnyzip(
-    field_paths: Mapping[str, str],
-    fields: Tuple[str, str, str],
-    output: Path,
-    count: int,
-    order: np.ndarray,
-    force: bool,
-) -> Tuple[str, Dict[str, Any]]:
-    """Gather three fields directly into an ordered interleaved stream."""
-
-    require_output_path(output, force)
-    if order.size != count:
-        raise RuntimeError(
-            f"XnYZip ordered export expected {count} indices, "
-            f"got {order.size}."
-        )
-    interleaved = np.memmap(
-        output,
-        dtype=np.float32,
-        mode="w+",
-        shape=(count, 3),
-    )
-
-    def write_axis(item: Tuple[int, str]) -> None:
-        axis, logical = item
-        values = np.memmap(
-            field_paths[logical],
-            dtype=np.float32,
-            mode="r",
-        )
-        if values.size != count:
-            raise RuntimeError(
-                f"XnYZip triplet export expected {count} values in "
-                f"{field_paths[logical]}, got {values.size}."
-            )
-        interleaved[:, axis] = values[order]
-
-    with ThreadPoolExecutor(max_workers=len(fields)) as executor:
-        list(executor.map(write_axis, enumerate(fields)))
-    interleaved.flush()
-    del interleaved
-    return str(output), {
-        "dtype": "float32",
-        "shape": [count, 3],
-        "layout": "xyz_interleaved",
-        "fields": list(fields),
-        "file_bytes": count * 3 * np.dtype(np.float32).itemsize,
-        "ordered_during_interleave": True,
-    }
 
 
 def export_float_field(
@@ -309,26 +191,6 @@ def export_float_field(
     range_stats = {"float_min": math.inf, "float_max": -math.inf}
     update_numeric_stats(range_stats, source)
     return str(output), finalize_numeric_stats(range_stats)
-
-
-def export_float32_for_lcp(
-    raw_path: str,
-    source_dtype: np.dtype,
-    output: Path,
-    count: int,
-    force: bool,
-) -> Tuple[str, float]:
-    source_dtype = np.dtype(source_dtype)
-    if source_dtype == np.dtype("float32"):
-        return raw_path, 0.0
-    require_output_path(output, force)
-    source = read_raw(raw_path, source_dtype, count)
-    encoded = source.astype(np.float32)
-    cast_error = np.abs(
-        encoded.astype(np.float64) - source.astype(np.float64, copy=False)
-    )
-    encoded.tofile(output)
-    return str(output), float(cast_error.max(initial=0.0))
 
 
 def export_id_for_pcodec(

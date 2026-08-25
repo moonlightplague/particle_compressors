@@ -9,34 +9,24 @@ import yaml
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
-    "lcp": str(
-        DEFAULT_CONFIG_PATH.parent / "tools" / "LCP" / "build" / "bin" / "lcp"
-    ),
-    "xnyzip": str(
-        DEFAULT_CONFIG_PATH.parent / "tools" / "XnYZip" / "build" / "XnYZip"
-    ),
     "abs_eb": None,
     "rel_eb": 1e-3,
     "pos_abs_eb": None,
     "pos_rel_eb": None,
     "vel_abs_eb": None,
     "vel_rel_eb": None,
-    "vel_chunk_size": 0,
-    "vel_chunk_workers": 0,
     "id_abs_eb": 0.0,
     "position_scale": "auto",
     "position_scale_attr": "bitwidth",
     "position_scale_value": None,
-    "pos_compressor": "lcp",
-    "vel_compressor": "sz3",
+    "lossy_compressor": "szo",
     "lossless": "pcodec",
     "lattice_layout": False,
     "lattice_min_occupancy": 0.8,
     "lattice_axis_search": True,
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
-    "pos_compressor": ("lcp", "xnyzip", "sz3", "szo"),
-    "vel_compressor": ("sz3", "szo", "lcp", "xnyzip"),
+    "lossy_compressor": ("szo", "sz3"),
     "lossless": ("pcodec",),
 }
 NULLABLE_NUMBER_KEYS = (
@@ -48,24 +38,6 @@ NULLABLE_NUMBER_KEYS = (
     "vel_rel_eb",
     "position_scale_value",
 )
-
-
-def validate_compressor_combination(
-    position_codec: str,
-    velocity_codec: str,
-) -> None:
-    if velocity_codec == "lcp" and position_codec != "lcp":
-        raise RuntimeError(
-            "--vel-compressor lcp requires --pos-compressor lcp."
-        )
-    if (
-        velocity_codec == "xnyzip"
-        and position_codec not in ("lcp", "xnyzip")
-    ):
-        raise RuntimeError(
-            "--vel-compressor xnyzip requires --pos-compressor lcp or "
-            "xnyzip."
-        )
 
 
 def load_config(path: str) -> Tuple[Path, Dict[str, Any]]:
@@ -88,7 +60,7 @@ def load_config(path: str) -> Tuple[Path, Dict[str, Any]]:
     advanced = payload.get("advanced", {})
     if not isinstance(advanced, Mapping):
         raise RuntimeError("Config section advanced must be a mapping.")
-    return config_path, _validated_advanced_config(advanced, config_path)
+    return config_path, _validated_advanced_config(advanced)
 
 
 def build_parser(
@@ -111,7 +83,7 @@ def build_parser(
         "Preprocess and compress an HDF5 particle file.",
         defaults,
     )
-    _add_decompress_command(commands, defaults)
+    _add_decompress_command(commands)
     _add_pipeline_command(
         commands,
         "roundtrip",
@@ -121,10 +93,7 @@ def build_parser(
     return parser
 
 
-def _validated_advanced_config(
-    config: Mapping[str, Any],
-    config_path: Path,
-) -> Dict[str, Any]:
+def _validated_advanced_config(config: Mapping[str, Any]) -> Dict[str, Any]:
     _reject_unknown_keys(
         config,
         set(BUILTIN_ADVANCED_DEFAULTS),
@@ -136,14 +105,6 @@ def _validated_advanced_config(
     defaults["id_abs_eb"] = _required_number(
         defaults["id_abs_eb"],
         "id_abs_eb",
-    )
-    defaults["vel_chunk_size"] = _nonnegative_integer(
-        defaults["vel_chunk_size"],
-        "vel_chunk_size",
-    )
-    defaults["vel_chunk_workers"] = _nonnegative_integer(
-        defaults["vel_chunk_workers"],
-        "vel_chunk_workers",
     )
     for key in ("lattice_layout", "lattice_axis_search"):
         if not isinstance(defaults[key], bool):
@@ -167,19 +128,8 @@ def _validated_advanced_config(
         raise RuntimeError(
             "config value advanced.position_scale_attr must be a string."
         )
-    for key in ("lcp", "xnyzip"):
-        if not isinstance(defaults[key], str):
-            raise RuntimeError(
-                f"config value advanced.{key} must be a path string."
-            )
     for key, choices in AVAILABLE_COMPRESSORS.items():
         defaults[key] = _choice(defaults[key], key, choices)
-
-    for key in ("lcp", "xnyzip"):
-        tool_path = Path(defaults[key]).expanduser()
-        if not tool_path.is_absolute():
-            tool_path = config_path.parent / tool_path
-        defaults[key] = str(tool_path.resolve())
     return defaults
 
 
@@ -203,7 +153,7 @@ def _add_pipeline_command(
 ) -> None:
     command = commands.add_parser(name, help=help_text)
     _add_config_argument(command, argparse.SUPPRESS)
-    _add_runtime_arguments(command, defaults)
+    _add_runtime_arguments(command)
     _add_compression_arguments(command, defaults)
     command.add_argument(
         "--file-workers",
@@ -211,21 +161,18 @@ def _add_pipeline_command(
         default=0,
         help=(
             "Parallel file processes for directory input; 0 selects up to "
-            "16 workers automatically (default: %(default)s)."
+            "128 workers automatically (default: %(default)s)."
         ),
     )
 
 
-def _add_decompress_command(
-    commands: Any,
-    defaults: Mapping[str, Any],
-) -> None:
+def _add_decompress_command(commands: Any) -> None:
     command = commands.add_parser(
         "decompress",
         help="Decompress a package and rebuild its HDF5 file.",
     )
     _add_config_argument(command, argparse.SUPPRESS)
-    _add_runtime_arguments(command, defaults)
+    _add_runtime_arguments(command)
     command.add_argument(
         "--work-dir",
         default="particle_pipeline_runs",
@@ -233,10 +180,7 @@ def _add_decompress_command(
     )
 
 
-def _add_config_argument(
-    parser: argparse.ArgumentParser,
-    default: Any,
-) -> None:
+def _add_config_argument(parser: argparse.ArgumentParser, default: Any) -> None:
     parser.add_argument(
         "--config",
         default=default,
@@ -246,30 +190,7 @@ def _add_config_argument(
     )
 
 
-def _add_runtime_arguments(
-    parser: argparse.ArgumentParser,
-    defaults: Mapping[str, Any],
-) -> None:
-    parser.add_argument(
-        "--lcp",
-        default=defaults["lcp"],
-        help="Path to the LCP executable.",
-    )
-    parser.add_argument(
-        "--xnyzip",
-        default=defaults["xnyzip"],
-        help="Path to the XnYZip executable.",
-    )
-    parser.add_argument(
-        "--vel-chunk-workers",
-        type=int,
-        default=defaults["vel_chunk_workers"],
-        help=(
-            "Parallel native workers for chunked LCP or XnYZip velocities; "
-            "0 selects "
-            "up to 16 workers automatically (default: %(default)s)."
-        ),
-    )
+def _add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--clean-raw",
         action="store_true",
@@ -335,25 +256,6 @@ def _add_compression_arguments(
         help="Relative error bound for vx/vy/vz.",
     )
     parser.add_argument(
-        "--vel-chunk-size",
-        type=int,
-        default=defaults["vel_chunk_size"],
-        help=(
-            "Particles per independent velocity LCP or XnYZip chunk; 0 "
-            "disables chunking (default: %(default)s)."
-        ),
-    )
-    parser.add_argument(
-        "--blockwise-ord",
-        action="store_true",
-        help=(
-            "Use LCP's packed block-local velocity order plus a "
-            "Huffman-coded block-ID sidecar. Requires LCP for both "
-            "positions and velocities and cannot be combined with "
-            "--vel-chunk-size."
-        ),
-    )
-    parser.add_argument(
         "--id-abs-eb",
         type=float,
         default=defaults["id_abs_eb"],
@@ -382,38 +284,27 @@ def _add_compression_arguments(
         help="Scale used by --position-scale value.",
     )
     parser.add_argument(
-        "--pos-compressor",
-        choices=AVAILABLE_COMPRESSORS["pos_compressor"],
-        default=defaults["pos_compressor"],
-        help="Position triplet compressor (default: %(default)s).",
-    )
-    parser.add_argument(
-        "--vel-compressor",
-        choices=AVAILABLE_COMPRESSORS["vel_compressor"],
-        default=defaults["vel_compressor"],
+        "--lossy-compressor",
+        choices=AVAILABLE_COMPRESSORS["lossy_compressor"],
+        default=defaults["lossy_compressor"],
         help=(
-            "Velocity triplet compressor; lcp requires lcp positions and "
-            "xnyzip requires lcp or xnyzip positions "
+            "Lossy compressor used for all position and velocity fields "
             "(default: %(default)s)."
         ),
     )
     parser.add_argument(
         "--sort",
         action="store_true",
-        help=(
-            "Stably sort particles by ascending ID before compression when "
-            "neither triplet compressor establishes a canonical row order."
-        ),
+        help="Stably sort particles by ascending ID before compression.",
     )
     parser.add_argument(
         "--lattice-layout",
         action=argparse.BooleanOptionalAction,
         default=defaults["lattice_layout"],
         help=(
-            "Use an ID-derived periodic dense 3-D layout for fieldwise "
-            "position and velocity codecs; implies ID sorting and falls back "
-            "to the normal sorted layout when occupancy is too low "
-            "(default: %(default)s)."
+            "Use an ID-derived periodic dense 3-D layout; implies ID "
+            "sorting and falls back to the normal sorted layout when "
+            "occupancy is too low (default: %(default)s)."
         ),
     )
     parser.add_argument(
@@ -438,7 +329,7 @@ def _add_compression_arguments(
         "--lossless",
         choices=AVAILABLE_COMPRESSORS["lossless"],
         default=defaults["lossless"],
-        help="ID and integer-sidecar compressor (default: %(default)s).",
+        help="ID compressor (default: %(default)s).",
     )
 
 
@@ -474,28 +365,10 @@ def _required_number(value: Any, key: str) -> float:
     return number
 
 
-def _nonnegative_integer(value: Any, key: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise RuntimeError(
-            f"config value advanced.{key} must be a non-negative integer."
-        )
-    return value
-
-
-def _choice(
-    value: Any,
-    key: str,
-    choices: Tuple[str, ...],
-) -> str:
+def _choice(value: Any, key: str, choices: Tuple[str, ...]) -> str:
     if value not in choices:
         raise RuntimeError(
             f"config value advanced.{key} must be one of: "
             f"{', '.join(choices)}."
         )
     return str(value)
-
-
-# Backwards-compatible parser-builder names.
-add_config_arg = _add_config_argument
-add_common_tool_args = _add_runtime_arguments
-add_compression_args = _add_compression_arguments
