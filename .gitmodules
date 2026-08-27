@@ -7,3 +7,6 @@
 [submodule "tools/SPERR"]
 	path = tools/SPERR
 	url = https://github.com/moonlightplague/SPERR.git
+[submodule "tools/QoZ"]
+	path = tools/QoZ
+	url = https://github.com/moonlightplague/QoZ.git
