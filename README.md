@@ -1,10 +1,10 @@
 # Particle Compressors
 
 Particle Compressors is a command-line pipeline for lossy compression of
-particle data stored in HDF5. One selected codec, SZO or SZ3, compresses all
-six position and velocity fields. Particle IDs remain lossless through
-pcodec. Roundtrip reconstruction preserves dataset paths, dtypes, dataset
-attributes, and root HDF5 attributes.
+particle data stored in HDF5. One selected codec, SZO, SZ3, or SPERR,
+compresses all six position and velocity fields. Particle IDs remain lossless
+through pcodec. Roundtrip reconstruction preserves dataset paths, dtypes,
+dataset attributes, and root HDF5 attributes.
 
 ## Input Format
 
@@ -26,8 +26,9 @@ Datasets may be inside HDF5 groups; matching uses the final path component.
 ## Requirements and Installation
 
 - Python with development headers; Python 3.13 is known to work
+- CMake and a C++ compiler for the local SPERR shared library
 - Rust and Cargo for the local pcodec Python extension
-- Initialized `tools/SZo` and `tools/pcodec` submodules
+- Initialized `tools/SZo`, `tools/SPERR`, and `tools/pcodec` submodules
 
 ```bash
 git submodule update --init --recursive
@@ -36,8 +37,10 @@ conda activate compressor
 bash install.sh
 ```
 
-The installation script installs the pinned Python dependencies, the local
-SZO Python binding, and the editable pcodec extension.
+The installation script builds the local SPERR shared library, then installs
+the pinned Python dependencies, the local SZO and SPERR Python APIs, and the
+editable pcodec extension. SPERR is built without OpenMP for portability; its
+streams remain compatible with an OpenMP-enabled SPERR build.
 
 ## Quick Start
 
@@ -61,9 +64,20 @@ python main.py roundtrip data/sample.h5 \
   --force
 ```
 
-`--lossy-compressor` is the single codec selector and accepts only `szo` or
-`sz3`. The resulting compressed directory contains `id.pco` plus one stream
-per lossy field. SZO streams use `.szo`; SZ3 streams use `.psz`.
+Select SPERR's point-wise-error mode for every lossy field with:
+
+```bash
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs/sample-sperr \
+  --lossy-compressor sperr \
+  --rel-eb 1e-3 \
+  --force
+```
+
+`--lossy-compressor` is the single codec selector and accepts `szo`, `sz3`,
+or `sperr`. The resulting compressed directory contains `id.pco` plus one
+stream per lossy field. SZO streams use `.szo`, SZ3 streams use `.psz`, and
+SPERR streams use `.sperr`.
 
 Use a distinct work directory for each input and error-bound combination.
 Existing outputs are rejected unless `--force` is supplied.
@@ -122,8 +136,8 @@ temporary sort permutation, or by unique particle ID after `--clean-raw`.
 
 ## Periodic Lattice Layout
 
-`--lattice-layout` enables an ID-derived dense 3-D transform before SZO or SZ3
-compression and implies stable ID sorting:
+`--lattice-layout` enables an ID-derived dense 3-D transform before SZO, SZ3,
+or SPERR compression and implies stable ID sorting:
 
 ```bash
 python main.py roundtrip data/sample.h5 \
@@ -171,7 +185,7 @@ A compressed package contains:
 - `manifest.json` with schema, attributes, bounds, codecs, ordering, layout,
   sizes, and timings
 - `compressed/id.pco`
-- six `.szo` or six `.psz` lossy field streams
+- six `.szo`, six `.psz`, or six `.sperr` lossy field streams
 - optional pcodec streams for lattice wrap offsets
 
 A completed roundtrip also contains `reconstructed.h5` and `metrics.json`.
@@ -188,7 +202,7 @@ stale or misspelled settings.
 ## Code Structure
 
 - `preprocess.py`, `compress.py`, and `decompress.py` orchestrate stages.
-- `raw_codecs.py` adapts pcodec, SZ3, and SZO field streams.
+- `raw_codecs.py` adapts pcodec, SPERR, SZ3, and SZO field streams.
 - `lattice_layout.py` implements periodic dense transforms.
 - `shaped_codecs.py` chooses adaptive 3-D codec layouts.
 - `field_export.py`, `error_bounds.py`, and `hdf5_io.py` handle source

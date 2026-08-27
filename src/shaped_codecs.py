@@ -9,10 +9,11 @@ from typing import Any, Dict, Iterator, Mapping, Tuple
 
 import numpy as np
 
-from src.raw_codecs import require_float_dtype
+from src.raw_codecs import require_float_dtype, sperr_pwe_quality
 from src.runtime import (
     load_pysz,
     load_pyszo,
+    load_sperr,
     read_raw,
     require_output_path,
 )
@@ -44,6 +45,18 @@ def compress_shaped_lossy_raw(
         )
     if codec == "sz3":
         return _compress_shaped_sz3(
+            raw_path,
+            dtype,
+            compressed_path,
+            field_name,
+            count,
+            abs_error_bound,
+            force,
+            encoded_shape,
+            axis_search,
+        )
+    if codec == "sperr":
+        return _compress_shaped_sperr(
             raw_path,
             dtype,
             compressed_path,
@@ -101,6 +114,27 @@ def decompress_shaped_lossy_raw(
                 data_type,
                 shape,
             )[0],
+        )
+        return
+    if codec == "sperr":
+        data_type = require_float_dtype(
+            field["dtype"],
+            str(field["field"]),
+            "SPERR decompression",
+        )
+        sperr = load_sperr()
+        _decompress_shaped(
+            field,
+            out_path,
+            force,
+            data_type,
+            "SPERR",
+            lambda payload, shape: _decompress_shaped_sperr_payload(
+                sperr,
+                payload,
+                shape,
+                data_type,
+            ),
         )
         return
     raise RuntimeError(
@@ -262,6 +296,80 @@ def _compress_shaped_sz3(
     )
 
 
+def _compress_shaped_sperr(
+    raw_path: str,
+    dtype: str,
+    compressed_path: str,
+    field_name: str,
+    count: int,
+    abs_error_bound: float,
+    force: bool,
+    encoded_shape: Tuple[int, int, int],
+    axis_search: bool,
+) -> Dict[str, Any]:
+    data_type = require_float_dtype(
+        dtype,
+        field_name,
+        "SPERR compression",
+    )
+    output = Path(compressed_path)
+    require_output_path(output, force)
+    sperr = load_sperr()
+    values = _read_shaped(raw_path, data_type, encoded_shape)
+    quality = sperr_pwe_quality(values, abs_error_bound, field_name)
+    best_payload = None
+    best_permutation = tuple(range(values.ndim))
+    best_flips = (False,) * values.ndim
+    best_shape = values.shape
+    for permutation, candidate in _axis_candidates(values, axis_search):
+        try:
+            payload = sperr.compress(
+                candidate,
+                quality=quality,
+                mode="pwe",
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"SPERR compression failed for shaped field {field_name}."
+            ) from exc
+        if best_payload is None or len(payload) < len(best_payload):
+            best_payload = payload
+            best_permutation = permutation
+            best_shape = candidate.shape
+    if axis_search:
+        for flips, candidate in _flip_candidates(values, best_permutation):
+            try:
+                payload = sperr.compress(
+                    candidate,
+                    quality=quality,
+                    mode="pwe",
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"SPERR compression failed for shaped field {field_name}."
+                ) from exc
+            if len(payload) < len(best_payload):
+                best_payload = payload
+                best_flips = flips
+                best_shape = candidate.shape
+    assert best_payload is not None
+    output.write_bytes(best_payload)
+    return _shaped_metadata(
+        field_name,
+        "sperr",
+        data_type,
+        count,
+        output,
+        len(best_payload),
+        values.shape,
+        best_shape,
+        best_permutation,
+        best_flips,
+        abs_error_bound,
+        axis_search,
+    )
+
+
 def _read_shaped(
     raw_path: str,
     dtype: np.dtype,
@@ -272,6 +380,22 @@ def _read_shaped(
         raise RuntimeError(f"Invalid dense codec shape: {shape!r}.")
     count = math.prod(resolved_shape)
     return read_raw(raw_path, dtype, count).reshape(resolved_shape)
+
+
+def _decompress_shaped_sperr_payload(
+    sperr: Any,
+    payload: np.ndarray,
+    expected_shape: Tuple[int, ...],
+    expected_dtype: np.dtype,
+) -> np.ndarray:
+    decoded = np.asarray(sperr.decompress(payload))
+    if decoded.shape != expected_shape or decoded.dtype != expected_dtype:
+        raise RuntimeError(
+            f"SPERR stream returned shape {decoded.shape} and dtype "
+            f"{decoded.dtype}, expected {expected_shape} and "
+            f"{expected_dtype}."
+        )
+    return decoded
 
 
 def _axis_candidates(

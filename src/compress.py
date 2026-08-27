@@ -38,9 +38,9 @@ class CompressionSettings:
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "CompressionSettings":
         lossy_codec = str(args.lossy_compressor)
-        if lossy_codec not in ("szo", "sz3"):
+        if lossy_codec not in ("szo", "sz3", "sperr"):
             raise RuntimeError(
-                "--lossy-compressor must be one of: szo, sz3."
+                "--lossy-compressor must be one of: szo, sz3, sperr."
             )
         sort_requested = bool(getattr(args, "sort", False))
         lattice_requested = bool(getattr(args, "lattice_layout", False))

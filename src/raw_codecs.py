@@ -1,4 +1,4 @@
-"""Adapters for fieldwise pcodec, SZ3, and SZo streams."""
+"""Adapters for fieldwise pcodec, SPERR, SZ3, and SZo streams."""
 
 from pathlib import Path
 from typing import Any, Dict, Mapping, Tuple
@@ -10,6 +10,7 @@ from src.runtime import (
     load_pcodec,
     load_pysz,
     load_pyszo,
+    load_sperr,
     read_raw,
     require_output_path,
 )
@@ -161,6 +162,56 @@ def compress_pysz_raw(
     return metadata
 
 
+def compress_sperr_raw(
+    raw_path: str,
+    dtype: str,
+    compressed_path: str,
+    field_name: str,
+    count: int,
+    abs_error_bound: float,
+    force: bool,
+) -> Dict[str, Any]:
+    data_type = require_float_dtype(dtype, field_name, "SPERR compression")
+    output = Path(compressed_path)
+    require_output_path(output, force)
+    sperr = load_sperr()
+
+    values = read_raw(raw_path, data_type, count)
+    encoded_count = max(count, 1)
+    encoded = np.empty(encoded_count, dtype=data_type)
+    encoded[:count] = values
+    if count == 0:
+        encoded[0] = 0
+    encoded_shape = (1, encoded_count)
+    quality = sperr_pwe_quality(encoded, abs_error_bound, field_name)
+    try:
+        payload = sperr.compress(
+            encoded.reshape(encoded_shape),
+            quality=quality,
+            mode="pwe",
+        )
+    except Exception as exc:
+        raise RuntimeError(f"SPERR compression failed for {field_name}.") from exc
+
+    output.write_bytes(payload)
+    metadata = _field_metadata(
+        field_name,
+        "sperr",
+        data_type,
+        count,
+        output,
+        len(payload),
+    )
+    metadata.update(
+        {
+            "abs_error_bound": float(abs_error_bound),
+            "encoded_count": encoded_count,
+            "encoded_shape": list(encoded_shape),
+        }
+    )
+    return metadata
+
+
 def compress_lossy_raw(
     codec: str,
     raw_path: str,
@@ -172,6 +223,7 @@ def compress_lossy_raw(
     force: bool,
 ) -> Dict[str, Any]:
     compressors = {
+        "sperr": compress_sperr_raw,
         "sz3": compress_pysz_raw,
         "szo": compress_szo_raw,
     }
@@ -262,6 +314,53 @@ def decompress_pysz_raw(
     )
 
 
+def decompress_sperr_raw(
+    field: Mapping[str, Any],
+    out_path: str,
+    force: bool,
+) -> None:
+    data_type = require_float_dtype(
+        field["dtype"],
+        str(field["field"]),
+        "SPERR decompression",
+    )
+    count = int(field["count"])
+    encoded_count = int(field.get("encoded_count", count))
+    encoded_shape = tuple(
+        int(value)
+        for value in field.get("encoded_shape", (1, encoded_count))
+    )
+    if (
+        len(encoded_shape) != 2
+        or any(value <= 0 for value in encoded_shape)
+        or int(np.prod(encoded_shape)) != encoded_count
+        or encoded_count < count
+    ):
+        raise RuntimeError(
+            f"SPERR metadata for {field['field']} is inconsistent."
+        )
+
+    sperr = load_sperr()
+    payload = Path(field["path"]).read_bytes()
+    try:
+        values = sperr.decompress(payload)
+    except Exception as exc:
+        raise RuntimeError(
+            f"SPERR decompression failed for {field['field']}."
+        ) from exc
+
+    decoded = np.asarray(values)
+    if decoded.shape != encoded_shape or decoded.dtype != data_type:
+        raise RuntimeError(
+            f"SPERR decompression for {field['field']} returned shape "
+            f"{decoded.shape} and dtype {decoded.dtype}, expected "
+            f"{encoded_shape} and {data_type}."
+        )
+    output = Path(out_path)
+    require_output_path(output, force)
+    decoded.reshape(-1)[:count].tofile(output)
+
+
 def decompress_lossy_raw(
     field: Mapping[str, Any],
     out_path: str,
@@ -269,6 +368,7 @@ def decompress_lossy_raw(
 ) -> None:
     decompressors = {
         "pysz": decompress_pysz_raw,
+        "sperr": decompress_sperr_raw,
         "szo": decompress_szo_raw,
     }
     codec = str(field.get("codec"))
@@ -326,6 +426,22 @@ def require_float_dtype(
             f"for {field_name}."
         )
     return data_type
+
+
+def sperr_pwe_quality(
+    values: np.ndarray,
+    abs_error_bound: float,
+    field_name: str,
+) -> float:
+    quality = float(abs_error_bound)
+    if np.isfinite(quality) and quality > 0.0:
+        return quality
+    if quality == 0.0 and values.size and np.all(values == values.flat[0]):
+        return float(np.nextafter(np.float64(0.0), np.float64(1.0)))
+    raise RuntimeError(
+        f"SPERR requires a positive finite error bound for nonconstant "
+        f"field {field_name}; got {quality}."
+    )
 
 
 def _validate_decoded_field(

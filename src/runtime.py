@@ -84,6 +84,21 @@ def load_pyszo() -> Tuple[Any, Any, Any, Any]:
         ) from exc
 
 
+def load_sperr() -> Any:
+    try:
+        import sperr
+        from sperr._native import library
+
+        library()
+        return sperr
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(
+            "Could not import SPERR or load libSPERR. Run `bash install.sh` "
+            "to build the local shared library and install its Python API, "
+            "or set SPERR_LIBRARY to the full path of libSPERR."
+        ) from exc
+
+
 def _preload_pyszo_zstd() -> None:
     spec = importlib.util.find_spec("pyszo")
     if spec is None or not spec.submodule_search_locations:

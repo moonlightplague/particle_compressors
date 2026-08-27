@@ -3,4 +3,5 @@ h5py==3.16.0
 pysz==1.0.3
 PyYAML==6.0.3
 ./tools/SZo/tools/pyszo
+-e ./tools/SPERR
 -e ./tools/pcodec/pco_python

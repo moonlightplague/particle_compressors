@@ -34,7 +34,7 @@ FIELDS = {
 
 class CompressorSelectionTests(unittest.TestCase):
     def test_cli_uses_one_lossy_compressor_for_all_fields(self) -> None:
-        for codec in ("szo", "sz3"):
+        for codec in ("szo", "sz3", "sperr"):
             argv = [
                 "roundtrip",
                 "input.h5",
@@ -48,7 +48,7 @@ class CompressorSelectionTests(unittest.TestCase):
 
         self.assertEqual(
             AVAILABLE_COMPRESSORS["lossy_compressor"],
-            ("szo", "sz3"),
+            ("szo", "sz3", "sperr"),
         )
 
     def test_settings_preserve_sort_and_lattice_options(self) -> None:
@@ -84,15 +84,18 @@ class CompressorSelectionTests(unittest.TestCase):
         root = Path("/tmp/package/compressed")
         szo = build_compressed_artifacts(root, "szo")
         sz3 = build_compressed_artifacts(root, "sz3")
+        sperr = build_compressed_artifacts(root, "sperr")
 
         self.assertEqual(Path(szo["id"]).name, "id.pco")
         self.assertEqual(Path(sz3["id"]).name, "id.pco")
+        self.assertEqual(Path(sperr["id"]).name, "id.pco")
         for field in (*POSITION_FIELDS, *VELOCITY_FIELDS):
             self.assertEqual(Path(szo[field]).name, f"{field}.szo")
             self.assertEqual(Path(sz3[field]).name, f"{field}.psz")
+            self.assertEqual(Path(sperr[field]).name, f"{field}.sperr")
 
     def test_manifest_requires_one_codec_for_every_lossy_field(self) -> None:
-        for configured in ("szo", "sz3"):
+        for configured in ("szo", "sz3", "sperr"):
             self.assertEqual(
                 lossy_compressor_from_manifest(
                     {"compressors": {"lossy": configured}}
@@ -107,6 +110,12 @@ class CompressorSelectionTests(unittest.TestCase):
             }
         }
         self.assertEqual(lossy_compressor_from_manifest(inferred), "sz3")
+
+        inferred["compressed_fields"] = {
+            field: {"codec": "sperr"}
+            for field in (*POSITION_FIELDS, *VELOCITY_FIELDS)
+        }
+        self.assertEqual(lossy_compressor_from_manifest(inferred), "sperr")
 
 
 class StableSortingTests(unittest.TestCase):
