@@ -242,6 +242,7 @@ def _make_manifest(
             "pcodec": package_version("pcodec"),
             "pysz": package_version("pysz"),
             "pyszo": package_version("pyszo"),
+            "qoz": package_version("qoz-compressor"),
             "sperr": package_version("sperr"),
         },
     }
@@ -275,9 +276,9 @@ def preprocess(
 
 
 def _validate_preprocess_args(args: argparse.Namespace) -> None:
-    if args.lossy_compressor not in ("szo", "sz3", "sperr"):
+    if args.lossy_compressor not in ("szo", "sz3", "sperr", "qoz"):
         raise RuntimeError(
-            "--lossy-compressor must be one of: szo, sz3, sperr."
+            "--lossy-compressor must be one of: szo, sz3, sperr, qoz."
         )
 
 
@@ -294,6 +295,11 @@ def _selected_payload_bytes(
 
 def _lossy_extension(codec: str) -> str:
     try:
-        return {"sz3": "psz", "szo": "szo", "sperr": "sperr"}[codec]
+        return {
+            "sz3": "psz",
+            "szo": "szo",
+            "sperr": "sperr",
+            "qoz": "qoz",
+        }[codec]
     except KeyError as exc:
         raise RuntimeError(f"Unsupported lossy compressor: {codec}.") from exc

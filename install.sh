@@ -11,3 +11,4 @@ cmake --build tools/SPERR/build --parallel
 
 mkdir -p tools/SPERR/.pybuild
 python -m pip install -r requirements.txt
+python -m pip install tools/QoZ

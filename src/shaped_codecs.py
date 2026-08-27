@@ -9,10 +9,15 @@ from typing import Any, Dict, Iterator, Mapping, Tuple
 
 import numpy as np
 
-from src.raw_codecs import require_float_dtype, sperr_pwe_quality
+from src.raw_codecs import (
+    prepare_qoz_input,
+    require_float_dtype,
+    sperr_pwe_quality,
+)
 from src.runtime import (
     load_pysz,
     load_pyszo,
+    load_qoz,
     load_sperr,
     read_raw,
     require_output_path,
@@ -45,6 +50,18 @@ def compress_shaped_lossy_raw(
         )
     if codec == "sz3":
         return _compress_shaped_sz3(
+            raw_path,
+            dtype,
+            compressed_path,
+            field_name,
+            count,
+            abs_error_bound,
+            force,
+            encoded_shape,
+            axis_search,
+        )
+    if codec == "qoz":
+        return _compress_shaped_qoz(
             raw_path,
             dtype,
             compressed_path,
@@ -114,6 +131,27 @@ def decompress_shaped_lossy_raw(
                 data_type,
                 shape,
             )[0],
+        )
+        return
+    if codec == "qoz":
+        data_type = require_float_dtype(
+            field["dtype"],
+            str(field["field"]),
+            "QoZ decompression",
+        )
+        qoz = load_qoz()
+        _decompress_shaped(
+            field,
+            out_path,
+            force,
+            data_type,
+            "QoZ",
+            lambda payload, shape: _decompress_shaped_qoz_payload(
+                qoz,
+                payload,
+                shape,
+                data_type,
+            ),
         )
         return
     if codec == "sperr":
@@ -296,6 +334,82 @@ def _compress_shaped_sz3(
     )
 
 
+def _compress_shaped_qoz(
+    raw_path: str,
+    dtype: str,
+    compressed_path: str,
+    field_name: str,
+    count: int,
+    abs_error_bound: float,
+    force: bool,
+    encoded_shape: Tuple[int, int, int],
+    axis_search: bool,
+) -> Dict[str, Any]:
+    data_type = require_float_dtype(
+        dtype,
+        field_name,
+        "QoZ compression",
+    )
+    output = Path(compressed_path)
+    require_output_path(output, force)
+    qoz = load_qoz()
+    values = _read_shaped(raw_path, data_type, encoded_shape)
+    qoz_values, effective_bound, constant_value = prepare_qoz_input(
+        values,
+        abs_error_bound,
+        field_name,
+    )
+    best_payload = None
+    best_permutation = tuple(range(values.ndim))
+    best_flips = (False,) * values.ndim
+    best_shape = values.shape
+    for permutation, candidate in _axis_candidates(qoz_values, axis_search):
+        try:
+            payload = qoz.compress(candidate, effective_bound, mode="abs")
+        except Exception as exc:
+            raise RuntimeError(
+                f"QoZ compression failed for shaped field {field_name}."
+            ) from exc
+        if best_payload is None or len(payload) < len(best_payload):
+            best_payload = payload
+            best_permutation = permutation
+            best_shape = candidate.shape
+    if axis_search:
+        for flips, candidate in _flip_candidates(
+            qoz_values,
+            best_permutation,
+        ):
+            try:
+                payload = qoz.compress(candidate, effective_bound, mode="abs")
+            except Exception as exc:
+                raise RuntimeError(
+                    f"QoZ compression failed for shaped field {field_name}."
+                ) from exc
+            if len(payload) < len(best_payload):
+                best_payload = payload
+                best_flips = flips
+                best_shape = candidate.shape
+    assert best_payload is not None
+    output.write_bytes(best_payload)
+    metadata = _shaped_metadata(
+        field_name,
+        "qoz",
+        data_type,
+        count,
+        output,
+        len(best_payload),
+        values.shape,
+        best_shape,
+        best_permutation,
+        best_flips,
+        abs_error_bound,
+        axis_search,
+    )
+    if constant_value is not None:
+        metadata["constant_value"] = constant_value
+    return metadata
+
+
 def _compress_shaped_sperr(
     raw_path: str,
     dtype: str,
@@ -398,6 +512,22 @@ def _decompress_shaped_sperr_payload(
     return decoded
 
 
+def _decompress_shaped_qoz_payload(
+    qoz: Any,
+    payload: np.ndarray,
+    expected_shape: Tuple[int, ...],
+    expected_dtype: np.dtype,
+) -> np.ndarray:
+    decoded = np.asarray(qoz.decompress(payload))
+    if decoded.shape != expected_shape or decoded.dtype != expected_dtype:
+        raise RuntimeError(
+            f"QoZ stream returned shape {decoded.shape} and dtype "
+            f"{decoded.dtype}, expected {expected_shape} and "
+            f"{expected_dtype}."
+        )
+    return decoded
+
+
 def _axis_candidates(
     values: np.ndarray,
     axis_search: bool,
@@ -490,6 +620,12 @@ def _decompress_shaped(
         raise RuntimeError(
             f"{codec_label} decompression for {field['field']} returned "
             f"{decoded.size} values, expected {encoded_count}."
+        )
+    if "constant_value" in field:
+        decoded = np.full(
+            decoded.shape,
+            field["constant_value"],
+            dtype=dtype,
         )
     permutation = tuple(int(value) for value in field["axis_permutation"])
     if sorted(permutation) != list(range(len(encoded_shape))):

@@ -58,12 +58,13 @@ def lossy_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
         compressed_fields.get(field, {}).get("codec")
         for field in lossy_fields
     }
-    if configured in ("szo", "sz3", "sperr"):
+    if configured in ("szo", "sz3", "sperr", "qoz"):
         if compressed_fields:
             expected_codec = {
                 "szo": "szo",
                 "sz3": "pysz",
                 "sperr": "sperr",
+                "qoz": "qoz",
             }[configured]
             if codecs != {expected_codec}:
                 raise RuntimeError(
@@ -78,6 +79,8 @@ def lossy_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
         return "sz3"
     if codecs == {"sperr"}:
         return "sperr"
+    if codecs == {"qoz"}:
+        return "qoz"
     raise RuntimeError(
         "Manifest does not select one supported lossy compressor for all "
         "position and velocity fields."

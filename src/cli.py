@@ -26,7 +26,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lattice_axis_search": True,
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
-    "lossy_compressor": ("szo", "sz3", "sperr"),
+    "lossy_compressor": ("szo", "sz3", "sperr", "qoz"),
     "lossless": ("pcodec",),
 }
 NULLABLE_NUMBER_KEYS = (

@@ -1,7 +1,7 @@
-"""Adapters for fieldwise pcodec, SPERR, SZ3, and SZo streams."""
+"""Adapters for fieldwise pcodec, QoZ, SPERR, SZ3, and SZo streams."""
 
 from pathlib import Path
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -10,6 +10,7 @@ from src.runtime import (
     load_pcodec,
     load_pysz,
     load_pyszo,
+    load_qoz,
     load_sperr,
     read_raw,
     require_output_path,
@@ -162,6 +163,52 @@ def compress_pysz_raw(
     return metadata
 
 
+def compress_qoz_raw(
+    raw_path: str,
+    dtype: str,
+    compressed_path: str,
+    field_name: str,
+    count: int,
+    abs_error_bound: float,
+    force: bool,
+) -> Dict[str, Any]:
+    data_type = require_float_dtype(dtype, field_name, "QoZ compression")
+    output = Path(compressed_path)
+    require_output_path(output, force)
+    qoz = load_qoz()
+
+    values = read_raw(raw_path, data_type, count)
+    encoded, encoded_count = pad_codec_input(values)
+    qoz_input, effective_bound, constant_value = prepare_qoz_input(
+        encoded,
+        abs_error_bound,
+        field_name,
+    )
+    try:
+        payload = qoz.compress(qoz_input, effective_bound, mode="abs")
+    except Exception as exc:
+        raise RuntimeError(f"QoZ compression failed for {field_name}.") from exc
+
+    output.write_bytes(payload)
+    metadata = _field_metadata(
+        field_name,
+        "qoz",
+        data_type,
+        count,
+        output,
+        len(payload),
+    )
+    metadata.update(
+        {
+            "abs_error_bound": float(abs_error_bound),
+            "encoded_count": encoded_count,
+        }
+    )
+    if constant_value is not None:
+        metadata["constant_value"] = constant_value
+    return metadata
+
+
 def compress_sperr_raw(
     raw_path: str,
     dtype: str,
@@ -223,6 +270,7 @@ def compress_lossy_raw(
     force: bool,
 ) -> Dict[str, Any]:
     compressors = {
+        "qoz": compress_qoz_raw,
         "sperr": compress_sperr_raw,
         "sz3": compress_pysz_raw,
         "szo": compress_szo_raw,
@@ -314,6 +362,48 @@ def decompress_pysz_raw(
     )
 
 
+def decompress_qoz_raw(
+    field: Mapping[str, Any],
+    out_path: str,
+    force: bool,
+) -> None:
+    data_type = require_float_dtype(
+        field["dtype"],
+        str(field["field"]),
+        "QoZ decompression",
+    )
+    count = int(field["count"])
+    encoded_count = int(field.get("encoded_count", count))
+    if encoded_count < count:
+        raise RuntimeError(f"QoZ metadata for {field['field']} is inconsistent.")
+
+    qoz = load_qoz()
+    payload = Path(field["path"]).read_bytes()
+    try:
+        values = qoz.decompress(payload)
+    except Exception as exc:
+        raise RuntimeError(
+            f"QoZ decompression failed for {field['field']}."
+        ) from exc
+
+    decoded = np.asarray(values)
+    if decoded.shape != (encoded_count,) or decoded.dtype != data_type:
+        raise RuntimeError(
+            f"QoZ decompression for {field['field']} returned shape "
+            f"{decoded.shape} and dtype {decoded.dtype}, expected "
+            f"{(encoded_count,)} and {data_type}."
+        )
+    if "constant_value" in field:
+        decoded = np.full(
+            decoded.shape,
+            field["constant_value"],
+            dtype=data_type,
+        )
+    output = Path(out_path)
+    require_output_path(output, force)
+    decoded[:count].tofile(output)
+
+
 def decompress_sperr_raw(
     field: Mapping[str, Any],
     out_path: str,
@@ -368,6 +458,7 @@ def decompress_lossy_raw(
 ) -> None:
     decompressors = {
         "pysz": decompress_pysz_raw,
+        "qoz": decompress_qoz_raw,
         "sperr": decompress_sperr_raw,
         "szo": decompress_szo_raw,
     }
@@ -440,6 +531,29 @@ def sperr_pwe_quality(
         return float(np.nextafter(np.float64(0.0), np.float64(1.0)))
     raise RuntimeError(
         f"SPERR requires a positive finite error bound for nonconstant "
+        f"field {field_name}; got {quality}."
+    )
+
+
+def prepare_qoz_input(
+    values: np.ndarray,
+    abs_error_bound: float,
+    field_name: str,
+) -> Tuple[np.ndarray, float, Optional[float]]:
+    """Return QoZ-ready values while preserving exact zero-bound constants."""
+    quality = float(abs_error_bound)
+    if np.isfinite(quality) and quality > 0.0:
+        return np.ascontiguousarray(values), quality, None
+    if (
+        quality == 0.0
+        and values.size
+        and np.isfinite(values.flat[0])
+        and np.all(values == values.flat[0])
+    ):
+        constant_value = float(values.flat[0])
+        return np.zeros_like(values), 1.0, constant_value
+    raise RuntimeError(
+        f"QoZ requires a positive finite error bound for nonconstant "
         f"field {field_name}; got {quality}."
     )
 

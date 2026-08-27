@@ -84,6 +84,18 @@ def load_pyszo() -> Tuple[Any, Any, Any, Any]:
         ) from exc
 
 
+def load_qoz() -> Any:
+    try:
+        import qoz
+
+        return qoz
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(
+            "Could not import QoZ. Build/install the local Python API with "
+            "`python -m pip install tools/QoZ`."
+        ) from exc
+
+
 def load_sperr() -> Any:
     try:
         import sperr
