@@ -201,6 +201,15 @@ def _add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Overwrite pipeline outputs in the work directory.",
     )
+    parser.add_argument(
+        "--field-workers",
+        type=int,
+        default=0,
+        help=(
+            "Parallel processes for the six independent floating-point "
+            "fields; 0 selects automatically (default: %(default)s)."
+        ),
+    )
 
 
 def _add_compression_arguments(

@@ -3,11 +3,33 @@
 import ctypes
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Mapping, Tuple
 
 import numpy as np
+
+
+MAX_PARALLEL_FIELDS = 6
+
+
+def resolve_field_workers(
+    configured: int,
+    field_count: int = MAX_PARALLEL_FIELDS,
+    concurrent_pipelines: int = 1,
+) -> int:
+    """Resolve workers for independent floating-point field codecs."""
+
+    if configured < 0:
+        raise RuntimeError("Field workers must be non-negative.")
+    if field_count < 1:
+        raise RuntimeError("Cannot resolve workers without any fields.")
+    if concurrent_pipelines < 1:
+        raise RuntimeError("Concurrent pipelines must be positive.")
+    available = max(1, (os.cpu_count() or 1) // concurrent_pipelines)
+    requested = configured or available
+    return min(requested, field_count)
 
 
 def repo_root() -> Path:

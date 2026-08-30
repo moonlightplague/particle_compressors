@@ -2,8 +2,10 @@
 
 import argparse
 import time
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 
@@ -23,9 +25,66 @@ from src.runtime import (
     read_json,
     read_raw,
     require_output_path,
+    resolve_field_workers,
     write_json,
 )
 from src.shaped_codecs import decompress_shaped_lossy_raw
+
+
+@dataclass(frozen=True)
+class FieldDecompressionJob:
+    """Pickle-friendly description of one independent field decode."""
+
+    field: Dict[str, Any]
+    output_path: str
+    decompressed_dir: str
+    force: bool
+    count: int
+    lattice_metadata: Optional[Dict[str, Any]] = None
+    id_path: Optional[str] = None
+    id_dtype: Optional[str] = None
+
+
+def _decompress_field_job(job: FieldDecompressionJob) -> None:
+    field = job.field
+    if field.get("spatial_layout") != LATTICE_LAYOUT_NAME:
+        decompress_lossy_raw(field, job.output_path, job.force)
+        return
+
+    logical = str(field["field"])
+    dtype = np.dtype(field["dtype"])
+    dense_path = (
+        Path(job.decompressed_dir)
+        / f"{logical}.lattice-encoded.{dtype.name}.raw"
+    )
+    decompress_shaped_lossy_raw(field, str(dense_path), job.force)
+    if job.id_path is None or job.id_dtype is None:
+        raise RuntimeError("Parallel lattice decode is missing its ID field.")
+    if job.lattice_metadata is None:
+        raise RuntimeError("Parallel lattice decode is missing layout metadata.")
+    sorted_ids = read_raw(job.id_path, np.dtype(job.id_dtype), job.count)
+    layout = lattice_layout_from_metadata(sorted_ids, job.lattice_metadata)
+    dense_values = read_raw(str(dense_path), dtype, layout.dense_count)
+    wrap_offsets = None
+    if "lattice_wrap_field" in field:
+        wrap_field = field["lattice_wrap_field"]
+        wrap_dtype = np.dtype(wrap_field["dtype"])
+        wrap_path = (
+            Path(job.decompressed_dir)
+            / f"{logical}.lattice-wrap.{wrap_dtype.name}.raw"
+        )
+        decompress_integer_raw(wrap_field, str(wrap_path), job.force)
+        wrap_offsets = read_raw(str(wrap_path), wrap_dtype, job.count)
+    decoded = layout.decode_field(
+        dense_values,
+        logical,
+        str(field.get("lattice_transform", "identity")),
+        dtype,
+        wrap_offsets,
+    )
+    output = Path(job.output_path)
+    require_output_path(output, job.force)
+    decoded.tofile(output)
 
 
 class DecompressionPipeline:
@@ -53,6 +112,10 @@ class DecompressionPipeline:
         require_output_path(self.output_h5, args.force)
         self.output_paths = self._build_output_paths()
         self._decoded_lattice: DenseLatticeLayout | None = None
+        self.field_workers = resolve_field_workers(
+            int(getattr(args, "field_workers", 1)),
+        )
+        self.lossy_fields_seconds = 0.0
         for path in self.output_paths.values():
             require_output_path(Path(path), args.force)
 
@@ -63,8 +126,21 @@ class DecompressionPipeline:
             self.output_paths["id"],
             self.args.force,
         )
-        for logical in (*POSITION_FIELDS, *VELOCITY_FIELDS):
-            self._decompress_field(logical)
+        fields_started = time.perf_counter()
+        logical_fields = (*POSITION_FIELDS, *VELOCITY_FIELDS)
+        if self.field_workers == 1:
+            for logical in logical_fields:
+                self._decompress_field(logical)
+        else:
+            jobs = [
+                self._field_decompression_job(logical)
+                for logical in logical_fields
+            ]
+            with ProcessPoolExecutor(
+                max_workers=min(self.field_workers, len(jobs))
+            ) as executor:
+                list(executor.map(_decompress_field_job, jobs))
+        self.lossy_fields_seconds = time.perf_counter() - fields_started
 
         recombine_started = time.perf_counter()
         recombine_h5(self.manifest, self.output_paths, self.output_h5)
@@ -90,6 +166,31 @@ class DecompressionPipeline:
                 for logical in VELOCITY_FIELDS
             },
         }
+
+    def _field_decompression_job(
+        self,
+        logical: str,
+    ) -> FieldDecompressionJob:
+        field = dict(self.fields[logical])
+        is_lattice = field.get("spatial_layout") == LATTICE_LAYOUT_NAME
+        return FieldDecompressionJob(
+            field=field,
+            output_path=self.output_paths[logical],
+            decompressed_dir=str(self.decompressed_dir),
+            force=bool(self.args.force),
+            count=self.count,
+            lattice_metadata=(
+                dict(self.manifest.get("lattice_layout", {}))
+                if is_lattice
+                else None
+            ),
+            id_path=self.output_paths["id"] if is_lattice else None,
+            id_dtype=(
+                str(self.manifest["fields"]["id"]["dtype"])
+                if is_lattice
+                else None
+            ),
+        )
 
     def _decompress_field(self, logical: str) -> None:
         field = self.fields[logical]
@@ -164,6 +265,9 @@ class DecompressionPipeline:
 
     def _finalize(self, started: float, recombine_seconds: float) -> None:
         timing = self.manifest.setdefault("timing", {})
+        timing["lossy_fields_decompress_wall_seconds"] = (
+            self.lossy_fields_seconds
+        )
         timing["decompress_and_recombine_wall_seconds"] = (
             time.perf_counter() - started
         )
@@ -173,6 +277,9 @@ class DecompressionPipeline:
         self.manifest.setdefault("sizes", {})[
             "reconstructed_h5_file_bytes"
         ] = self.output_h5.stat().st_size
+        self.manifest.setdefault("runtime", {})[
+            "decompression_field_workers"
+        ] = self.field_workers
         update_compressed_size_metrics(self.manifest, self.work_dir)
         write_json(self.manifest_path, self.manifest, force=True)
 

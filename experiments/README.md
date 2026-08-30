@@ -16,7 +16,55 @@ python -m experiments.orientation_search data/dat_2.1.h5 \
   --output /tmp/orientation-search.json
 python -m experiments.coupled_search data/new_data/dat_2.15.h5 \
   --id-base 1 --output /tmp/coupled-search.json
+python -m experiments.velocity_id_relationship data/dat_2.1.h5 \
+  --baseline-manifest particle_pipeline_runs/dat_2.1.h5/manifest.json \
+  --output /tmp/velocity-id-relationship.json
 ```
+
+## Reconstruction visualization
+
+Create a self-contained HTML dashboard for any completed roundtrip package:
+
+```bash
+python -m experiments.visualize_reconstruction \
+  particle_pipeline_runs/sample-qoz
+```
+
+The dashboard plots signed reconstruction error against the original value
+for every lossy field, maps 3-D position-error magnitude over the sampled
+`x-y` particle locations, and summarizes the full metrics and requested
+bounds. It uses the manifest to align sorted reconstructions with their source
+rows. Use `--sample-size` and `--seed` to control the embedded deterministic
+sample, `--output` to select the HTML path, or `--original-h5` when the source
+file has moved since compression. No plotting package is required.
+
+## Velocity scalar versus ID
+
+The velocity relationship driver tests the requested signed scalar
+`cbrt(vx^3 + vy^3 + vz^3)`. This is not the conventional nonnegative L3
+magnitude. It stably sorts by particle ID, reconstructs the periodic dense ID
+lattice, compares flat and lattice compression, and verifies the decoded
+absolute-error bound.
+
+On all 53,957,517 particles in `data/dat_2.1.h5`, SZO at relative error
+`1e-3` produced these particle-based compression ratios:
+
+| Field and layout | Compressed bytes | Compression ratio |
+| --- | ---: | ---: |
+| `vx`, dense lattice | 19,824,481 | 10.8870 |
+| `vy`, dense lattice | 21,475,569 | 10.0500 |
+| `vz`, dense lattice | 20,434,282 | 10.5622 |
+| Derived scalar, ID-sorted flat | 32,271,332 | 6.6880 |
+| Derived scalar, dense lattice | 25,353,084 | 8.5130 |
+
+The lattice reduced the scalar's compressed size by 21.44% compared with the
+already ID-sorted flat stream, and adjacent ID-sorted scalar values had a
+sampled Pearson correlation of 0.99084. This demonstrates strong local
+ID/lattice coherence. The scalar has little global linear relationship with
+the numeric ID itself (`r = 0.05889`), however, and its dense compression ratio
+ranked last: it was 15.29% below even the least-compressible component (`vy`).
+Thus the tested scalar follows local ID structure, but does not compress better
+than `vx`, `vy`, or `vz` separately.
 
 The searches established the following choices used by the production path:
 

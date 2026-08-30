@@ -51,6 +51,16 @@ class CompressorSelectionTests(unittest.TestCase):
             ("szo", "sz3", "sperr", "qoz"),
         )
 
+    def test_cli_accepts_explicit_field_worker_count(self) -> None:
+        argv = [
+            "roundtrip",
+            "input.h5",
+            "--field-workers",
+            "3",
+        ]
+        args = build_parser(argv).parse_args(argv)
+        self.assertEqual(args.field_workers, 3)
+
     def test_settings_preserve_sort_and_lattice_options(self) -> None:
         sorted_settings = CompressionSettings.from_args(
             SimpleNamespace(
@@ -73,12 +83,14 @@ class CompressorSelectionTests(unittest.TestCase):
                 lattice_layout=True,
                 lattice_min_occupancy=0.9,
                 lattice_axis_search=False,
+                field_workers=4,
             )
         )
         self.assertTrue(lattice_settings.sort_by_id)
         self.assertTrue(lattice_settings.lattice_requested)
         self.assertEqual(lattice_settings.lattice_min_occupancy, 0.9)
         self.assertFalse(lattice_settings.lattice_axis_search)
+        self.assertEqual(lattice_settings.field_workers, 4)
 
     def test_artifact_extensions_match_selected_codec(self) -> None:
         root = Path("/tmp/package/compressed")

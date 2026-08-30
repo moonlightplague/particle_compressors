@@ -294,6 +294,7 @@ def compute_metrics(
         "error_bound_consistency": {},
         "compressors": dict(manifest.get("compressors", {})),
         "particle_sort": dict(manifest.get("particle_sort", {})),
+        "runtime": dict(manifest.get("runtime", {})),
         "sizes": dict(manifest.get("sizes", {})),
         "timing": dict(manifest.get("timing", {})),
     }

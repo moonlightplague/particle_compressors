@@ -2,9 +2,10 @@
 
 import argparse
 import time
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -21,7 +22,12 @@ from src.lattice_layout import (
 from src.manifest import update_compressed_size_metrics
 from src.models import CanonicalOrder
 from src.raw_codecs import compress_integer_raw, compress_lossy_raw
-from src.runtime import read_raw, require_output_path, write_json
+from src.runtime import (
+    read_raw,
+    require_output_path,
+    resolve_field_workers,
+    write_json,
+)
 from src.shaped_codecs import compress_shaped_lossy_raw
 
 
@@ -34,6 +40,7 @@ class CompressionSettings:
     lattice_requested: bool = False
     lattice_min_occupancy: float = 0.8
     lattice_axis_search: bool = True
+    field_workers: int = 1
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "CompressionSettings":
@@ -49,6 +56,9 @@ class CompressionSettings:
         )
         if not 0.0 < lattice_min_occupancy <= 1.0:
             raise RuntimeError("--lattice-min-occupancy must be in (0, 1].")
+        field_workers = int(getattr(args, "field_workers", 1))
+        if field_workers < 0:
+            raise RuntimeError("--field-workers must be non-negative.")
         return cls(
             lossy_codec=lossy_codec,
             force=bool(args.force),
@@ -59,7 +69,50 @@ class CompressionSettings:
             lattice_axis_search=bool(
                 getattr(args, "lattice_axis_search", True)
             ),
+            field_workers=field_workers,
         )
+
+
+@dataclass(frozen=True)
+class LossyCompressionJob:
+    """Pickle-friendly description of one independent codec invocation."""
+
+    codec: str
+    raw_path: str
+    dtype: str
+    compressed_path: str
+    field_name: str
+    count: int
+    abs_error_bound: float
+    force: bool
+    encoded_shape: Optional[Tuple[int, int, int]] = None
+    axis_search: bool = False
+
+
+def _compress_lossy_job(job: LossyCompressionJob) -> Dict[str, Any]:
+    if job.encoded_shape is None:
+        return compress_lossy_raw(
+            job.codec,
+            job.raw_path,
+            job.dtype,
+            job.compressed_path,
+            job.field_name,
+            job.count,
+            job.abs_error_bound,
+            job.force,
+        )
+    return compress_shaped_lossy_raw(
+        job.codec,
+        job.raw_path,
+        job.dtype,
+        job.compressed_path,
+        job.field_name,
+        job.count,
+        job.abs_error_bound,
+        job.force,
+        job.encoded_shape,
+        job.axis_search,
+    )
 
 
 class CompressionPipeline:
@@ -81,6 +134,11 @@ class CompressionPipeline:
         self.compressed_fields = manifest["compressed_fields"]
         self.count = int(manifest["count"])
         self.lattice: Optional[DenseLatticeLayout] = None
+        self._lattice_ordered_values: Dict[str, np.ndarray] = {}
+        self.field_workers = resolve_field_workers(
+            self.settings.field_workers,
+        )
+        self.lossy_fields_seconds = 0.0
 
     def run(self) -> Dict[str, Any]:
         started = time.perf_counter()
@@ -88,8 +146,11 @@ class CompressionPipeline:
         self._prepare_lattice_layout(canonical_order)
         self._record_ordering(canonical_order)
         self._compress_id(canonical_order)
-        self._compress_positions(canonical_order)
-        self._compress_velocities(canonical_order)
+        if self.lattice is None:
+            self._compress_positions(canonical_order)
+            self._compress_velocities(canonical_order)
+        else:
+            self._compress_lattice_fields(canonical_order)
         self._finalize(started)
         return self.manifest
 
@@ -173,6 +234,10 @@ class CompressionPipeline:
                 "reason": str(exc),
             }
             return
+        self._lattice_ordered_values = {
+            "id": sorted_ids,
+            **sorted_positions,
+        }
         self.manifest["lattice_layout"] = {
             **common,
             **self.lattice.manifest_metadata(),
@@ -214,17 +279,10 @@ class CompressionPipeline:
         )
 
     def _compress_positions(self, order: CanonicalOrder) -> None:
-        if self.lattice is not None:
-            self._compress_lattice_positions(order)
-            self.manifest["ordering"]["positions"] = {
-                "mapping": order.mapping,
-                "spatial_layout": LATTICE_LAYOUT_NAME,
-            }
-            return
-
+        jobs = []
         for logical in POSITION_FIELDS:
             raw_path = self._ordered_raw_path(logical, "float32", order)
-            self.compressed_fields[logical] = compress_lossy_raw(
+            jobs.append(LossyCompressionJob(
                 self.settings.lossy_codec,
                 raw_path,
                 "float32",
@@ -237,20 +295,25 @@ class CompressionPipeline:
                     ]
                 ),
                 self.settings.force,
-            )
+            ))
+        for logical, field in zip(
+            POSITION_FIELDS,
+            self._compress_jobs(jobs),
+        ):
+            self.compressed_fields[logical] = field
         self.manifest["ordering"]["positions"] = {
             "mapping": order.mapping
         }
 
-    def _compress_lattice_positions(self, order: CanonicalOrder) -> None:
+    def _prepare_lattice_positions(
+        self,
+        order: CanonicalOrder,
+    ) -> Tuple[List[LossyCompressionJob], List[Dict[str, Any]]]:
         assert self.lattice is not None
+        jobs: List[LossyCompressionJob] = []
+        field_updates: List[Dict[str, Any]] = []
         for logical in POSITION_FIELDS:
-            raw_path = self._ordered_raw_path(logical, "float32", order)
-            values = read_raw(
-                raw_path,
-                np.dtype("float32"),
-                self.count,
-            )
+            values = self._ordered_values(logical, "float32", order)
             requested_bound = float(
                 self.manifest["field_error_bounds"][logical][
                     "compressor_abs"
@@ -281,7 +344,7 @@ class CompressionPipeline:
             require_output_path(dense_path, self.settings.force)
             dense.tofile(dense_path)
             self.raw_paths[f"{logical}_lattice"] = str(dense_path)
-            field = compress_shaped_lossy_raw(
+            jobs.append(LossyCompressionJob(
                 self.settings.lossy_codec,
                 str(dense_path),
                 str(dense.dtype),
@@ -292,16 +355,14 @@ class CompressionPipeline:
                 self.settings.force,
                 self.lattice.shape,
                 self.settings.lattice_axis_search,
-            )
-            field.update(
-                {
-                    "spatial_layout": LATTICE_LAYOUT_NAME,
-                    "lattice_transform": transform,
-                    "requested_compressor_abs": requested_bound,
-                    "transform_roundoff_guard": guard,
-                    "transform_roundtrip_max_abs": measured_error,
-                }
-            )
+            ))
+            updates: Dict[str, Any] = {
+                "spatial_layout": LATTICE_LAYOUT_NAME,
+                "lattice_transform": transform,
+                "requested_compressor_abs": requested_bound,
+                "transform_roundoff_guard": guard,
+                "transform_roundtrip_max_abs": measured_error,
+            }
             if wrap_offsets is not None:
                 wrap_raw_path = (
                     self.preprocessed_dir
@@ -323,28 +384,22 @@ class CompressionPipeline:
                     self.count,
                     self.settings.force,
                 )
-                field["lattice_wrap_field"] = wrap_field
+                updates["lattice_wrap_field"] = wrap_field
                 self.raw_paths[f"{logical}_lattice_wrap"] = str(
                     wrap_raw_path
                 )
                 self.artifacts[f"{logical}_lattice_wrap"] = str(
                     wrap_compressed_path
                 )
-            self.compressed_fields[logical] = field
+            field_updates.append(updates)
+        return jobs, field_updates
 
     def _compress_velocities(self, order: CanonicalOrder) -> None:
-        if self.lattice is not None:
-            self._compress_lattice_velocities(order)
-            self.manifest["ordering"]["velocities"] = {
-                "mapping": order.mapping,
-                "spatial_layout": LATTICE_LAYOUT_NAME,
-            }
-            return
-
+        jobs = []
         for logical in VELOCITY_FIELDS:
             dtype = self.manifest["fields"][logical]["dtype"]
             raw_path = self._ordered_raw_path(logical, dtype, order)
-            self.compressed_fields[logical] = compress_lossy_raw(
+            jobs.append(LossyCompressionJob(
                 self.settings.lossy_codec,
                 raw_path,
                 dtype,
@@ -353,21 +408,25 @@ class CompressionPipeline:
                 self.count,
                 float(self.manifest["field_error_bounds"][logical]["abs"]),
                 self.settings.force,
-            )
+            ))
+        for logical, field in zip(
+            VELOCITY_FIELDS,
+            self._compress_jobs(jobs),
+        ):
+            self.compressed_fields[logical] = field
         self.manifest["ordering"]["velocities"] = {
             "mapping": order.mapping
         }
 
-    def _compress_lattice_velocities(self, order: CanonicalOrder) -> None:
+    def _prepare_lattice_velocities(
+        self,
+        order: CanonicalOrder,
+    ) -> List[LossyCompressionJob]:
         assert self.lattice is not None
+        jobs: List[LossyCompressionJob] = []
         for logical in VELOCITY_FIELDS:
             dtype = self.manifest["fields"][logical]["dtype"]
-            raw_path = self._ordered_raw_path(logical, dtype, order)
-            values = read_raw(
-                raw_path,
-                np.dtype(dtype),
-                self.count,
-            )
+            values = self._ordered_values(logical, dtype, order)
             dense, _, _ = self.lattice.encode_field(
                 values,
                 logical,
@@ -380,7 +439,7 @@ class CompressionPipeline:
             require_output_path(dense_path, self.settings.force)
             dense.tofile(dense_path)
             self.raw_paths[f"{logical}_lattice"] = str(dense_path)
-            field = compress_shaped_lossy_raw(
+            jobs.append(LossyCompressionJob(
                 self.settings.lossy_codec,
                 str(dense_path),
                 str(dense.dtype),
@@ -391,7 +450,24 @@ class CompressionPipeline:
                 self.settings.force,
                 self.lattice.shape,
                 self.settings.lattice_axis_search,
-            )
+            ))
+        return jobs
+
+    def _compress_lattice_fields(self, order: CanonicalOrder) -> None:
+        position_jobs, position_updates = self._prepare_lattice_positions(order)
+        velocity_jobs = self._prepare_lattice_velocities(order)
+        results = self._compress_jobs(position_jobs + velocity_jobs)
+        position_results = results[: len(POSITION_FIELDS)]
+        velocity_results = results[len(POSITION_FIELDS) :]
+
+        for logical, field, updates in zip(
+            POSITION_FIELDS,
+            position_results,
+            position_updates,
+        ):
+            field.update(updates)
+            self.compressed_fields[logical] = field
+        for logical, field in zip(VELOCITY_FIELDS, velocity_results):
             field.update(
                 {
                     "spatial_layout": LATTICE_LAYOUT_NAME,
@@ -399,6 +475,28 @@ class CompressionPipeline:
                 }
             )
             self.compressed_fields[logical] = field
+        self.manifest["ordering"]["positions"] = {
+            "mapping": order.mapping,
+            "spatial_layout": LATTICE_LAYOUT_NAME,
+        }
+        self.manifest["ordering"]["velocities"] = {
+            "mapping": order.mapping,
+            "spatial_layout": LATTICE_LAYOUT_NAME,
+        }
+
+    def _compress_jobs(
+        self,
+        jobs: List[LossyCompressionJob],
+    ) -> List[Dict[str, Any]]:
+        started = time.perf_counter()
+        workers = min(self.field_workers, len(jobs))
+        if workers == 1:
+            results = [_compress_lossy_job(job) for job in jobs]
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                results = list(executor.map(_compress_lossy_job, jobs))
+        self.lossy_fields_seconds += time.perf_counter() - started
+        return results
 
     def _ordered_raw_path(
         self,
@@ -413,6 +511,7 @@ class CompressionPipeline:
             raise RuntimeError("Canonical order metadata is incomplete.")
 
         data_type = np.dtype(dtype)
+        cached = self._lattice_ordered_values.pop(logical, None)
         ordered_path = _reorder_raw(
             source_path,
             dtype,
@@ -421,15 +520,35 @@ class CompressionPipeline:
             self.count,
             order.values,
             self.settings.force,
+            values=cached,
         )
         self.raw_paths[f"{logical}_canonical_ordered"] = ordered_path
         return ordered_path
 
+    def _ordered_values(
+        self,
+        logical: str,
+        dtype: str,
+        order: CanonicalOrder,
+    ) -> np.ndarray:
+        cached = self._lattice_ordered_values.pop(logical, None)
+        if cached is not None:
+            return cached
+        values = read_raw(self.raw_paths[logical], np.dtype(dtype), self.count)
+        if not order.is_reordered:
+            return values
+        if order.values is None:
+            raise RuntimeError("Canonical order metadata is incomplete.")
+        return np.ascontiguousarray(values[order.values])
+
     def _finalize(self, started: float) -> None:
         self.manifest["format_version"] = 8 if self.lattice is not None else 3
-        self.manifest.setdefault("timing", {})["compress_wall_seconds"] = (
-            time.perf_counter() - started
-        )
+        timing = self.manifest.setdefault("timing", {})
+        timing["lossy_fields_wall_seconds"] = self.lossy_fields_seconds
+        timing["compress_wall_seconds"] = time.perf_counter() - started
+        self.manifest.setdefault("runtime", {})[
+            "compression_field_workers"
+        ] = self.field_workers
         update_compressed_size_metrics(self.manifest, self.work_dir)
         write_json(
             self.work_dir / "manifest.json",
@@ -445,10 +564,17 @@ def _reorder_raw(
     count: int,
     order: np.ndarray,
     force: bool,
+    values: Optional[np.ndarray] = None,
 ) -> str:
     require_output_path(output_path, force)
-    values = read_raw(raw_path, np.dtype(dtype), count)
-    np.ascontiguousarray(values[order]).tofile(output_path)
+    if values is None:
+        source = read_raw(raw_path, np.dtype(dtype), count)
+        values = source[order]
+    elif values.ndim != 1 or values.size != count:
+        raise RuntimeError(
+            f"Cached ordered field expected {count} values, got {values.shape}."
+        )
+    np.ascontiguousarray(values).tofile(output_path)
     return str(output_path)
 
 

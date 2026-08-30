@@ -165,6 +165,9 @@ infer the dense lattice. If inference fails or occupancy is below
 `--lattice-min-occupancy`, the pipeline retains the sorted flat-field path.
 `--lattice-axis-search` tries all six dense-axis orders and stores the smallest
 payload for each field; disable it with `--no-lattice-axis-search`.
+The six floating-point fields are compressed and decompressed concurrently;
+`--field-workers 0` selects up to six processes automatically, while a
+positive value sets an explicit cap (use `--field-workers 1` for serial work).
 
 Position fields may use a reversible periodic residual transform. Any wrap
 offsets are stored losslessly with pcodec. The compressor bound is reduced by

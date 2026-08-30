@@ -27,7 +27,7 @@ from src.metrics import (
     print_summary,
 )
 from src.preprocess import preprocess
-from src.runtime import read_json, write_json
+from src.runtime import read_json, resolve_field_workers, write_json
 
 
 class PipelineApplication:
@@ -125,6 +125,13 @@ class DirectoryPipelineApplication:
             )
             for input_h5 in self.input_files
         ]
+        if int(getattr(self.args, "field_workers", 0)) == 0:
+            workers_per_file = resolve_field_workers(
+                0,
+                concurrent_pipelines=self.workers,
+            )
+            for args in file_args:
+                args.field_workers = workers_per_file
         started = time.perf_counter()
         results_by_input: Dict[str, BatchFileResult] = {}
         with ProcessPoolExecutor(max_workers=self.workers) as executor:
