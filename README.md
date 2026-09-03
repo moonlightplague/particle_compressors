@@ -110,7 +110,8 @@ Existing outputs are rejected unless `--force` is supplied.
 - `preprocess` exports raw fields and writes the initial manifest.
 - `compress` preprocesses and writes the compressed package.
 - `decompress` reconstructs an HDF5 file from an existing package.
-- `roundtrip` compresses, reconstructs, and writes quality metrics.
+- `roundtrip` compresses, reconstructs, and reports compression ratios and
+  runtime. Add `--metrics` to also compute and write detailed quality metrics.
 
 For a small environment check, add `--limit N`. Add `--clean-raw` to remove
 the `preprocessed` and `decompressed` working directories after a roundtrip.
@@ -210,7 +211,28 @@ extension exactly. `--file-workers 0` selects up to 128 processes; a positive
 value sets an explicit cap. Each input gets an isolated package directory.
 The batch root receives `batch_metrics.json` with byte-weighted total and
 field-group compression ratios, aggregate stage timings, throughput, per-file
-statistics, and per-field quality metrics.
+statistics, and, when `--metrics` is supplied, per-field quality metrics.
+
+To treat disjoint chunks as one particle set, add `--merge`:
+
+```bash
+python main.py roundtrip data/snapshots \
+  --work-dir particle_pipeline_runs/snapshots-merged \
+  --lossy-compressor szo \
+  --sort \
+  --lattice-layout \
+  --merge \
+  --force
+```
+
+The merge path checks all IDs exactly and rejects duplicate IDs within or
+across chunks. It also requires matching field dtypes, dataset attributes, and
+common root attributes. The concatenated source is written to
+`WORK_DIR/merged/merged.h5` before preprocessing. Per-file root attributes are
+normalized for the common file: `npart` and `npart_total` become the merged
+particle count, while `rank` and `proc_size` become zero and one. Merge
+provenance and elapsed time are recorded in the manifest. Without `--merge`,
+directory processing retains the existing independent-file behavior.
 
 ## Package Contents
 
@@ -222,10 +244,12 @@ A compressed package contains:
 - six `.szo`, `.psz`, `.sperr`, `.qoz`, or `.tthresh` lossy field streams
 - optional pcodec streams for lattice wrap offsets
 
-A completed roundtrip also contains `reconstructed.h5` and `metrics.json`.
-Metrics include maximum absolute error, MSE, RMSE, normalized RMSE, PSNR,
-bound consistency, exact ID matching, component compression ratios, and total
-payload compression ratio.
+Every completed roundtrip contains `reconstructed.h5`. `metrics.json` is
+created only when `--metrics` is supplied. Detailed metrics
+include maximum absolute error, MSE, RMSE, normalized RMSE, PSNR, bound
+consistency, exact ID matching, component compression ratios, and total
+payload compression ratio. Without `--metrics`, the console still reports
+each component CR, total payload CR, and stage and end-to-end runtimes.
 
 ## Configuration
 

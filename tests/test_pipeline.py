@@ -61,6 +61,15 @@ class CompressorSelectionTests(unittest.TestCase):
         args = build_parser(argv).parse_args(argv)
         self.assertEqual(args.field_workers, 3)
 
+    def test_detailed_metrics_are_opt_in_for_roundtrip(self) -> None:
+        default_argv = ["roundtrip", "input.h5"]
+        default_args = build_parser(default_argv).parse_args(default_argv)
+        self.assertFalse(default_args.metrics)
+
+        metrics_argv = ["roundtrip", "input.h5", "--metrics"]
+        metrics_args = build_parser(metrics_argv).parse_args(metrics_argv)
+        self.assertTrue(metrics_args.metrics)
+
     def test_settings_preserve_sort_and_lattice_options(self) -> None:
         sorted_settings = CompressionSettings.from_args(
             SimpleNamespace(

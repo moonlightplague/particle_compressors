@@ -9,4 +9,5 @@ python main.py roundtrip "${INPUT_H5}" \
   --work-dir "${WORK_DIR}" \
   --rel-eb 1e-3 \
   --sort --lattice-layout \
+  --metrics \
   --force --clean-raw

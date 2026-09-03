@@ -87,7 +87,7 @@ def build_parser(
     _add_pipeline_command(
         commands,
         "roundtrip",
-        "Compress, reconstruct, and report roundtrip metrics.",
+        "Compress, reconstruct, and report compression ratios and runtime.",
         defaults,
     )
     return parser
@@ -164,6 +164,24 @@ def _add_pipeline_command(
             "128 workers automatically (default: %(default)s)."
         ),
     )
+    command.add_argument(
+        "--merge",
+        action="store_true",
+        help=(
+            "For directory input, verify that particle IDs are disjoint, "
+            "merge all files, and run one common pipeline. Without this "
+            "flag, files remain independent."
+        ),
+    )
+    if name == "roundtrip":
+        command.add_argument(
+            "--metrics",
+            action="store_true",
+            help=(
+                "Compute detailed reconstruction quality metrics. Without "
+                "this flag, report only compression ratios and runtime."
+            ),
+        )
 
 
 def _add_decompress_command(commands: Any) -> None:

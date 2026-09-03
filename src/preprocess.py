@@ -187,6 +187,12 @@ class PreprocessingPipeline:
         manifest["sizes"] = {
             "selected_original_payload_bytes": selected_payload_bytes
         }
+        merge_metadata = getattr(self.args, "merge_metadata", None)
+        if merge_metadata is not None:
+            manifest["merge"] = dict(merge_metadata)
+            manifest.setdefault("timing", {})["merge_wall_seconds"] = float(
+                merge_metadata["wall_seconds"]
+            )
         manifest.setdefault("timing", {})["preprocess_wall_seconds"] = (
             time.perf_counter() - started
         )

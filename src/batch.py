@@ -238,6 +238,7 @@ def print_batch_summary(
         "compress_wall_seconds",
         "decompress_and_recombine_wall_seconds",
         "metrics_wall_seconds",
+        "roundtrip_wall_seconds",
     ):
         value = timing["stage_seconds_total"].get(name)
         if value is not None:
