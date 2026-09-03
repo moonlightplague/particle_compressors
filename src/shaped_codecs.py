@@ -10,7 +10,9 @@ from typing import Any, Dict, Iterator, Mapping, Tuple
 import numpy as np
 
 from src.raw_codecs import (
+    compress_tthresh_array,
     prepare_qoz_input,
+    prepare_tthresh_input,
     require_float_dtype,
     sperr_pwe_quality,
 )
@@ -19,6 +21,7 @@ from src.runtime import (
     load_pyszo,
     load_qoz,
     load_sperr,
+    load_tthresh,
     read_raw,
     require_output_path,
 )
@@ -35,6 +38,7 @@ def compress_shaped_lossy_raw(
     force: bool,
     encoded_shape: Tuple[int, int, int],
     axis_search: bool,
+    relative_error_bound: float | None = None,
 ) -> Dict[str, Any]:
     if codec == "szo":
         return _compress_shaped_szo(
@@ -83,6 +87,19 @@ def compress_shaped_lossy_raw(
             force,
             encoded_shape,
             axis_search,
+        )
+    if codec == "tthresh":
+        return _compress_shaped_tthresh(
+            raw_path,
+            dtype,
+            compressed_path,
+            field_name,
+            count,
+            abs_error_bound,
+            force,
+            encoded_shape,
+            axis_search,
+            relative_error_bound,
         )
     raise RuntimeError(f"Unsupported shaped lossy compressor: {codec}.")
 
@@ -169,6 +186,27 @@ def decompress_shaped_lossy_raw(
             "SPERR",
             lambda payload, shape: _decompress_shaped_sperr_payload(
                 sperr,
+                payload,
+                shape,
+                data_type,
+            ),
+        )
+        return
+    if codec == "tthresh":
+        data_type = require_float_dtype(
+            field["dtype"],
+            str(field["field"]),
+            "TTHRESH decompression",
+        )
+        tthresh = load_tthresh()
+        _decompress_shaped(
+            field,
+            out_path,
+            force,
+            data_type,
+            "TTHRESH",
+            lambda payload, shape: _decompress_shaped_tthresh_payload(
+                tthresh,
                 payload,
                 shape,
                 data_type,
@@ -484,6 +522,100 @@ def _compress_shaped_sperr(
     )
 
 
+def _compress_shaped_tthresh(
+    raw_path: str,
+    dtype: str,
+    compressed_path: str,
+    field_name: str,
+    count: int,
+    abs_error_bound: float,
+    force: bool,
+    encoded_shape: Tuple[int, int, int],
+    axis_search: bool,
+    relative_error_bound: float | None,
+) -> Dict[str, Any]:
+    data_type = require_float_dtype(
+        dtype,
+        field_name,
+        "TTHRESH compression",
+    )
+    output = Path(compressed_path)
+    require_output_path(output, force)
+    tthresh = load_tthresh()
+    values = _read_shaped(raw_path, data_type, encoded_shape)
+    accuracy_mode = (
+        "relative_error" if relative_error_bound is not None else "rmse"
+    )
+    accuracy_target = (
+        float(relative_error_bound)
+        if relative_error_bound is not None
+        else float(abs_error_bound)
+    )
+    tthresh_values, effective_target, constant_value = prepare_tthresh_input(
+        values,
+        accuracy_target,
+        field_name,
+        accuracy_mode,
+    )
+    best_payload = None
+    best_permutation = tuple(range(values.ndim))
+    best_flips = (False,) * values.ndim
+    best_shape = values.shape
+    for permutation, candidate in _axis_candidates(
+        tthresh_values,
+        axis_search,
+    ):
+        payload = compress_tthresh_array(
+            tthresh,
+            candidate,
+            accuracy_mode,
+            effective_target,
+            field_name,
+        )
+        if best_payload is None or len(payload) < len(best_payload):
+            best_payload = payload
+            best_permutation = permutation
+            best_shape = candidate.shape
+    if axis_search:
+        for flips, candidate in _flip_candidates(
+            tthresh_values,
+            best_permutation,
+        ):
+            payload = compress_tthresh_array(
+                tthresh,
+                candidate,
+                accuracy_mode,
+                effective_target,
+                field_name,
+            )
+            if len(payload) < len(best_payload):
+                best_payload = payload
+                best_flips = flips
+                best_shape = candidate.shape
+    assert best_payload is not None
+    output.write_bytes(best_payload)
+    metadata = _shaped_metadata(
+        field_name,
+        "tthresh",
+        data_type,
+        count,
+        output,
+        len(best_payload),
+        values.shape,
+        best_shape,
+        best_permutation,
+        best_flips,
+        abs_error_bound,
+        axis_search,
+    )
+    metadata["accuracy_mode"] = accuracy_mode
+    metadata["accuracy_target"] = accuracy_target
+    metadata["effective_accuracy_target"] = effective_target
+    if constant_value is not None:
+        metadata["constant_value"] = constant_value
+    return metadata
+
+
 def _read_shaped(
     raw_path: str,
     dtype: np.dtype,
@@ -522,6 +654,22 @@ def _decompress_shaped_qoz_payload(
     if decoded.shape != expected_shape or decoded.dtype != expected_dtype:
         raise RuntimeError(
             f"QoZ stream returned shape {decoded.shape} and dtype "
+            f"{decoded.dtype}, expected {expected_shape} and "
+            f"{expected_dtype}."
+        )
+    return decoded
+
+
+def _decompress_shaped_tthresh_payload(
+    tthresh: Any,
+    payload: np.ndarray,
+    expected_shape: Tuple[int, ...],
+    expected_dtype: np.dtype,
+) -> np.ndarray:
+    decoded = np.asarray(tthresh.decompress(payload))
+    if decoded.shape != expected_shape or decoded.dtype != expected_dtype:
+        raise RuntimeError(
+            f"TTHRESH stream returned shape {decoded.shape} and dtype "
             f"{decoded.dtype}, expected {expected_shape} and "
             f"{expected_dtype}."
         )

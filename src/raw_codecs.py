@@ -1,5 +1,6 @@
-"""Adapters for fieldwise pcodec, QoZ, SPERR, SZ3, and SZo streams."""
+"""Adapters for fieldwise pcodec, QoZ, SPERR, SZ3, SZo, and TTHRESH."""
 
+import math
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -12,6 +13,7 @@ from src.runtime import (
     load_pyszo,
     load_qoz,
     load_sperr,
+    load_tthresh,
     read_raw,
     require_output_path,
 )
@@ -259,6 +261,69 @@ def compress_sperr_raw(
     return metadata
 
 
+def compress_tthresh_raw(
+    raw_path: str,
+    dtype: str,
+    compressed_path: str,
+    field_name: str,
+    count: int,
+    abs_error_bound: float,
+    force: bool,
+    relative_error_bound: Optional[float] = None,
+) -> Dict[str, Any]:
+    data_type = require_float_dtype(dtype, field_name, "TTHRESH compression")
+    output = Path(compressed_path)
+    require_output_path(output, force)
+    tthresh = load_tthresh()
+
+    values = read_raw(raw_path, data_type, count)
+    encoded, encoded_shape = pad_tthresh_input(values)
+    accuracy_mode = (
+        "relative_error" if relative_error_bound is not None else "rmse"
+    )
+    accuracy_target = (
+        float(relative_error_bound)
+        if relative_error_bound is not None
+        else float(abs_error_bound)
+    )
+    prepared, effective_target, constant_value = prepare_tthresh_input(
+        encoded,
+        accuracy_target,
+        field_name,
+        accuracy_mode,
+    )
+    payload = compress_tthresh_array(
+        tthresh,
+        prepared.reshape(encoded_shape),
+        accuracy_mode,
+        effective_target,
+        field_name,
+    )
+
+    output.write_bytes(payload)
+    metadata = _field_metadata(
+        field_name,
+        "tthresh",
+        data_type,
+        count,
+        output,
+        len(payload),
+    )
+    metadata.update(
+        {
+            "abs_error_bound": float(abs_error_bound),
+            "encoded_count": int(encoded.size),
+            "encoded_shape": list(encoded_shape),
+            "accuracy_mode": accuracy_mode,
+            "accuracy_target": accuracy_target,
+            "effective_accuracy_target": effective_target,
+        }
+    )
+    if constant_value is not None:
+        metadata["constant_value"] = constant_value
+    return metadata
+
+
 def compress_lossy_raw(
     codec: str,
     raw_path: str,
@@ -268,18 +333,20 @@ def compress_lossy_raw(
     count: int,
     abs_error_bound: float,
     force: bool,
+    relative_error_bound: Optional[float] = None,
 ) -> Dict[str, Any]:
     compressors = {
         "qoz": compress_qoz_raw,
         "sperr": compress_sperr_raw,
         "sz3": compress_pysz_raw,
         "szo": compress_szo_raw,
+        "tthresh": compress_tthresh_raw,
     }
     try:
         compressor = compressors[codec]
     except KeyError as exc:
         raise RuntimeError(f"Unsupported lossy compressor: {codec}.") from exc
-    return compressor(
+    arguments = (
         raw_path,
         dtype,
         compressed_path,
@@ -288,6 +355,12 @@ def compress_lossy_raw(
         abs_error_bound,
         force,
     )
+    if codec == "tthresh":
+        return compressor(
+            *arguments,
+            relative_error_bound=relative_error_bound,
+        )
+    return compressor(*arguments)
 
 
 def decompress_pcodec_raw(
@@ -451,6 +524,56 @@ def decompress_sperr_raw(
     decoded.reshape(-1)[:count].tofile(output)
 
 
+def decompress_tthresh_raw(
+    field: Mapping[str, Any],
+    out_path: str,
+    force: bool,
+) -> None:
+    data_type = require_float_dtype(
+        field["dtype"],
+        str(field["field"]),
+        "TTHRESH decompression",
+    )
+    count = int(field["count"])
+    encoded_count = int(field.get("encoded_count", count))
+    encoded_shape = tuple(int(value) for value in field["encoded_shape"])
+    if (
+        len(encoded_shape) < 3
+        or any(value <= 0 for value in encoded_shape)
+        or math.prod(encoded_shape) != encoded_count
+        or encoded_count < count
+    ):
+        raise RuntimeError(
+            f"TTHRESH metadata for {field['field']} is inconsistent."
+        )
+
+    tthresh = load_tthresh()
+    payload = Path(field["path"]).read_bytes()
+    try:
+        values = tthresh.decompress(payload)
+    except Exception as exc:
+        raise RuntimeError(
+            f"TTHRESH decompression failed for {field['field']}."
+        ) from exc
+
+    decoded = np.asarray(values)
+    if decoded.shape != encoded_shape or decoded.dtype != data_type:
+        raise RuntimeError(
+            f"TTHRESH decompression for {field['field']} returned shape "
+            f"{decoded.shape} and dtype {decoded.dtype}, expected "
+            f"{encoded_shape} and {data_type}."
+        )
+    if "constant_value" in field:
+        decoded = np.full(
+            decoded.shape,
+            field["constant_value"],
+            dtype=data_type,
+        )
+    output = Path(out_path)
+    require_output_path(output, force)
+    decoded.reshape(-1)[:count].tofile(output)
+
+
 def decompress_lossy_raw(
     field: Mapping[str, Any],
     out_path: str,
@@ -461,6 +584,7 @@ def decompress_lossy_raw(
         "qoz": decompress_qoz_raw,
         "sperr": decompress_sperr_raw,
         "szo": decompress_szo_raw,
+        "tthresh": decompress_tthresh_raw,
     }
     codec = str(field.get("codec"))
     try:
@@ -485,6 +609,23 @@ def pad_codec_input(
     fill_value = values[-1] if values.size else np.asarray(0, dtype=values.dtype)
     padded[values.size :] = fill_value
     return padded, minimum_count
+
+
+def pad_tthresh_input(values: np.ndarray) -> Tuple[np.ndarray, Tuple[int, ...]]:
+    """Pad a flat field into a balanced 3-D tensor for TTHRESH."""
+    required = max(1, int(values.size))
+    side = max(1, math.ceil(required ** (1.0 / 3.0)))
+    while side**3 < required:
+        side += 1
+    while side > 1 and (side - 1) ** 3 >= required:
+        side -= 1
+    shape = (side, side, side)
+    encoded_count = math.prod(shape)
+    encoded = np.empty(encoded_count, dtype=values.dtype)
+    encoded[: values.size] = values
+    fill_value = values[-1] if values.size else np.asarray(0, dtype=values.dtype)
+    encoded[values.size :] = fill_value
+    return encoded, shape
 
 
 def _field_metadata(
@@ -556,6 +697,57 @@ def prepare_qoz_input(
         f"QoZ requires a positive finite error bound for nonconstant "
         f"field {field_name}; got {quality}."
     )
+
+
+def prepare_tthresh_input(
+    values: np.ndarray,
+    accuracy_target: float,
+    field_name: str,
+    accuracy_mode: str,
+) -> Tuple[np.ndarray, float, Optional[float]]:
+    """Return TTHRESH-ready values while preserving zero-bound constants."""
+    quality = float(accuracy_target)
+    if np.isfinite(quality) and quality > 0.0:
+        return np.ascontiguousarray(values), quality, None
+    if (
+        quality == 0.0
+        and values.size
+        and np.isfinite(values.flat[0])
+        and np.all(values == values.flat[0])
+    ):
+        constant_value = float(values.flat[0])
+        return np.zeros_like(values), 1.0, constant_value
+    raise RuntimeError(
+        f"TTHRESH requires a positive finite {accuracy_mode} target for "
+        f"nonconstant field {field_name}; got {quality}."
+    )
+
+
+def compress_tthresh_array(
+    tthresh: Any,
+    values: np.ndarray,
+    accuracy_mode: str,
+    accuracy_target: float,
+    field_name: str,
+) -> bytes:
+    """Compress a tensor using one native TTHRESH accuracy target."""
+    target = float(accuracy_target)
+    if accuracy_mode not in ("relative_error", "rmse"):
+        raise RuntimeError(
+            f"Unsupported TTHRESH accuracy mode: {accuracy_mode}."
+        )
+    if not math.isfinite(target) or target <= 0.0:
+        raise RuntimeError(
+            f"TTHRESH {accuracy_mode} target for {field_name} must be "
+            f"positive and finite; got {target}."
+        )
+    try:
+        payload = tthresh.compress(values, **{accuracy_mode: target})
+    except Exception as exc:
+        raise RuntimeError(
+            f"TTHRESH compression failed for {field_name}."
+        ) from exc
+    return bytes(payload)
 
 
 def _validate_decoded_field(

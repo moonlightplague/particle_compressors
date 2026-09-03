@@ -9,6 +9,11 @@ cmake -S tools/SPERR -B tools/SPERR/build \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build tools/SPERR/build --parallel
 
+cmake -S tools/tthresh -B tools/tthresh/build \
+  -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build tools/tthresh/build --parallel
+
 mkdir -p tools/SPERR/.pybuild
 python -m pip install -r requirements.txt
 python -m pip install tools/QoZ

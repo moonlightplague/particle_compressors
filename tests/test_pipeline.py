@@ -34,7 +34,7 @@ FIELDS = {
 
 class CompressorSelectionTests(unittest.TestCase):
     def test_cli_uses_one_lossy_compressor_for_all_fields(self) -> None:
-        for codec in ("szo", "sz3", "sperr", "qoz"):
+        for codec in ("szo", "sz3", "sperr", "qoz", "tthresh"):
             argv = [
                 "roundtrip",
                 "input.h5",
@@ -48,7 +48,7 @@ class CompressorSelectionTests(unittest.TestCase):
 
         self.assertEqual(
             AVAILABLE_COMPRESSORS["lossy_compressor"],
-            ("szo", "sz3", "sperr", "qoz"),
+            ("szo", "sz3", "sperr", "qoz", "tthresh"),
         )
 
     def test_cli_accepts_explicit_field_worker_count(self) -> None:
@@ -98,19 +98,25 @@ class CompressorSelectionTests(unittest.TestCase):
         sz3 = build_compressed_artifacts(root, "sz3")
         sperr = build_compressed_artifacts(root, "sperr")
         qoz = build_compressed_artifacts(root, "qoz")
+        tthresh = build_compressed_artifacts(root, "tthresh")
 
         self.assertEqual(Path(szo["id"]).name, "id.pco")
         self.assertEqual(Path(sz3["id"]).name, "id.pco")
         self.assertEqual(Path(sperr["id"]).name, "id.pco")
         self.assertEqual(Path(qoz["id"]).name, "id.pco")
+        self.assertEqual(Path(tthresh["id"]).name, "id.pco")
         for field in (*POSITION_FIELDS, *VELOCITY_FIELDS):
             self.assertEqual(Path(szo[field]).name, f"{field}.szo")
             self.assertEqual(Path(sz3[field]).name, f"{field}.psz")
             self.assertEqual(Path(sperr[field]).name, f"{field}.sperr")
             self.assertEqual(Path(qoz[field]).name, f"{field}.qoz")
+            self.assertEqual(
+                Path(tthresh[field]).name,
+                f"{field}.tthresh",
+            )
 
     def test_manifest_requires_one_codec_for_every_lossy_field(self) -> None:
-        for configured in ("szo", "sz3", "sperr", "qoz"):
+        for configured in ("szo", "sz3", "sperr", "qoz", "tthresh"):
             self.assertEqual(
                 lossy_compressor_from_manifest(
                     {"compressors": {"lossy": configured}}
@@ -137,6 +143,12 @@ class CompressorSelectionTests(unittest.TestCase):
             for field in (*POSITION_FIELDS, *VELOCITY_FIELDS)
         }
         self.assertEqual(lossy_compressor_from_manifest(inferred), "qoz")
+
+        inferred["compressed_fields"] = {
+            field: {"codec": "tthresh"}
+            for field in (*POSITION_FIELDS, *VELOCITY_FIELDS)
+        }
+        self.assertEqual(lossy_compressor_from_manifest(inferred), "tthresh")
 
 
 class StableSortingTests(unittest.TestCase):
@@ -229,6 +241,7 @@ class StableSortingTests(unittest.TestCase):
                 field_count,
                 bound,
                 force,
+                relative_error_bound=None,
             ):
                 captured[field_name] = np.fromfile(raw_path, dtype=dtype)
                 Path(compressed_path).write_bytes(field_name.encode())

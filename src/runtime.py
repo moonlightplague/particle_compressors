@@ -133,6 +133,18 @@ def load_sperr() -> Any:
         ) from exc
 
 
+def load_tthresh() -> Any:
+    try:
+        import tthresh
+
+        return tthresh
+    except ImportError as exc:
+        raise RuntimeError(
+            "Could not import TTHRESH. Run `bash install.sh` to build the "
+            "local executable and install its Python API."
+        ) from exc
+
+
 def _preload_pyszo_zstd() -> None:
     spec = importlib.util.find_spec("pyszo")
     if spec is None or not spec.submodule_search_locations:

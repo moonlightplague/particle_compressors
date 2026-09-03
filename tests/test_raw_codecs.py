@@ -15,6 +15,213 @@ from src.raw_codecs import (
 
 
 class RawCodecTests(unittest.TestCase):
+    def test_tthresh_absolute_bound_uses_direct_rmse_target(self):
+        class FakeTTHRESH:
+            encoded = None
+
+            @classmethod
+            def compress(cls, data, *, rmse):
+                self.assertEqual(rmse, 0.25)
+                cls.encoded = np.asarray(data).copy()
+                return b"tthresh-rmse"
+
+            @classmethod
+            def decompress(cls, payload):
+                self.assertEqual(bytes(payload), b"tthresh-rmse")
+                return cls.encoded.copy()
+
+        values = np.arange(8, dtype=np.float32)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_path = root / "input.raw"
+            compressed_path = root / "field.tthresh"
+            output_path = root / "decoded.raw"
+            values.tofile(raw_path)
+            with patch(
+                "src.raw_codecs.load_tthresh",
+                return_value=FakeTTHRESH,
+            ):
+                field = compress_lossy_raw(
+                    "tthresh",
+                    str(raw_path),
+                    "float32",
+                    str(compressed_path),
+                    "vx",
+                    values.size,
+                    0.25,
+                    False,
+                )
+                decompress_lossy_raw(field, str(output_path), False)
+
+            self.assertEqual(field["accuracy_mode"], "rmse")
+            self.assertEqual(field["accuracy_target"], 0.25)
+            np.testing.assert_array_equal(
+                np.fromfile(output_path, dtype=np.float32),
+                values,
+            )
+
+    def test_tthresh_zero_bound_constant_roundtrips_exactly(self):
+        class FakeTTHRESH:
+            @staticmethod
+            def compress(data, *, relative_error):
+                np.testing.assert_array_equal(data, np.zeros_like(data))
+                self.assertEqual(relative_error, 1.0)
+                return b"constant-tthresh"
+
+            @staticmethod
+            def decompress(payload):
+                self.assertEqual(bytes(payload), b"constant-tthresh")
+                return np.zeros((3, 3, 3), dtype=np.float64)
+
+        values = np.full(17, -7.25, dtype=np.float64)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_path = root / "input.raw"
+            compressed_path = root / "field.tthresh"
+            output_path = root / "decoded.raw"
+            values.tofile(raw_path)
+
+            with patch(
+                "src.raw_codecs.load_tthresh",
+                return_value=FakeTTHRESH,
+            ):
+                field = compress_lossy_raw(
+                    "tthresh",
+                    str(raw_path),
+                    "float64",
+                    str(compressed_path),
+                    "vy",
+                    values.size,
+                    0.0,
+                    False,
+                    0.0,
+                )
+                decompress_lossy_raw(field, str(output_path), False)
+
+            self.assertEqual(field["constant_value"], -7.25)
+            self.assertEqual(field["accuracy_mode"], "relative_error")
+            self.assertEqual(field["accuracy_target"], 0.0)
+            self.assertEqual(field["effective_accuracy_target"], 1.0)
+            np.testing.assert_array_equal(
+                np.fromfile(output_path, dtype=np.float64),
+                values,
+            )
+
+    def test_tthresh_does_not_verify_pointwise_error_during_compression(self):
+        class FakeTTHRESH:
+            encoded_by_token = {}
+            targets = []
+
+            @classmethod
+            def compress(cls, data, *, relative_error):
+                token = len(cls.targets)
+                cls.targets.append(relative_error)
+                cls.encoded_by_token[token] = np.asarray(data).copy()
+                return bytes([token])
+
+            @classmethod
+            def decompress(cls, payload):
+                token = int(bytes(payload)[0])
+                decoded = cls.encoded_by_token[token].copy()
+                if token == 0:
+                    decoded.flat[0] += np.float32(0.02)
+                return decoded
+
+        values = np.linspace(-1.0, 1.0, 8, dtype=np.float32)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_path = root / "input.raw"
+            compressed_path = root / "field.tthresh"
+            output_path = root / "decoded.raw"
+            values.tofile(raw_path)
+
+            with patch(
+                "src.raw_codecs.load_tthresh",
+                return_value=FakeTTHRESH,
+            ):
+                field = compress_lossy_raw(
+                    "tthresh",
+                    str(raw_path),
+                    "float32",
+                    str(compressed_path),
+                    "vx",
+                    values.size,
+                    0.01,
+                    False,
+                    0.01,
+                )
+                decompress_lossy_raw(field, str(output_path), False)
+
+            self.assertEqual(FakeTTHRESH.targets, [0.01])
+            self.assertEqual(field["accuracy_mode"], "relative_error")
+            self.assertEqual(field["accuracy_target"], 0.01)
+            self.assertGreater(
+                float(
+                    np.max(
+                        np.abs(
+                            np.fromfile(output_path, dtype=np.float32)
+                            - values
+                        )
+                    )
+                ),
+                0.01,
+            )
+
+    def test_tthresh_roundtrip_uses_direct_relative_error_target(self):
+        class FakeTTHRESH:
+            encoded = None
+            relative_error = None
+
+            @classmethod
+            def compress(cls, data, *, relative_error):
+                cls.encoded = np.asarray(data).copy()
+                cls.relative_error = relative_error
+                return b"tthresh-payload"
+
+            @classmethod
+            def decompress(cls, payload):
+                self.assertIn(
+                    bytes(payload),
+                    (b"tthresh-payload",),
+                )
+                return cls.encoded.copy()
+
+        values = np.linspace(-1.0, 1.0, 17, dtype=np.float32)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_path = root / "input.raw"
+            compressed_path = root / "field.tthresh"
+            output_path = root / "decoded.raw"
+            values.tofile(raw_path)
+
+            with patch(
+                "src.raw_codecs.load_tthresh",
+                return_value=FakeTTHRESH,
+            ):
+                field = compress_lossy_raw(
+                    "tthresh",
+                    str(raw_path),
+                    "float32",
+                    str(compressed_path),
+                    "vx",
+                    values.size,
+                    0.01,
+                    False,
+                    1e-3,
+                )
+                decompress_lossy_raw(field, str(output_path), False)
+
+            self.assertEqual(field["codec"], "tthresh")
+            self.assertEqual(field["encoded_shape"], [3, 3, 3])
+            self.assertEqual(field["encoded_count"], 27)
+            self.assertEqual(FakeTTHRESH.relative_error, 1e-3)
+            self.assertEqual(field["accuracy_mode"], "relative_error")
+            self.assertEqual(field["accuracy_target"], 1e-3)
+            np.testing.assert_array_equal(
+                np.fromfile(output_path, dtype=np.float32),
+                values,
+            )
+
     def test_qoz_roundtrip_uses_absolute_error_mode(self) -> None:
         class FakeQoZ:
             encoded = None

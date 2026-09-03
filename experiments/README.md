@@ -21,6 +21,23 @@ python -m experiments.velocity_id_relationship data/dat_2.1.h5 \
   --output /tmp/velocity-id-relationship.json
 ```
 
+## Lattice-layout advantage visualization
+
+Compare a sort-only package with a lattice package built from the same input,
+codec, and error bounds:
+
+```bash
+python -m experiments.visualize_lattice_advantage \
+  /tmp/sort-only/manifest.json particle_pipeline_runs/lattice/manifest.json \
+  --ablation-json /tmp/payload-search.json \
+  --output /tmp/lattice-advantage.html
+```
+
+The self-contained dashboard attributes package bytes saved to positions and
+velocities, compares every field, and displays the flat-to-dense and
+dense-to-position-residual interventions recorded by `payload_search.py`.
+Supplying the ablation JSON is optional.
+
 ## Reconstruction visualization
 
 Create a self-contained HTML dashboard for any completed roundtrip package:
@@ -37,6 +54,25 @@ bounds. It uses the manifest to align sorted reconstructions with their source
 rows. Use `--sample-size` and `--seed` to control the embedded deterministic
 sample, `--output` to select the HTML path, or `--original-h5` when the source
 file has moved since compression. No plotting package is required.
+
+## X-y particle statistics
+
+Create a self-contained HTML dashboard of particle statistics projected onto
+the x-y plane. Inputs may be individual HDF5 files, directories, or a mixture;
+all selected rows are accumulated into one common grid:
+
+```bash
+python -m experiments.visualize_xy_statistics data/new_data \
+  --output /tmp/new-data-xy.html
+```
+
+The dashboard maps particle density, mean z, mean speed, 3-D velocity
+dispersion, each mean velocity component, and the mean planar velocity vector.
+Integer positions are normalized using each file's `bitwidth` attribute. The
+default deterministic systematic sample analyzes at most five million rows;
+use `--max-particles 0` for exact full-data statistics, `--bins` to change the
+grid resolution, or `--extent XMIN XMAX YMIN YMAX` to compare several reports
+on identical axes. No plotting package is required.
 
 ## Velocity scalar versus ID
 

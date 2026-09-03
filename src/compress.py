@@ -45,9 +45,10 @@ class CompressionSettings:
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "CompressionSettings":
         lossy_codec = str(args.lossy_compressor)
-        if lossy_codec not in ("szo", "sz3", "sperr", "qoz"):
+        if lossy_codec not in ("szo", "sz3", "sperr", "qoz", "tthresh"):
             raise RuntimeError(
-                "--lossy-compressor must be one of: szo, sz3, sperr, qoz."
+                "--lossy-compressor must be one of: szo, sz3, sperr, qoz, "
+                "tthresh."
             )
         sort_requested = bool(getattr(args, "sort", False))
         lattice_requested = bool(getattr(args, "lattice_layout", False))
@@ -87,6 +88,7 @@ class LossyCompressionJob:
     force: bool
     encoded_shape: Optional[Tuple[int, int, int]] = None
     axis_search: bool = False
+    relative_error_bound: Optional[float] = None
 
 
 def _compress_lossy_job(job: LossyCompressionJob) -> Dict[str, Any]:
@@ -100,6 +102,7 @@ def _compress_lossy_job(job: LossyCompressionJob) -> Dict[str, Any]:
             job.count,
             job.abs_error_bound,
             job.force,
+            relative_error_bound=job.relative_error_bound,
         )
     return compress_shaped_lossy_raw(
         job.codec,
@@ -112,6 +115,7 @@ def _compress_lossy_job(job: LossyCompressionJob) -> Dict[str, Any]:
         job.force,
         job.encoded_shape,
         job.axis_search,
+        relative_error_bound=job.relative_error_bound,
     )
 
 
@@ -295,6 +299,7 @@ class CompressionPipeline:
                     ]
                 ),
                 self.settings.force,
+                relative_error_bound=self._relative_error_bound(logical),
             ))
         for logical, field in zip(
             POSITION_FIELDS,
@@ -355,6 +360,7 @@ class CompressionPipeline:
                 self.settings.force,
                 self.lattice.shape,
                 self.settings.lattice_axis_search,
+                relative_error_bound=self._relative_error_bound(logical),
             ))
             updates: Dict[str, Any] = {
                 "spatial_layout": LATTICE_LAYOUT_NAME,
@@ -408,6 +414,7 @@ class CompressionPipeline:
                 self.count,
                 float(self.manifest["field_error_bounds"][logical]["abs"]),
                 self.settings.force,
+                relative_error_bound=self._relative_error_bound(logical),
             ))
         for logical, field in zip(
             VELOCITY_FIELDS,
@@ -450,8 +457,13 @@ class CompressionPipeline:
                 self.settings.force,
                 self.lattice.shape,
                 self.settings.lattice_axis_search,
+                relative_error_bound=self._relative_error_bound(logical),
             ))
         return jobs
+
+    def _relative_error_bound(self, logical: str) -> Optional[float]:
+        value = self.manifest["field_error_bounds"][logical].get("relative")
+        return None if value is None else float(value)
 
     def _compress_lattice_fields(self, order: CanonicalOrder) -> None:
         position_jobs, position_updates = self._prepare_lattice_positions(order)

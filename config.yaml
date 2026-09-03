@@ -7,7 +7,7 @@ advanced:
   vel_abs_eb: null
   vel_rel_eb: null
   id_abs_eb: 0.0
-  lossy_compressor: szo
+  lossy_compressor: tthresh
   lossless: pcodec
   # Opt-in periodic ID-lattice layout. The flat field layout remains the
   # default unless this is enabled here or with --lattice-layout.

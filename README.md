@@ -1,10 +1,10 @@
 # Particle Compressors
 
 Particle Compressors is a command-line pipeline for lossy compression of
-particle data stored in HDF5. One selected codec, SZO, SZ3, SPERR, or QoZ,
-compresses all six position and velocity fields. Particle IDs remain lossless
-through pcodec. Roundtrip reconstruction preserves dataset paths, dtypes,
-dataset attributes, and root HDF5 attributes.
+particle data stored in HDF5. One selected codec—SZO, SZ3, SPERR, QoZ, or
+TTHRESH—compresses all six position and velocity fields. Particle IDs remain
+lossless through pcodec. Roundtrip reconstruction preserves dataset paths,
+dtypes, dataset attributes, and root HDF5 attributes.
 
 ## Input Format
 
@@ -26,10 +26,10 @@ Datasets may be inside HDF5 groups; matching uses the final path component.
 ## Requirements and Installation
 
 - Python with development headers; Python 3.13 is known to work
-- CMake and a C++ compiler for the local SPERR and QoZ libraries
+- CMake and a C++ compiler for the local SPERR, QoZ, and TTHRESH tools
 - Rust and Cargo for the local pcodec Python extension
-- Initialized `tools/SZo`, `tools/SPERR`, `tools/QoZ`, and `tools/pcodec`
-  submodules
+- Initialized `tools/SZo`, `tools/SPERR`, `tools/QoZ`, `tools/tthresh`, and
+  `tools/pcodec` submodules
 
 ```bash
 git submodule update --init --recursive
@@ -38,11 +38,11 @@ conda activate compressor
 bash install.sh
 ```
 
-The installation script builds the local SPERR shared library, then installs
-the pinned Python dependencies, the local SZO, SPERR, and QoZ Python APIs,
-and the editable pcodec extension. SPERR is built without OpenMP for
-portability; its streams remain compatible with an OpenMP-enabled SPERR
-build.
+The installation script builds the local SPERR shared library and TTHRESH
+executable, then installs the pinned Python dependencies, the local SZO,
+SPERR, QoZ, and TTHRESH Python APIs, and the editable pcodec extension. SPERR
+and TTHRESH are built without OpenMP because the pipeline already runs fields
+in parallel. Their streams remain compatible with OpenMP-enabled builds.
 
 ## Quick Start
 
@@ -86,10 +86,21 @@ python main.py roundtrip data/sample.h5 \
   --force
 ```
 
+Select TTHRESH for every lossy field with:
+
+```bash
+python main.py roundtrip data/sample.h5 \
+  --work-dir particle_pipeline_runs/sample-tthresh \
+  --lossy-compressor tthresh \
+  --rel-eb 1e-3 \
+  --force
+```
+
 `--lossy-compressor` is the single codec selector and accepts `szo`, `sz3`,
-`sperr`, or `qoz`. The resulting compressed directory contains `id.pco` plus
-one stream per lossy field. SZO streams use `.szo`, SZ3 streams use `.psz`,
-SPERR streams use `.sperr`, and QoZ streams use `.qoz`.
+`sperr`, `qoz`, or `tthresh`. The resulting compressed directory contains
+`id.pco` plus one stream per lossy field. SZO streams use `.szo`, SZ3 streams
+use `.psz`, SPERR streams use `.sperr`, QoZ streams use `.qoz`, and TTHRESH
+streams use `.tthresh`.
 
 Use a distinct work directory for each input and error-bound combination.
 Existing outputs are rejected unless `--force` is supplied.
@@ -129,6 +140,14 @@ Position data is converted to float32 compressor units before lossy coding.
 The manifest records preprocessing cast error and the adjusted compressor
 bound for each position field.
 
+TTHRESH receives relative bounds directly through its native relative-L2
+error mode. This differs from the range-relative pointwise interpretation used
+for the other lossy codecs, so TTHRESH reconstructions are not expected to
+pass the final maximum-absolute-error check. With an absolute-bound CLI mode,
+the TTHRESH adapter passes that value directly as an RMSE target. Flat fields
+are padded to a balanced 3-D tensor; lattice fields retain their native 3-D
+shape.
+
 ## Stable ID Sorting
 
 Use `--sort` to stably sort particles by ascending ID before compression:
@@ -149,7 +168,7 @@ temporary sort permutation, or by unique particle ID after `--clean-raw`.
 ## Periodic Lattice Layout
 
 `--lattice-layout` enables an ID-derived dense 3-D transform before SZO, SZ3,
-SPERR, or QoZ compression and implies stable ID sorting:
+SPERR, QoZ, or TTHRESH compression and implies stable ID sorting:
 
 ```bash
 python main.py roundtrip data/sample.h5 \
@@ -200,7 +219,7 @@ A compressed package contains:
 - `manifest.json` with schema, attributes, bounds, codecs, ordering, layout,
   sizes, and timings
 - `compressed/id.pco`
-- six `.szo`, `.psz`, `.sperr`, or `.qoz` lossy field streams
+- six `.szo`, `.psz`, `.sperr`, `.qoz`, or `.tthresh` lossy field streams
 - optional pcodec streams for lattice wrap offsets
 
 A completed roundtrip also contains `reconstructed.h5` and `metrics.json`.
@@ -217,7 +236,7 @@ stale or misspelled settings.
 ## Code Structure
 
 - `preprocess.py`, `compress.py`, and `decompress.py` orchestrate stages.
-- `raw_codecs.py` adapts pcodec, QoZ, SPERR, SZ3, and SZO field streams.
+- `raw_codecs.py` adapts pcodec, QoZ, SPERR, SZ3, SZO, and TTHRESH streams.
 - `lattice_layout.py` implements periodic dense transforms.
 - `shaped_codecs.py` chooses adaptive 3-D codec layouts.
 - `field_export.py`, `error_bounds.py`, and `hdf5_io.py` handle source
