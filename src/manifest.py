@@ -45,6 +45,12 @@ def update_compressed_size_metrics(
                 if compressed_total
                 else math.inf
             )
+        if "input_file_bytes" in manifest:
+            sizes["input_file_to_compressed_ratio"] = (
+                int(manifest["input_file_bytes"]) / compressed_total
+                if compressed_total
+                else math.inf
+            )
 
         rendered_manifest_bytes = json_size_bytes(manifest)
         if components.get("manifest.json") == rendered_manifest_bytes:

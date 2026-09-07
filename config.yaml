@@ -16,13 +16,13 @@ advanced:
   # 0 selects up to 16 workers automatically for chunked velocities.
   vel_chunk_workers: 0
   id_abs_eb: 0.0
-  pos_compressor: szo
+  pos_compressor: xnyzip
   vel_compressor: szo
   lossless: pcodec
   # Opt-in periodic ID-lattice layout. Existing codec pipelines remain the
   # default unless this is enabled here or with --lattice-layout.
   lattice_layout: false
-  lattice_min_occupancy: 0.8
+  lattice_min_occupancy: 0.69
   lattice_axis_search: true
 
   # Integer position conversion used before float32 triplet compression.

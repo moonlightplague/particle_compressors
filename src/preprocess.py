@@ -1,4 +1,4 @@
-"""Preprocess HDF5 particle fields and initialize a package manifest."""
+"""Preprocess HDF5 or native particle fields and initialize a manifest."""
 
 import argparse
 import importlib.metadata
@@ -43,6 +43,7 @@ from src.hdf5_io import (
     resolve_fields,
 )
 from src.models import ErrorBoundSelection, PositionScale, ToolPaths
+from src.native_snapshot import AdaptedParticleInput, adapt_particle_input
 from src.runtime import write_json
 
 
@@ -75,11 +76,6 @@ class PreprocessingPipeline:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         _validate_preprocess_args(args)
-        self.input_h5 = Path(args.input_h5).resolve()
-        if not self.input_h5.is_file():
-            raise RuntimeError(
-                f"Input HDF5 file does not exist: {self.input_h5}"
-            )
         self.tools = ToolPaths(
             lcp=Path(args.lcp),
             xnyzip=(
@@ -92,6 +88,11 @@ class PreprocessingPipeline:
             args.work_dir,
             bool(args.force),
         )
+        self.input = adapt_particle_input(
+            Path(args.input_h5),
+            self.workspace.root / "input_adapters",
+        )
+        self.input_h5 = self.input.h5_path
         self.raw_paths: Dict[str, str] = {}
         self.statistics: Dict[str, Any] = {}
 
@@ -125,6 +126,7 @@ class PreprocessingPipeline:
                 bounds,
                 self.tools,
             )
+            _record_native_source(manifest, self.input)
             selected_payload_bytes = _selected_payload_bytes(
                 source,
                 fields,
@@ -298,6 +300,12 @@ class PreprocessingPipeline:
         manifest["sizes"] = {
             "selected_original_payload_bytes": selected_payload_bytes
         }
+        merge_metadata = getattr(self.args, "merge_metadata", None)
+        if merge_metadata is not None:
+            manifest["merge"] = dict(merge_metadata)
+            manifest.setdefault("timing", {})[
+                "merge_wall_seconds"
+            ] = float(merge_metadata["wall_seconds"])
         manifest.setdefault("timing", {})["preprocess_wall_seconds"] = (
             time.perf_counter() - started
         )
@@ -412,6 +420,21 @@ def make_manifest(
         bounds,
         tools,
     )
+
+
+def _record_native_source(
+    manifest: Dict[str, Any],
+    adapted_input: AdaptedParticleInput,
+) -> None:
+    header = adapted_input.native_header
+    if header is None:
+        return
+    source_metadata = header.source_metadata()
+    manifest["input_format"] = source_metadata["format"]
+    manifest["input_file"] = str(adapted_input.original_path)
+    manifest["input_file_bytes"] = adapted_input.original_path.stat().st_size
+    manifest["source"] = source_metadata
+    manifest.pop("input_h5_file_bytes", None)
 
 
 def build_compressed_artifacts(

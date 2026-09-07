@@ -53,10 +53,22 @@ def reorder_raw(
     count: int,
     order: np.ndarray,
     force: bool,
+    values: Optional[np.ndarray] = None,
 ) -> str:
     require_output_path(output_path, force)
-    values = read_raw(raw_path, np.dtype(dtype), count)
-    np.ascontiguousarray(values[order]).tofile(output_path)
+    if values is None:
+        source = np.memmap(
+            raw_path,
+            dtype=np.dtype(dtype),
+            mode="r",
+            shape=(count,),
+        )
+        values = source[order]
+    elif values.ndim != 1 or values.size != count:
+        raise RuntimeError(
+            f"Cached ordered field expected {count} values, got {values.shape}."
+        )
+    np.ascontiguousarray(values).tofile(output_path)
     return str(output_path)
 
 

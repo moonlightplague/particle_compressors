@@ -14,6 +14,27 @@ import numpy as np
 from src.models import ToolPaths
 
 
+MAX_PARALLEL_FIELDS = 6
+
+
+def resolve_field_workers(
+    configured: int,
+    field_count: int = MAX_PARALLEL_FIELDS,
+    concurrent_pipelines: int = 1,
+) -> int:
+    """Resolve workers for independent floating-point field codecs."""
+
+    if configured < 0:
+        raise RuntimeError("Field workers must be non-negative.")
+    if field_count < 1:
+        raise RuntimeError("Cannot resolve workers without any fields.")
+    if concurrent_pipelines < 1:
+        raise RuntimeError("Concurrent pipelines must be positive.")
+    available = max(1, (os.cpu_count() or 1) // concurrent_pipelines)
+    requested = configured or available
+    return min(requested, field_count)
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -146,6 +167,7 @@ __all__ = [
     "read_raw",
     "repo_root",
     "require_output_path",
+    "resolve_field_workers",
     "resolve_lcp_chunk_workers",
     "resolve_velocity_chunk_workers",
     "run_command",

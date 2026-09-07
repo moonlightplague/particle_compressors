@@ -115,7 +115,7 @@ def build_parser(
     _add_pipeline_command(
         commands,
         "roundtrip",
-        "Compress, reconstruct, and report roundtrip metrics.",
+        "Compress, reconstruct, and report compression ratios and runtime.",
         defaults,
     )
     return parser
@@ -210,10 +210,28 @@ def _add_pipeline_command(
         type=int,
         default=0,
         help=(
-            "Parallel file processes for directory input; 0 selects up to "
-            "16 workers automatically (default: %(default)s)."
+            "Parallel file processes for directory input; 0 selects "
+            "automatically (default: %(default)s)."
         ),
     )
+    command.add_argument(
+        "--merge",
+        action="store_true",
+        help=(
+            "For directory input, verify that particle IDs are disjoint, "
+            "merge all files, and run one common pipeline. Without this "
+            "flag, files remain independent."
+        ),
+    )
+    if name == "roundtrip":
+        command.add_argument(
+            "--metrics",
+            action="store_true",
+            help=(
+                "Compute detailed reconstruction quality metrics. Without "
+                "this flag, report only compression ratios and runtime."
+            ),
+        )
 
 
 def _add_decompress_command(
@@ -280,6 +298,15 @@ def _add_runtime_arguments(
         action="store_true",
         help="Overwrite pipeline outputs in the work directory.",
     )
+    parser.add_argument(
+        "--field-workers",
+        type=int,
+        default=0,
+        help=(
+            "Parallel processes for independent floating-point fields; "
+            "0 selects automatically (default: %(default)s)."
+        ),
+    )
 
 
 def _add_compression_arguments(
@@ -288,7 +315,10 @@ def _add_compression_arguments(
 ) -> None:
     parser.add_argument(
         "input_h5",
-        help="Input HDF5 particle file or directory of .h5 files.",
+        help=(
+            "Input HDF5 particle file, native dat_* file with cfg_*, or a "
+            "directory containing either format."
+        ),
     )
     parser.add_argument(
         "--work-dir",
@@ -411,8 +441,10 @@ def _add_compression_arguments(
         default=defaults["lattice_layout"],
         help=(
             "Use an ID-derived periodic dense 3-D layout for fieldwise "
-            "position and velocity codecs; implies ID sorting and falls back "
-            "to the normal sorted layout when occupancy is too low "
+            "velocity fields and, when positions are also fieldwise, for "
+            "position fields. Native LCP/XnYZip position order is preserved; "
+            "fully fieldwise pipelines imply ID sorting. Falls back to the "
+            "normal canonical layout when occupancy is too low "
             "(default: %(default)s)."
         ),
     )

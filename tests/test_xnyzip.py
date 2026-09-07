@@ -1043,6 +1043,7 @@ class XnYZipNativeRoundtripTests(unittest.TestCase):
                 "0.1",
                 "--vel-abs-eb",
                 "0.05",
+                "--metrics",
             ]
             if chunk_size:
                 argv.extend(

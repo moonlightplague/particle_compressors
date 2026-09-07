@@ -1,10 +1,11 @@
 # Particle Compressors
 
 Particle Compressors is a command-line pipeline for compressing particle data
-stored in HDF5. It combines specialized codecs for each component of a particle
-record, reconstructs the original HDF5 layout, and can calculate roundtrip error
-and compression metrics. The pipeline preserves dataset names, dtypes, dataset attributes, and root HDF5
-attributes in the reconstructed file.
+stored in HDF5 or native field-major `cfg_*`/`dat_*` snapshots. It combines
+specialized codecs for each component of a particle record, reconstructs the
+original HDF5 layout, and can calculate roundtrip error and compression
+metrics. The pipeline preserves dataset names, dtypes, dataset attributes, and
+root HDF5 attributes in the reconstructed file.
 
 ## Input Format
 
@@ -24,6 +25,13 @@ aliases:
 
 Datasets may be located in HDF5 groups; matching uses only the final component
 of each dataset path.
+
+The pipeline also accepts a native data file named `dat_SUFFIX` when a matching
+`cfg_SUFFIX` file is present. The configuration must contain the 43-value
+snapshot header used by the source simulation, and the data file must contain
+field-major little-endian `int32` positions, `float32` velocities, and `uint64`
+IDs. Native data is exposed through a lightweight HDF5 adapter in the work
+directory, so the compressor paths—including LCP and XnYZip—remain unchanged.
 
 ## Requirements
 
@@ -70,6 +78,8 @@ The Python implementation is separated by responsibility:
   LCP block-ID sidecars.
 - `field_export.py`, `error_bounds.py`, and `hdf5_io.py` handle source
   conversion, bound selection, and HDF5 reconstruction.
+- `native_snapshot.py` adapts native `cfg_*`/`dat_*` partitions, and `merge.py`
+  validates and concatenates disjoint particle chunks.
 - `manifest.py`, `metrics.py`, and `runtime.py` contain package metadata,
   reporting, and low-level runtime utilities.
 - `helpers.py` is a compatibility facade for integrations using the original
@@ -88,8 +98,14 @@ python main.py roundtrip data/sample.h5 \
   --config config.yaml \
   --work-dir particle_pipeline_runs \
   --rel-eb 1e-3 \
+  --metrics \
   --force 
 ```
+
+Detailed quality metrics are opt-in: `--metrics` writes `metrics.json` and
+computes reconstruction error. Without it, a roundtrip still reports component
+and payload compression ratios plus stage and end-to-end runtime, and avoids
+the extra source/reconstruction comparison pass.
 
 Use a distinct work directory for each input/error-bound combination. Existing
 outputs are rejected unless `--force` is supplied.
@@ -106,16 +122,36 @@ python main.py roundtrip data/snapshots \
 ```
 
 Directory inputs run in parallel processes. `--file-workers 0` automatically
-uses up to 16 workers; a positive value sets an explicit cap. Each input keeps
+selects a bounded worker count; a positive value sets an explicit cap. Each input keeps
 the normal single-file pipeline and writes to a separate subdirectory named
 after the source file, such as `particle_pipeline_runs/snapshots/step_01.h5`.
 Per-file console metrics are printed as usual, and the batch root receives
 `batch_metrics.json` with byte-weighted total compression ratio, aggregate
 stage timings, observed batch wall time, throughput, per-file statistics, and
-separate byte-weighted total CRs for positions, IDs, and velocities. It also
-records per-field `max_abs`, `mse`, and `psnr` quality metrics for each
-roundtrip.
-Directory globbing is non-recursive and matches the `.h5` extension exactly.
+separate byte-weighted total CRs for positions, IDs, and velocities. With
+`--metrics`, it also records per-field `max_abs`, `mse`, and `psnr` quality
+metrics for each roundtrip. Discovery is non-recursive and includes exact
+lowercase `.h5` files and valid native `dat_*` partitions.
+
+Add `--merge` to treat all directory entries as one disjoint particle set:
+
+```bash
+python main.py roundtrip data/snapshots \
+  --work-dir particle_pipeline_runs/snapshots-merged \
+  --merge --metrics --force
+```
+
+The merge path rejects duplicate IDs within or across chunks and requires
+matching field dtypes, dataset attributes, and common root attributes. It
+writes `WORK_DIR/merged/merged.h5`, normalizes `npart`, `npart_total`, `rank`,
+and `proc_size`, and records provenance and timing in the manifest. Native
+partitions are adapted before merging. Without `--merge`, directory files keep
+their independent per-file pipelines.
+
+Independent SZ3/SZO fields are compressed and decompressed concurrently.
+`--field-workers 0` chooses up to six workers while accounting for concurrent
+directory pipelines; use `--field-workers 1` for serial execution. LCP and
+XnYZip triplet/chunk worker behavior is unchanged.
 
 With `--pos-compressor lcp --vel-compressor sz3`, the compressed directory
 contains `positions.lcp`, `id.pco`, `vx.psz`, `vy.psz`, and `vz.psz`, without
@@ -328,20 +364,32 @@ dense box. Positions are stored as lattice residuals; small lossless pcodec
 sidecars preserve which side of the periodic seam each value belongs to.
 Unoccupied cells receive interpolation-only values and are discarded during
 decoding. SZO or SZ3 then sees spatially adjacent 3-D values instead of a flat
-ID-sorted stream. By default the compressor tries all six axis orders, then
-the reversals of the best order, and records the smallest orientation for each
+stream. By default the compressor tries all six axis orders, then the
+reversals of the best order, and records the smallest orientation for each
 field.
 
-The optimization requires both triplets to use fieldwise SZO or SZ3, a numeric
-root `nsidemesh` attribute, unique IDs that fit an `nsidemesh^3` zero- or
-one-based lattice, normalized positions in the periodic domain, and a dense
-box occupancy of at least `--lattice-min-occupancy` (default `0.8`). It implies
-ID sorting. If inference or the occupancy check fails, the manifest records
-the reason and compression safely falls back to the ordinary ID-sorted
-fieldwise path. Existing packages and runs without `--lattice-layout` retain
-their previous format and behavior. Use `--no-lattice-axis-search` to encode
-the native dense axis order only when compression time matters more than the
-last fraction of payload CR.
+When positions use LCP or XnYZip and velocities use SZO or SZ3, the same mode
+applies the lattice layout only to `vx`, `vy`, and `vz`. The velocity rows first
+follow the exact order emitted by the native position compressor; lattice
+decoding gathers them back into that same order so they remain aligned with
+the native positions and the reordered IDs. Native position payloads and
+their order handling are unchanged.
+
+The optimization requires SZO or SZ3 velocities, a numeric root `nsidemesh`
+attribute, unique IDs that fit an `nsidemesh^3` zero- or one-based lattice,
+normalized positions in the periodic domain, and a dense box occupancy of at
+least `--lattice-min-occupancy` (default `0.8`). Fully fieldwise position and
+velocity pipelines imply ID sorting; native-position pipelines retain the LCP
+or XnYZip position order. If inference or the occupancy check fails, the
+manifest records the reason and compression safely falls back to the ordinary
+canonical fieldwise path. Existing packages and runs without
+`--lattice-layout` retain their previous format and behavior. Use
+`--no-lattice-axis-search` to encode the native dense axis order only when
+compression time matters more than the last fraction of payload CR.
+
+For a merged complete cubic lattice, the verified contiguous ID range enables
+an O(N) inverse permutation and implicit geometry, avoiding comparison sorting
+and full coordinate/scatter-index arrays.
 
 On the repository's full `data/dat_2.1.h5` input at relative error `1e-3`, the
 measured packaged payload (including the manifest and all sidecars) was:

@@ -8,6 +8,7 @@ from src.lattice_layout import (
     IDENTITY_TRANSFORM,
     POSITION_RESIDUAL_TRANSFORM,
     LatticeLayoutUnavailable,
+    infer_complete_lattice_layout,
     infer_dense_lattice_layout,
     lattice_layout_from_metadata,
 )
@@ -110,6 +111,43 @@ class DenseLatticeLayoutTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(restored_again, velocity)
 
+    def test_native_position_order_is_preserved_by_velocity_lattice(self):
+        side, ids, positions, coordinates = self._periodic_slab(101)
+        native_order = np.random.default_rng(42).permutation(ids.size)
+        ordered_ids = ids[native_order]
+        ordered_positions = {
+            logical: values[native_order]
+            for logical, values in positions.items()
+        }
+        velocity = (
+            coordinates[0] * 0.5
+            + coordinates[1] * 0.25
+            - coordinates[2]
+        ).astype(np.float32)[native_order]
+
+        layout = infer_dense_lattice_layout(
+            ordered_ids,
+            ordered_positions,
+            side,
+            0.8,
+        )
+        dense, _, _ = layout.encode_field(
+            velocity,
+            "vx",
+            position_residual=False,
+        )
+        restored = lattice_layout_from_metadata(
+            ordered_ids,
+            layout.manifest_metadata(),
+        ).decode_field(
+            dense,
+            "vx",
+            IDENTITY_TRANSFORM,
+            np.dtype("float32"),
+        )
+
+        np.testing.assert_array_equal(restored, velocity)
+
     def test_rejects_a_periodic_box_below_the_occupancy_threshold(self):
         side, ids, positions, _ = self._periodic_slab(2)
         with self.assertRaisesRegex(
@@ -117,6 +155,55 @@ class DenseLatticeLayoutTests(unittest.TestCase):
             "occupancy",
         ):
             infer_dense_lattice_layout(ids, positions, side, 0.8)
+
+    def test_complete_lattice_uses_implicit_geometry(self):
+        side = 12
+        ids = np.arange(side**3, dtype=np.uint64)
+        high = ids // (side * side)
+        middle = (ids // side) % side
+        low = ids % side
+        positions = {
+            "x": ((low + 0.125) / side).astype(np.float32),
+            "y": ((high + 0.25) / side).astype(np.float32),
+            "z": ((middle + 0.375) / side).astype(np.float32),
+        }
+
+        layout = infer_complete_lattice_layout(
+            ids,
+            positions,
+            side,
+            0,
+            side**3 - 1,
+        )
+
+        self.assertTrue(layout.implicit_full_lattice)
+        self.assertEqual(layout.shape, (side, side, side))
+        self.assertEqual(layout.position_digit_axes, (2, 0, 1))
+        self.assertEqual(layout.dense_indices.size, 0)
+        dense, _, wraps = layout.encode_field(
+            positions["x"],
+            "x",
+            position_residual=True,
+        )
+        restored = layout.decode_field(
+            dense,
+            "x",
+            POSITION_RESIDUAL_TRANSFORM,
+            np.dtype("float32"),
+            wraps,
+        )
+        np.testing.assert_allclose(
+            restored,
+            positions["x"],
+            atol=1e-7,
+            rtol=0,
+        )
+
+        from_metadata = lattice_layout_from_metadata(
+            None,
+            layout.manifest_metadata(),
+        )
+        self.assertTrue(from_metadata.implicit_full_lattice)
 
 
 if __name__ == "__main__":

@@ -313,6 +313,7 @@ class BlockwiseLCPNativeRoundtripTests(unittest.TestCase):
                 "0.01",
                 "--vel-abs-eb",
                 "0.01",
+                "--metrics",
                 "--force",
             ]
             stdout = StringIO()

@@ -12,7 +12,7 @@ import numpy as np
 import main as particle_main
 from src.cli import AVAILABLE_COMPRESSORS, build_parser
 from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
-from src.compress import CompressionSettings
+from src.compress import CompressionSettings, _inverse_dense_id_order
 from src.compress import compress as compress_pipeline
 from src.compress import (
     compress_chunked_lcp_triplet,
@@ -30,6 +30,12 @@ from src.decompress import (
     recombine_h5,
     velocity_compressor_from_manifest,
 )
+from src.lattice_layout import (
+    DenseLatticeLayout,
+    IDENTITY_TRANSFORM,
+    LATTICE_LAYOUT_NAME,
+    lattice_layout_from_metadata,
+)
 from src.metrics import (
     comparison_order_for_reconstructed_rows,
     print_component_summary,
@@ -44,6 +50,181 @@ FIELDS = {
 
 
 class CompressionOrderingTests(unittest.TestCase):
+    def test_dense_id_inverse_permutation_avoids_comparison_sort(self) -> None:
+        ids = np.array([3, 0, 2, 1], dtype=np.uint64)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "ids.raw"
+            ids.tofile(path)
+            order = _inverse_dense_id_order(
+                str(path),
+                ids.dtype,
+                ids.size,
+                0,
+            )
+
+        np.testing.assert_array_equal(order, np.array([1, 3, 2, 0]))
+
+    def test_merged_complete_lattice_uses_dense_fast_paths(self) -> None:
+        side = 3
+        count = side**3
+        shuffled_ids = np.array(
+            [7, 0, 19, 3, 22, 12, 1, 26, 8, 14, 5, 21, 10, 2,
+             18, 6, 25, 11, 4, 17, 9, 23, 13, 20, 15, 24, 16],
+            dtype=np.uint64,
+        )
+        high = shuffled_ids // (side * side)
+        middle = (shuffled_ids // side) % side
+        low = shuffled_ids % side
+        source = {
+            "id": shuffled_ids,
+            "x": ((low + 0.125) / side).astype(np.float32),
+            "y": ((high + 0.25) / side).astype(np.float32),
+            "z": ((middle + 0.375) / side).astype(np.float32),
+            "vx": shuffled_ids.astype(np.float32),
+            "vy": shuffled_ids.astype(np.float32) + 1,
+            "vz": shuffled_ids.astype(np.float32) + 2,
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_dir = root / "preprocessed"
+            compressed_dir = root / "compressed"
+            raw_dir.mkdir()
+            compressed_dir.mkdir()
+            raw_paths = {}
+            for logical, values in source.items():
+                path = raw_dir / f"{logical}.raw"
+                values.tofile(path)
+                raw_paths[logical] = str(path)
+
+            artifacts = {"id": str(compressed_dir / "id.pco")}
+            artifacts.update(
+                {
+                    logical: str(compressed_dir / f"{logical}.szo")
+                    for logical in (*POSITION_FIELDS, *VELOCITY_FIELDS)
+                }
+            )
+            position_stats = {
+                logical: {
+                    "min_in_lcp_units": float(source[logical].min()),
+                    "max_in_lcp_units": float(source[logical].max()),
+                }
+                for logical in POSITION_FIELDS
+            }
+            manifest = {
+                "count": count,
+                "fields": {
+                    logical: {"dtype": str(values.dtype)}
+                    for logical, values in source.items()
+                },
+                "field_error_bounds": {
+                    logical: {
+                        "abs": 0.01,
+                        "compressor_abs": 0.01,
+                    }
+                    for logical in (*POSITION_FIELDS, *VELOCITY_FIELDS)
+                },
+                "root_attrs": {
+                    "nsidemesh": {
+                        "dtype": "int32",
+                        "shape": [],
+                        "value": side,
+                    }
+                },
+                "preprocess": {"positions": position_stats},
+                "artifacts": {
+                    "preprocessed": raw_paths,
+                    "compressed": artifacts,
+                },
+                "compressed_fields": {},
+                "sizes": {"selected_original_payload_bytes": count * 32},
+                "merge": {
+                    "enabled": True,
+                    "id_overlap_check": {
+                        "status": "passed",
+                        "count": count,
+                        "minimum": 0,
+                        "maximum": count - 1,
+                    },
+                },
+            }
+            args = SimpleNamespace(
+                work_dir=str(root),
+                force=False,
+                lossless="pcodec",
+                pos_compressor="szo",
+                vel_compressor="szo",
+                vel_chunk_size=0,
+                vel_chunk_workers=0,
+                blockwise_ord=False,
+                sort=True,
+                lattice_layout=True,
+                lattice_min_occupancy=0.8,
+                lattice_axis_search=False,
+                field_workers=1,
+                metrics=False,
+            )
+            captured_ids = []
+
+            def fake_integer(
+                codec,
+                raw_path,
+                dtype,
+                compressed_path,
+                field_name,
+                value_count,
+                force,
+            ):
+                if field_name == "id":
+                    captured_ids.append(
+                        np.fromfile(raw_path, dtype=np.dtype(dtype))
+                    )
+                return {
+                    "field": field_name,
+                    "codec": codec,
+                    "dtype": dtype,
+                    "count": value_count,
+                }
+
+            def fake_jobs(self, jobs):
+                return [
+                    {
+                        "field": job.field_name,
+                        "codec": job.codec,
+                        "dtype": job.dtype,
+                        "count": job.count,
+                    }
+                    for job in jobs
+                ]
+
+            with patch(
+                "src.compress.compress_integer_raw",
+                side_effect=fake_integer,
+            ), patch(
+                "src.compress.CompressionPipeline._compress_jobs",
+                new=fake_jobs,
+            ), patch("src.compress.update_compressed_size_metrics"):
+                result = compress_pipeline(
+                    args,
+                    manifest,
+                    raw_paths,
+                    SimpleNamespace(lcp=Path("lcp")),
+                )
+
+            np.testing.assert_array_equal(
+                captured_ids[0],
+                np.arange(count, dtype=np.uint64),
+            )
+            self.assertEqual(
+                result["runtime"]["canonical_order_algorithm"],
+                "dense_inverse_permutation",
+            )
+            self.assertTrue(result["runtime"]["complete_lattice_fast_path"])
+            self.assertTrue(
+                result["lattice_layout"]["implicit_full_lattice"]
+            )
+            self.assertNotIn("id_sort_order", raw_paths)
+
     def test_velocity_lcp_requires_lcp_positions_at_compression_entry(
         self,
     ) -> None:
@@ -149,6 +330,237 @@ class CompressionOrderingTests(unittest.TestCase):
                 self.assertEqual(settings.position_codec, position_codec)
                 self.assertEqual(settings.velocity_codec, velocity_codec)
 
+    def test_native_positions_enable_velocity_only_lattice_layout(self) -> None:
+        for position_codec in ("lcp", "xnyzip"):
+            for velocity_codec in ("sz3", "szo"):
+                with self.subTest(
+                    position_codec=position_codec,
+                    velocity_codec=velocity_codec,
+                ):
+                    settings = CompressionSettings.from_args(
+                        SimpleNamespace(
+                            pos_compressor=position_codec,
+                            vel_compressor=velocity_codec,
+                            vel_chunk_size=0,
+                            vel_chunk_workers=0,
+                            force=False,
+                            sort=False,
+                            lattice_layout=True,
+                        )
+                    )
+                    self.assertTrue(settings.lattice_layout)
+                    self.assertTrue(settings.lattice_velocity_only)
+                    self.assertFalse(settings.sort_by_id)
+
+    def test_lcp_position_order_drives_velocity_only_lattice(self) -> None:
+        count = 5
+        position_order = np.array([2, 0, 4, 1, 3], dtype=np.int32)
+        source = {
+            "x": np.array([0.1, 0.3, 0.5, 0.7, 0.9], dtype=np.float32),
+            "y": np.array([0.2, 0.4, 0.6, 0.8, 0.0], dtype=np.float32),
+            "z": np.array([0.9, 0.7, 0.5, 0.3, 0.1], dtype=np.float32),
+            "id": np.array([3, 0, 4, 1, 2], dtype=np.uint64),
+            "vx": np.array([1, 2, 3, 4, 5], dtype=np.float32),
+            "vy": np.array([6, 7, 8, 9, 10], dtype=np.float32),
+            "vz": np.array([11, 12, 13, 14, 15], dtype=np.float32),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            preprocessed = root / "preprocessed"
+            compressed = root / "compressed"
+            preprocessed.mkdir()
+            compressed.mkdir()
+            raw_paths = {}
+            for logical, values in source.items():
+                path = preprocessed / f"{logical}.raw"
+                values.tofile(path)
+                raw_paths[logical] = str(path)
+
+            artifacts = {
+                "positions": str(compressed / "positions.lcp"),
+                "id": str(compressed / "id.pco"),
+                **{
+                    logical: str(compressed / f"{logical}.szo")
+                    for logical in VELOCITY_FIELDS
+                },
+            }
+            manifest = {
+                "count": count,
+                "fields": {
+                    logical: {"dtype": str(values.dtype)}
+                    for logical, values in source.items()
+                },
+                "error_bounds": {"positions_lcp_abs": 0.01},
+                "field_error_bounds": {
+                    logical: {"abs": 0.01}
+                    for logical in VELOCITY_FIELDS
+                },
+                "root_attrs": {
+                    "nsidemesh": {
+                        "dtype": "int32",
+                        "shape": [],
+                        "value": count,
+                    }
+                },
+                "artifacts": {
+                    "preprocessed": raw_paths,
+                    "compressed": artifacts,
+                },
+                "compressed_fields": {},
+                "sizes": {"selected_original_payload_bytes": count * 32},
+            }
+            args = SimpleNamespace(
+                work_dir=str(root),
+                force=False,
+                lossless="pcodec",
+                pos_compressor="lcp",
+                vel_compressor="szo",
+                vel_chunk_size=0,
+                vel_chunk_workers=0,
+                blockwise_ord=False,
+                sort=False,
+                lattice_layout=True,
+                lattice_min_occupancy=0.8,
+                lattice_axis_search=False,
+                field_workers=1,
+                metrics=False,
+            )
+            captured = {"lattice_inputs": {}}
+
+            def fake_run_command(argv):
+                Path(argv[argv.index("-z") + 1]).write_bytes(b"lcp")
+                position_order.tofile(argv[-1])
+
+            def fake_integer(
+                codec,
+                raw_path,
+                dtype,
+                compressed_path,
+                field_name,
+                value_count,
+                force,
+            ):
+                captured[field_name] = np.fromfile(
+                    raw_path,
+                    dtype=np.dtype(dtype),
+                )
+                Path(compressed_path).write_bytes(b"integer")
+                return {
+                    "field": field_name,
+                    "codec": codec,
+                    "dtype": dtype,
+                    "count": value_count,
+                }
+
+            def fake_infer(ids, positions, side, min_occupancy):
+                captured["inference_ids"] = ids.copy()
+                captured["inference_positions"] = {
+                    logical: values.copy()
+                    for logical, values in positions.items()
+                }
+                dense_indices = ids.astype(np.intp, copy=True)
+                return DenseLatticeLayout(
+                    side=side,
+                    id_base=0,
+                    starts=(0, 0, 0),
+                    shape=(1, 1, count),
+                    position_digit_axes=(0, 1, 2),
+                    count=count,
+                    dense_indices=dense_indices,
+                    coordinates=(
+                        np.zeros(count, dtype=np.int32),
+                        np.zeros(count, dtype=np.int32),
+                        dense_indices.astype(np.int32),
+                    ),
+                    dense_order=np.argsort(dense_indices, kind="stable"),
+                    missing_indices=np.empty(0, dtype=np.intp),
+                )
+
+            def fake_jobs(pipeline, jobs):
+                fields = []
+                for job in jobs:
+                    captured["lattice_inputs"][job.field_name] = np.fromfile(
+                        job.raw_path,
+                        dtype=np.dtype(job.dtype),
+                    )
+                    fields.append(
+                        {
+                            "field": job.field_name,
+                            "codec": job.codec,
+                            "dtype": job.dtype,
+                            "count": job.count,
+                        }
+                    )
+                return fields
+
+            with patch(
+                "src.lcp_codec.run_command",
+                side_effect=fake_run_command,
+            ), patch(
+                "src.compress.compress_integer_raw",
+                side_effect=fake_integer,
+            ), patch(
+                "src.compress.infer_dense_lattice_layout",
+                side_effect=fake_infer,
+            ), patch(
+                "src.compress.CompressionPipeline._compress_jobs",
+                new=fake_jobs,
+            ), patch("src.compress.update_compressed_size_metrics"):
+                result = compress_pipeline(
+                    args,
+                    manifest,
+                    raw_paths,
+                    SimpleNamespace(lcp=Path("lcp")),
+                )
+
+            ordered_ids = source["id"][position_order]
+            np.testing.assert_array_equal(
+                captured["inference_ids"],
+                ordered_ids,
+            )
+            np.testing.assert_array_equal(captured["id"], ordered_ids)
+            for logical in POSITION_FIELDS:
+                np.testing.assert_array_equal(
+                    captured["inference_positions"][logical],
+                    source[logical][position_order],
+                )
+            for logical in VELOCITY_FIELDS:
+                ordered_velocity = source[logical][position_order]
+                dense_velocity = np.empty(count, dtype=np.float32)
+                dense_velocity[ordered_ids] = ordered_velocity
+                np.testing.assert_array_equal(
+                    captured["lattice_inputs"][logical],
+                    dense_velocity,
+                )
+                restored = lattice_layout_from_metadata(
+                    ordered_ids,
+                    result["lattice_layout"],
+                ).decode_field(
+                    dense_velocity,
+                    logical,
+                    IDENTITY_TRANSFORM,
+                    np.dtype("float32"),
+                )
+                np.testing.assert_array_equal(restored, ordered_velocity)
+                self.assertEqual(
+                    result["compressed_fields"][logical]["spatial_layout"],
+                    LATTICE_LAYOUT_NAME,
+                )
+            self.assertEqual(
+                result["compressed_fields"]["positions"]["codec"],
+                "lcp",
+            )
+            self.assertNotIn("x", result["compressed_fields"])
+            self.assertEqual(
+                result["lattice_layout"]["field_scope"],
+                "velocities",
+            )
+            self.assertEqual(
+                result["ordering"]["velocities"]["mapping"],
+                "lcp_position_sorted",
+            )
+
     def test_compress_reorders_id_and_sz3_velocities_and_omits_position_order(self) -> None:
         count = 5
         position_order = np.array([2, 0, 4, 1, 3], dtype=np.int32)
@@ -156,7 +568,7 @@ class CompressionOrderingTests(unittest.TestCase):
             "x": np.array([10, 20, 30, 40, 50], dtype=np.float32),
             "y": np.array([11, 21, 31, 41, 51], dtype=np.float32),
             "z": np.array([12, 22, 32, 42, 52], dtype=np.float32),
-            "id": np.array([901, 117, 502, 330, 774], dtype=np.uint64),
+            "id": np.array([3, 0, 4, 1, 2], dtype=np.uint64),
             "vx": np.array([1, 2, 3, 4, 5], dtype=np.float32),
             "vy": np.array([6, 7, 8, 9, 10], dtype=np.float32),
             "vz": np.array([11, 12, 13, 14, 15], dtype=np.float32),
@@ -198,6 +610,15 @@ class CompressionOrderingTests(unittest.TestCase):
                 },
                 "compressed_fields": {},
                 "sizes": {"selected_original_payload_bytes": 160},
+                "merge": {
+                    "enabled": True,
+                    "id_overlap_check": {
+                        "status": "passed",
+                        "count": count,
+                        "minimum": 0,
+                        "maximum": count - 1,
+                    },
+                },
             }
             args = SimpleNamespace(
                 work_dir=str(root),
@@ -522,6 +943,25 @@ class RecombinationTests(unittest.TestCase):
                     np.testing.assert_array_equal(h5[logical][:], values[velocity_order])
 
 class SZoPipelineTests(unittest.TestCase):
+    def test_roundtrip_metrics_and_field_workers_are_explicit_options(
+        self,
+    ) -> None:
+        default_argv = ["roundtrip", "input.h5"]
+        default_args = build_parser(default_argv).parse_args(default_argv)
+        self.assertFalse(default_args.metrics)
+        self.assertEqual(default_args.field_workers, 0)
+
+        argv = [
+            "roundtrip",
+            "input.h5",
+            "--metrics",
+            "--field-workers",
+            "3",
+        ]
+        args = build_parser(argv).parse_args(argv)
+        self.assertTrue(args.metrics)
+        self.assertEqual(args.field_workers, 3)
+
     def test_cli_exposes_szo_only_as_a_lossy_compressor(self) -> None:
         argv = [
             "roundtrip",

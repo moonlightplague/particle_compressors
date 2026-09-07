@@ -1,9 +1,11 @@
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+import importlib.util
 import math
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import h5py
@@ -16,6 +18,7 @@ from src.batch import (
     discover_h5_files,
     print_batch_summary,
 )
+from src.merge import merge_h5_files
 from src.runtime import read_json
 
 
@@ -305,6 +308,253 @@ class BatchPipelineTests(unittest.TestCase):
                 batch["sizes"]["payload_compression_ratio"]
             )
 
+    def test_merge_preprocesses_directory_as_one_disjoint_particle_set(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            inputs = root / "inputs"
+            outputs = root / "outputs"
+            inputs.mkdir()
+            self._write_particle_h5(inputs / "b.h5", 4, rank=1)
+            self._write_particle_h5(inputs / "a.h5", 0, rank=0)
+
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = particle_main.main(
+                    [
+                        "preprocess",
+                        str(inputs),
+                        "--merge",
+                        "--work-dir",
+                        str(outputs),
+                        "--force",
+                    ]
+                )
+
+            self.assertEqual(result, 0, stderr.getvalue())
+            self.assertIn("merged_h5 =", stdout.getvalue())
+            self.assertFalse((outputs / "batch_metrics.json").exists())
+            manifest = read_json(outputs / "manifest.json")
+            self.assertEqual(manifest["count"], 8)
+            self.assertEqual(manifest["merge"]["source_file_count"], 2)
+            self.assertEqual(
+                manifest["merge"]["id_overlap_check"]["status"],
+                "passed",
+            )
+            self.assertIn("merge_wall_seconds", manifest["timing"])
+            with h5py.File(outputs / "merged" / "merged.h5", "r") as merged:
+                np.testing.assert_array_equal(
+                    merged["id"][:],
+                    np.arange(8, dtype=np.uint64),
+                )
+                self.assertEqual(int(merged.attrs["npart"]), 8)
+                self.assertEqual(int(merged.attrs["npart_total"]), 8)
+                self.assertEqual(int(merged.attrs["rank"]), 0)
+                self.assertEqual(int(merged.attrs["proc_size"]), 1)
+
+    def test_merge_rejects_overlapping_ids_without_publishing_h5(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            inputs = root / "inputs"
+            outputs = root / "outputs"
+            inputs.mkdir()
+            self._write_particle_h5(inputs / "a.h5", 0, rank=0)
+            self._write_particle_h5(inputs / "b.h5", 3, rank=1)
+
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                result = particle_main.main(
+                    [
+                        "preprocess",
+                        str(inputs),
+                        "--merge",
+                        "--work-dir",
+                        str(outputs),
+                        "--force",
+                    ]
+                )
+
+            self.assertEqual(result, 2)
+            self.assertIn(
+                "overlapping or duplicate particle ID 3",
+                stderr.getvalue(),
+            )
+            self.assertFalse((outputs / "merged" / "merged.h5").exists())
+            self.assertFalse(
+                (outputs / "merged" / ".merged.h5.partial").exists()
+            )
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("pcodec") is not None
+        and importlib.util.find_spec("pyszo") is not None,
+        "pcodec and pyszo are required for the merged roundtrip smoke test",
+    )
+    def test_merged_roundtrip_writes_optional_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            inputs = root / "inputs"
+            outputs = root / "outputs"
+            inputs.mkdir()
+            self._write_particle_h5(inputs / "a.h5", 0, rank=0)
+            self._write_particle_h5(inputs / "b.h5", 4, rank=1)
+
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                result = particle_main.main(
+                    [
+                        "roundtrip",
+                        str(inputs),
+                        "--merge",
+                        "--metrics",
+                        "--work-dir",
+                        str(outputs),
+                        "--pos-compressor",
+                        "szo",
+                        "--vel-compressor",
+                        "szo",
+                        "--field-workers",
+                        "2",
+                        "--force",
+                    ]
+                )
+
+            self.assertEqual(result, 0, stderr.getvalue())
+            metrics = read_json(outputs / "metrics.json")
+            manifest = read_json(outputs / "manifest.json")
+            self.assertEqual(manifest["merge"]["source_file_count"], 2)
+            self.assertEqual(metrics["runtime"]["compression_field_workers"], 2)
+            self.assertIn("roundtrip_wall_seconds", metrics["timing"])
+            self.assertIn("merge_wall_seconds", metrics["timing"])
+
+    def test_sparse_id_overlap_check_has_exact_disk_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            inputs = root / "inputs"
+            inputs.mkdir()
+            self._write_particle_h5(inputs / "a.h5", 0, rank=0)
+            self._write_particle_h5(inputs / "b.h5", 4, rank=1)
+
+            with patch("src.merge.MAX_BITMAP_BYTES", 0), patch(
+                "src.merge.MAX_IN_MEMORY_ID_BYTES",
+                0,
+            ), patch("src.merge.PARTITION_TARGET_BYTES", 16):
+                result = merge_h5_files(
+                    discover_h5_files(inputs),
+                    root / "merged.h5",
+                    force=False,
+                    input_directory=inputs,
+                )
+
+            self.assertEqual(
+                result.metadata["id_overlap_check"]["algorithm"],
+                "disk_partitioned_sort",
+            )
+
+    def test_roundtrip_skips_detailed_metrics_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            args = SimpleNamespace(
+                command="roundtrip",
+                work_dir=str(root),
+                input_h5=str(root / "input.h5"),
+                clean_raw=False,
+                force=True,
+                metrics=False,
+            )
+            tools = SimpleNamespace()
+            final_manifest = {"timing": {}}
+
+            with patch.object(
+                particle_main, "preprocess", return_value=({}, {}, tools)
+            ), patch.object(
+                particle_main, "compress", return_value={}
+            ), patch.object(
+                particle_main, "decompress", return_value=final_manifest
+            ), patch.object(
+                particle_main, "compute_metrics"
+            ) as compute, patch.object(
+                particle_main, "update_compressed_size_metrics"
+            ) as update_sizes, patch.object(
+                particle_main, "write_json"
+            ) as write, patch.object(
+                particle_main.PipelineApplication,
+                "_print_roundtrip_summary",
+            ):
+                particle_main.PipelineApplication(args).run()
+
+            compute.assert_not_called()
+            update_sizes.assert_called_once_with(final_manifest, root)
+            self.assertIn("roundtrip_wall_seconds", final_manifest["timing"])
+            self.assertEqual(write.call_args.args[0], root / "manifest.json")
+
+    def test_roundtrip_metrics_flag_retains_detailed_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_h5 = root / "input.h5"
+            reconstructed_h5 = root / "reconstructed.h5"
+            args = SimpleNamespace(
+                command="roundtrip",
+                work_dir=str(root),
+                input_h5=str(input_h5),
+                clean_raw=False,
+                force=True,
+                metrics=True,
+            )
+            tools = SimpleNamespace()
+            final_manifest = {
+                "input_h5": str(input_h5),
+                "artifacts": {"reconstructed_h5": str(reconstructed_h5)},
+            }
+            detailed_metrics = {"timing": {}}
+
+            with patch.object(
+                particle_main, "preprocess", return_value=({}, {}, tools)
+            ), patch.object(
+                particle_main, "compress", return_value={}
+            ), patch.object(
+                particle_main, "decompress", return_value=final_manifest
+            ), patch.object(
+                particle_main, "compute_metrics", return_value=detailed_metrics
+            ) as compute, patch.object(
+                particle_main, "write_json"
+            ) as write, patch.object(
+                particle_main, "print_summary"
+            ), patch.object(
+                particle_main.PipelineApplication,
+                "_print_runtime_summary",
+            ):
+                particle_main.PipelineApplication(args).run()
+
+            compute.assert_called_once_with(
+                input_h5,
+                reconstructed_h5,
+                final_manifest,
+            )
+            self.assertIn(
+                "roundtrip_wall_seconds",
+                detailed_metrics["timing"],
+            )
+            self.assertEqual(write.call_args.args[0], root / "metrics.json")
+
+    def test_batch_roundtrip_report_respects_metrics_flag(self) -> None:
+        args = SimpleNamespace(
+            command="roundtrip",
+            work_dir="/tmp/example",
+            metrics=False,
+        )
+        self.assertEqual(
+            particle_main._file_report_path(args),
+            Path("/tmp/example/manifest.json"),
+        )
+        args.metrics = True
+        self.assertEqual(
+            particle_main._file_report_path(args),
+            Path("/tmp/example/metrics.json"),
+        )
+
     @staticmethod
     def _result(
         name: str,
@@ -335,8 +585,16 @@ class BatchPipelineTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _write_particle_h5(path: Path, offset: int) -> None:
+    def _write_particle_h5(
+        path: Path,
+        offset: int,
+        rank: int = 0,
+    ) -> None:
         with h5py.File(path, "w") as h5:
+            h5.attrs["npart"] = np.int32(4)
+            h5.attrs["npart_total"] = np.uint64(8)
+            h5.attrs["rank"] = np.int32(rank)
+            h5.attrs["proc_size"] = np.int32(2)
             h5.create_dataset(
                 "id",
                 data=np.arange(offset, offset + 4, dtype=np.uint64),

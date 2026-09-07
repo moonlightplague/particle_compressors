@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd tools/LCP
-cmake -B build -DCMAKE_INSTALL_PREFIX:PATH=build
+cmake -B build -DCMAKE_INSTALL_PREFIX:PATH=.
 cd build
 make lcp
 make install
