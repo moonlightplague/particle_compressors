@@ -10,7 +10,7 @@ import h5py
 import numpy as np
 
 from src.cli import AVAILABLE_COMPRESSORS, build_parser
-from src.compress import CompressionSettings, compress
+from src.compress import CompressionSettings, _inverse_dense_id_order, compress
 from src.hdf5_io import recombine_h5
 from src.manifest import lossy_compressor_from_manifest
 from src.metrics import (
@@ -161,6 +161,20 @@ class CompressorSelectionTests(unittest.TestCase):
 
 
 class StableSortingTests(unittest.TestCase):
+    def test_dense_id_inverse_permutation_avoids_comparison_sort(self) -> None:
+        ids = np.array([3, 0, 2, 1], dtype=np.uint64)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "ids.raw"
+            ids.tofile(path)
+            order = _inverse_dense_id_order(
+                str(path),
+                ids.dtype,
+                ids.size,
+                0,
+            )
+
+        np.testing.assert_array_equal(order, np.array([1, 3, 2, 0]))
+
     def test_sort_applies_one_stable_id_order_to_every_field(self) -> None:
         count = 5
         source = {

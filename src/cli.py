@@ -74,20 +74,20 @@ def build_parser(
     _add_pipeline_command(
         commands,
         "preprocess",
-        "Export compressor-ready raw fields and create a manifest.",
+        "Export compressor-ready fields and create a manifest.",
         defaults,
     )
     _add_pipeline_command(
         commands,
         "compress",
-        "Preprocess and compress an HDF5 particle file.",
+        "Preprocess and compress a particle input.",
         defaults,
     )
     _add_decompress_command(commands)
     _add_pipeline_command(
         commands,
         "roundtrip",
-        "Compress, reconstruct, and report compression ratios and runtime.",
+        "Compress and reconstruct particle input, then report results.",
         defaults,
     )
     return parser
@@ -236,7 +236,10 @@ def _add_compression_arguments(
 ) -> None:
     parser.add_argument(
         "input_h5",
-        help="Input HDF5 particle file or directory of .h5 files.",
+        help=(
+            "Input HDF5 particle file, native dat_* particle file with a "
+            "matching cfg_* header, or a directory containing either."
+        ),
     )
     parser.add_argument(
         "--work-dir",

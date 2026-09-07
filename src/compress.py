@@ -1,8 +1,9 @@
 """Compression-stage orchestration for fieldwise lossy codecs."""
 
 import argparse
+import math
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,6 +17,7 @@ from src.lattice_layout import (
     LATTICE_LAYOUT_NAME,
     LatticeLayoutUnavailable,
     POSITION_RESIDUAL_TRANSFORM,
+    infer_complete_lattice_layout,
     infer_dense_lattice_layout,
     position_transform_guard,
 )
@@ -137,19 +139,30 @@ class CompressionPipeline:
         self.artifacts = manifest["artifacts"]["compressed"]
         self.compressed_fields = manifest["compressed_fields"]
         self.count = int(manifest["count"])
+        self.dense_merged_id_base = self._dense_merged_id_base()
         self.lattice: Optional[DenseLatticeLayout] = None
         self._lattice_ordered_values: Dict[str, np.ndarray] = {}
         self.field_workers = resolve_field_workers(
             self.settings.field_workers,
         )
         self.lossy_fields_seconds = 0.0
+        self.canonical_order_seconds = 0.0
+        self.lattice_prepare_seconds = 0.0
+        self.id_compress_seconds = 0.0
+        self.lattice_field_prepare_seconds = 0.0
 
     def run(self) -> Dict[str, Any]:
         started = time.perf_counter()
+        stage_started = time.perf_counter()
         canonical_order = self._select_canonical_order()
+        self.canonical_order_seconds = time.perf_counter() - stage_started
+        stage_started = time.perf_counter()
         self._prepare_lattice_layout(canonical_order)
+        self.lattice_prepare_seconds = time.perf_counter() - stage_started
         self._record_ordering(canonical_order)
+        stage_started = time.perf_counter()
         self._compress_id(canonical_order)
+        self.id_compress_seconds = time.perf_counter() - stage_started
         if self.lattice is None:
             self._compress_positions(canonical_order)
             self._compress_velocities(canonical_order)
@@ -162,21 +175,44 @@ class CompressionPipeline:
         if not self.settings.sort_by_id:
             return CanonicalOrder()
         id_dtype = np.dtype(self.manifest["fields"]["id"]["dtype"])
-        particle_ids = read_raw(
-            self.raw_paths["id"],
-            id_dtype,
-            self.count,
+        if self.dense_merged_id_base is None:
+            particle_ids = read_raw(
+                self.raw_paths["id"],
+                id_dtype,
+                self.count,
+            )
+            order = np.argsort(particle_ids, kind="stable")
+            algorithm = "stable_argsort"
+        else:
+            order = _inverse_dense_id_order(
+                self.raw_paths["id"],
+                id_dtype,
+                self.count,
+                self.dense_merged_id_base,
+            )
+            algorithm = "dense_inverse_permutation"
+
+        artifact = None
+        artifact_dtype = None
+        persist_order = not (
+            self.dense_merged_id_base is not None
+            and not bool(getattr(self.args, "metrics", False))
         )
-        order = np.argsort(particle_ids, kind="stable")
-        order_path = self.preprocessed_dir / "id_sort_order.i64.raw"
-        require_output_path(order_path, self.settings.force)
-        order.astype(np.int64, copy=False).tofile(order_path)
-        self.raw_paths["id_sort_order"] = str(order_path)
+        if persist_order:
+            order_path = self.preprocessed_dir / "id_sort_order.i64.raw"
+            require_output_path(order_path, self.settings.force)
+            order.astype(np.int64, copy=False).tofile(order_path)
+            self.raw_paths["id_sort_order"] = str(order_path)
+            artifact = "id_sort_order"
+            artifact_dtype = "int64"
+        self.manifest.setdefault("runtime", {})[
+            "canonical_order_algorithm"
+        ] = algorithm
         return CanonicalOrder(
             mapping="id_sorted",
             field="id",
-            artifact="id_sort_order",
-            artifact_dtype="int64",
+            artifact=artifact,
+            artifact_dtype=artifact_dtype,
             values=order.astype(np.intp, copy=False),
         )
 
@@ -206,6 +242,19 @@ class CompressionPipeline:
             return
         try:
             side = int(side_payload["value"])
+            if self._can_use_complete_lattice_fast_path(side):
+                self.lattice = self._prepare_complete_lattice_layout(
+                    order,
+                    side,
+                )
+                self.manifest.setdefault("runtime", {})[
+                    "complete_lattice_fast_path"
+                ] = True
+                self.manifest["lattice_layout"] = {
+                    **common,
+                    **self.lattice.manifest_metadata(),
+                }
+                return
             id_dtype = np.dtype(self.manifest["fields"]["id"]["dtype"])
             sorted_ids = read_raw(
                 self.raw_paths["id"],
@@ -246,6 +295,91 @@ class CompressionPipeline:
             **common,
             **self.lattice.manifest_metadata(),
         }
+
+    def _dense_merged_id_base(self) -> Optional[int]:
+        merge = self.manifest.get("merge", {})
+        if not isinstance(merge, dict) or not merge.get("enabled", False):
+            return None
+        overlap = merge.get("id_overlap_check", {})
+        if not isinstance(overlap, dict) or overlap.get("status") != "passed":
+            return None
+        try:
+            count = int(overlap["count"])
+            minimum = int(overlap["minimum"])
+            maximum = int(overlap["maximum"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+        if count != self.count or maximum - minimum + 1 != count:
+            return None
+        return minimum
+
+    def _can_use_complete_lattice_fast_path(self, side: int) -> bool:
+        if self.dense_merged_id_base not in (0, 1):
+            return False
+        if side <= 0 or side**3 != self.count:
+            return False
+        position_stats = self.manifest.get("preprocess", {}).get(
+            "positions",
+            {},
+        )
+        for logical in POSITION_FIELDS:
+            stats = position_stats.get(logical, {})
+            try:
+                minimum = float(stats["min_in_compressor_units"])
+                maximum = float(stats["max_in_compressor_units"])
+            except (KeyError, TypeError, ValueError, OverflowError):
+                return False
+            if (
+                not math.isfinite(minimum)
+                or not math.isfinite(maximum)
+                or minimum < 0.0
+                or maximum >= 1.0
+            ):
+                return False
+        return True
+
+    def _prepare_complete_lattice_layout(
+        self,
+        order: CanonicalOrder,
+        side: int,
+    ) -> DenseLatticeLayout:
+        if order.values is None or self.dense_merged_id_base is None:
+            raise LatticeLayoutUnavailable(
+                "complete lattice optimization requires a dense ID order"
+            )
+        sample_count = min(self.count, 200_000)
+        sample_indices = (
+            np.arange(self.count, dtype=np.intp)
+            if sample_count == self.count
+            else np.linspace(
+                0,
+                self.count - 1,
+                sample_count,
+                dtype=np.intp,
+            )
+        )
+        source_indices = order.values[sample_indices]
+        id_dtype = np.dtype(self.manifest["fields"]["id"]["dtype"])
+        sampled_ids = (
+            sample_indices.astype(np.uint64)
+            + np.uint64(self.dense_merged_id_base)
+        ).astype(id_dtype, copy=False)
+        sampled_positions = {}
+        for logical in POSITION_FIELDS:
+            source = np.memmap(
+                self.raw_paths[logical],
+                dtype=np.dtype("float32"),
+                mode="r",
+                shape=(self.count,),
+            )
+            sampled_positions[logical] = np.asarray(source[source_indices])
+        return infer_complete_lattice_layout(
+            sampled_ids,
+            sampled_positions,
+            side,
+            self.dense_merged_id_base,
+            self.dense_merged_id_base + self.count - 1,
+        )
 
     def _record_ordering(self, order: CanonicalOrder) -> None:
         self.manifest["ordering"] = {
@@ -315,90 +449,97 @@ class CompressionPipeline:
         order: CanonicalOrder,
     ) -> Tuple[List[LossyCompressionJob], List[Dict[str, Any]]]:
         assert self.lattice is not None
-        jobs: List[LossyCompressionJob] = []
-        field_updates: List[Dict[str, Any]] = []
-        for logical in POSITION_FIELDS:
-            values = self._ordered_values(logical, "float32", order)
-            requested_bound = float(
-                self.manifest["field_error_bounds"][logical][
-                    "compressor_abs"
-                ]
-            )
+        prepared = [
+            self._prepare_lattice_position(logical, order)
+            for logical in POSITION_FIELDS
+        ]
+        return (
+            [job for job, _ in prepared],
+            [updates for _, updates in prepared],
+        )
+
+    def _prepare_lattice_position(
+        self,
+        logical: str,
+        order: CanonicalOrder,
+    ) -> Tuple[LossyCompressionJob, Dict[str, Any]]:
+        assert self.lattice is not None
+        values = self._ordered_values(logical, "float32", order)
+        requested_bound = float(
+            self.manifest["field_error_bounds"][logical]["compressor_abs"]
+        )
+        dense, measured_error, wrap_offsets = self.lattice.encode_field(
+            values,
+            logical,
+            position_residual=True,
+        )
+        guard = position_transform_guard(values, measured_error)
+        transform = POSITION_RESIDUAL_TRANSFORM
+        compressor_bound = requested_bound - guard
+        if compressor_bound <= 0.0:
             dense, measured_error, wrap_offsets = self.lattice.encode_field(
                 values,
                 logical,
-                position_residual=True,
+                position_residual=False,
             )
-            guard = position_transform_guard(values, measured_error)
-            transform = POSITION_RESIDUAL_TRANSFORM
-            compressor_bound = requested_bound - guard
-            if compressor_bound <= 0.0:
-                dense, measured_error, wrap_offsets = self.lattice.encode_field(
-                    values,
-                    logical,
-                    position_residual=False,
-                )
-                guard = 0.0
-                compressor_bound = requested_bound
-                transform = IDENTITY_TRANSFORM
+            guard = 0.0
+            compressor_bound = requested_bound
+            transform = IDENTITY_TRANSFORM
 
-            dense_path = (
+        dense_path = (
+            self.preprocessed_dir
+            / f"{logical}.lattice.{dense.dtype.name}.raw"
+        )
+        require_output_path(dense_path, self.settings.force)
+        dense.tofile(dense_path)
+        self.raw_paths[f"{logical}_lattice"] = str(dense_path)
+        job = LossyCompressionJob(
+            self.settings.lossy_codec,
+            str(dense_path),
+            str(dense.dtype),
+            self.artifacts[logical],
+            logical,
+            self.count,
+            compressor_bound,
+            self.settings.force,
+            self.lattice.shape,
+            self.settings.lattice_axis_search,
+            relative_error_bound=self._relative_error_bound(logical),
+        )
+        updates: Dict[str, Any] = {
+            "spatial_layout": LATTICE_LAYOUT_NAME,
+            "lattice_transform": transform,
+            "requested_compressor_abs": requested_bound,
+            "transform_roundoff_guard": guard,
+            "transform_roundtrip_max_abs": measured_error,
+        }
+        if wrap_offsets is not None:
+            wrap_raw_path = (
                 self.preprocessed_dir
-                / f"{logical}.lattice.{dense.dtype.name}.raw"
+                / f"{logical}.lattice-wrap.int8.raw"
             )
-            require_output_path(dense_path, self.settings.force)
-            dense.tofile(dense_path)
-            self.raw_paths[f"{logical}_lattice"] = str(dense_path)
-            jobs.append(LossyCompressionJob(
-                self.settings.lossy_codec,
-                str(dense_path),
-                str(dense.dtype),
-                self.artifacts[logical],
-                logical,
+            require_output_path(wrap_raw_path, self.settings.force)
+            wrap_offsets.tofile(wrap_raw_path)
+            wrap_compressed_path = (
+                self.work_dir
+                / "compressed"
+                / f"{logical}.lattice-wrap.pco"
+            )
+            wrap_field = compress_integer_raw(
+                "pcodec",
+                str(wrap_raw_path),
+                "int8",
+                str(wrap_compressed_path),
+                f"{logical}_lattice_wrap",
                 self.count,
-                compressor_bound,
                 self.settings.force,
-                self.lattice.shape,
-                self.settings.lattice_axis_search,
-                relative_error_bound=self._relative_error_bound(logical),
-            ))
-            updates: Dict[str, Any] = {
-                "spatial_layout": LATTICE_LAYOUT_NAME,
-                "lattice_transform": transform,
-                "requested_compressor_abs": requested_bound,
-                "transform_roundoff_guard": guard,
-                "transform_roundtrip_max_abs": measured_error,
-            }
-            if wrap_offsets is not None:
-                wrap_raw_path = (
-                    self.preprocessed_dir
-                    / f"{logical}.lattice-wrap.int8.raw"
-                )
-                require_output_path(wrap_raw_path, self.settings.force)
-                wrap_offsets.tofile(wrap_raw_path)
-                wrap_compressed_path = (
-                    self.work_dir
-                    / "compressed"
-                    / f"{logical}.lattice-wrap.pco"
-                )
-                wrap_field = compress_integer_raw(
-                    "pcodec",
-                    str(wrap_raw_path),
-                    "int8",
-                    str(wrap_compressed_path),
-                    f"{logical}_lattice_wrap",
-                    self.count,
-                    self.settings.force,
-                )
-                updates["lattice_wrap_field"] = wrap_field
-                self.raw_paths[f"{logical}_lattice_wrap"] = str(
-                    wrap_raw_path
-                )
-                self.artifacts[f"{logical}_lattice_wrap"] = str(
-                    wrap_compressed_path
-                )
-            field_updates.append(updates)
-        return jobs, field_updates
+            )
+            updates["lattice_wrap_field"] = wrap_field
+            self.raw_paths[f"{logical}_lattice_wrap"] = str(wrap_raw_path)
+            self.artifacts[f"{logical}_lattice_wrap"] = str(
+                wrap_compressed_path
+            )
+        return job, updates
 
     def _compress_velocities(self, order: CanonicalOrder) -> None:
         jobs = []
@@ -430,44 +571,93 @@ class CompressionPipeline:
         order: CanonicalOrder,
     ) -> List[LossyCompressionJob]:
         assert self.lattice is not None
-        jobs: List[LossyCompressionJob] = []
-        for logical in VELOCITY_FIELDS:
-            dtype = self.manifest["fields"][logical]["dtype"]
-            values = self._ordered_values(logical, dtype, order)
-            dense, _, _ = self.lattice.encode_field(
-                values,
-                logical,
-                position_residual=False,
-            )
-            dense_path = (
-                self.preprocessed_dir
-                / f"{logical}.lattice.{dense.dtype.name}.raw"
-            )
-            require_output_path(dense_path, self.settings.force)
-            dense.tofile(dense_path)
-            self.raw_paths[f"{logical}_lattice"] = str(dense_path)
-            jobs.append(LossyCompressionJob(
-                self.settings.lossy_codec,
-                str(dense_path),
-                str(dense.dtype),
-                self.artifacts[logical],
-                logical,
-                self.count,
-                float(self.manifest["field_error_bounds"][logical]["abs"]),
-                self.settings.force,
-                self.lattice.shape,
-                self.settings.lattice_axis_search,
-                relative_error_bound=self._relative_error_bound(logical),
-            ))
-        return jobs
+        return [
+            self._prepare_lattice_velocity(logical, order)
+            for logical in VELOCITY_FIELDS
+        ]
+
+    def _prepare_lattice_velocity(
+        self,
+        logical: str,
+        order: CanonicalOrder,
+    ) -> LossyCompressionJob:
+        assert self.lattice is not None
+        dtype = self.manifest["fields"][logical]["dtype"]
+        values = self._ordered_values(logical, dtype, order)
+        dense, _, _ = self.lattice.encode_field(
+            values,
+            logical,
+            position_residual=False,
+        )
+        dense_path = (
+            self.preprocessed_dir
+            / f"{logical}.lattice.{dense.dtype.name}.raw"
+        )
+        require_output_path(dense_path, self.settings.force)
+        dense.tofile(dense_path)
+        self.raw_paths[f"{logical}_lattice"] = str(dense_path)
+        return LossyCompressionJob(
+            self.settings.lossy_codec,
+            str(dense_path),
+            str(dense.dtype),
+            self.artifacts[logical],
+            logical,
+            self.count,
+            float(self.manifest["field_error_bounds"][logical]["abs"]),
+            self.settings.force,
+            self.lattice.shape,
+            self.settings.lattice_axis_search,
+            relative_error_bound=self._relative_error_bound(logical),
+        )
 
     def _relative_error_bound(self, logical: str) -> Optional[float]:
         value = self.manifest["field_error_bounds"][logical].get("relative")
         return None if value is None else float(value)
 
     def _compress_lattice_fields(self, order: CanonicalOrder) -> None:
-        position_jobs, position_updates = self._prepare_lattice_positions(order)
-        velocity_jobs = self._prepare_lattice_velocities(order)
+        prepare_started = time.perf_counter()
+        assert self.lattice is not None
+        if self.lattice.implicit_full_lattice and self.field_workers > 1:
+            with ThreadPoolExecutor(
+                max_workers=min(self.field_workers, 6)
+            ) as executor:
+                position_futures = [
+                    executor.submit(
+                        self._prepare_lattice_position,
+                        logical,
+                        order,
+                    )
+                    for logical in POSITION_FIELDS
+                ]
+                velocity_futures = [
+                    executor.submit(
+                        self._prepare_lattice_velocity,
+                        logical,
+                        order,
+                    )
+                    for logical in VELOCITY_FIELDS
+                ]
+                position_prepared = [
+                    future.result() for future in position_futures
+                ]
+                velocity_jobs = [
+                    future.result() for future in velocity_futures
+                ]
+            position_jobs = [job for job, _ in position_prepared]
+            position_updates = [
+                updates for _, updates in position_prepared
+            ]
+            self.manifest.setdefault("runtime", {})[
+                "parallel_lattice_field_preparation"
+            ] = True
+        else:
+            position_jobs, position_updates = (
+                self._prepare_lattice_positions(order)
+            )
+            velocity_jobs = self._prepare_lattice_velocities(order)
+        self.lattice_field_prepare_seconds = (
+            time.perf_counter() - prepare_started
+        )
         results = self._compress_jobs(position_jobs + velocity_jobs)
         position_results = results[: len(POSITION_FIELDS)]
         velocity_results = results[len(POSITION_FIELDS) :]
@@ -523,12 +713,25 @@ class CompressionPipeline:
             raise RuntimeError("Canonical order metadata is incomplete.")
 
         data_type = np.dtype(dtype)
+        output_path = (
+            self.preprocessed_dir
+            / f"{logical}.{order.mapping}.{data_type.name}.raw"
+        )
+        if logical == "id" and self.dense_merged_id_base is not None:
+            ordered_path = _write_dense_ids(
+                output_path,
+                data_type,
+                self.count,
+                self.dense_merged_id_base,
+                self.settings.force,
+            )
+            self.raw_paths[f"{logical}_canonical_ordered"] = ordered_path
+            return ordered_path
         cached = self._lattice_ordered_values.pop(logical, None)
         ordered_path = _reorder_raw(
             source_path,
             dtype,
-            self.preprocessed_dir
-            / f"{logical}.{order.mapping}.{data_type.name}.raw",
+            output_path,
             self.count,
             order.values,
             self.settings.force,
@@ -546,7 +749,12 @@ class CompressionPipeline:
         cached = self._lattice_ordered_values.pop(logical, None)
         if cached is not None:
             return cached
-        values = read_raw(self.raw_paths[logical], np.dtype(dtype), self.count)
+        values = np.memmap(
+            self.raw_paths[logical],
+            dtype=np.dtype(dtype),
+            mode="r",
+            shape=(self.count,),
+        )
         if not order.is_reordered:
             return values
         if order.values is None:
@@ -556,6 +764,13 @@ class CompressionPipeline:
     def _finalize(self, started: float) -> None:
         self.manifest["format_version"] = 8 if self.lattice is not None else 3
         timing = self.manifest.setdefault("timing", {})
+        timing["canonical_order_wall_seconds"] = self.canonical_order_seconds
+        timing["lattice_prepare_wall_seconds"] = self.lattice_prepare_seconds
+        timing["id_compress_wall_seconds"] = self.id_compress_seconds
+        if self.lattice is not None:
+            timing["lattice_field_prepare_wall_seconds"] = (
+                self.lattice_field_prepare_seconds
+            )
         timing["lossy_fields_wall_seconds"] = self.lossy_fields_seconds
         timing["compress_wall_seconds"] = time.perf_counter() - started
         self.manifest.setdefault("runtime", {})[
@@ -580,13 +795,73 @@ def _reorder_raw(
 ) -> str:
     require_output_path(output_path, force)
     if values is None:
-        source = read_raw(raw_path, np.dtype(dtype), count)
+        source = np.memmap(
+            raw_path,
+            dtype=np.dtype(dtype),
+            mode="r",
+            shape=(count,),
+        )
         values = source[order]
     elif values.ndim != 1 or values.size != count:
         raise RuntimeError(
             f"Cached ordered field expected {count} values, got {values.shape}."
         )
     np.ascontiguousarray(values).tofile(output_path)
+    return str(output_path)
+
+
+def _inverse_dense_id_order(
+    raw_path: str,
+    dtype: np.dtype,
+    count: int,
+    id_base: int,
+) -> np.ndarray:
+    """Build sorted-row source indices in O(N) for a dense unique ID span."""
+
+    source = np.memmap(
+        raw_path,
+        dtype=dtype,
+        mode="r",
+        shape=(count,),
+    )
+    order = np.empty(count, dtype=np.intp)
+    chunk_rows = 4_194_304
+    for start in range(0, count, chunk_rows):
+        end = min(count, start + chunk_rows)
+        values = source[start:end]
+        if dtype.kind == "u":
+            offsets = values.astype(np.uint64, copy=False) - np.uint64(id_base)
+        else:
+            offsets = values.astype(np.int64, copy=False) - id_base
+        if np.any(offsets < 0) or np.any(offsets >= count):
+            raise RuntimeError(
+                "Merged dense-ID metadata does not match the exported IDs."
+            )
+        order[offsets.astype(np.intp, copy=False)] = np.arange(
+            start,
+            end,
+            dtype=np.intp,
+        )
+    return order
+
+
+def _write_dense_ids(
+    output_path: Path,
+    dtype: np.dtype,
+    count: int,
+    id_base: int,
+    force: bool,
+) -> str:
+    require_output_path(output_path, force)
+    chunk_rows = 4_194_304
+    with output_path.open("wb") as output:
+        for start in range(0, count, chunk_rows):
+            end = min(count, start + chunk_rows)
+            np.arange(
+                id_base + start,
+                id_base + end,
+                dtype=dtype,
+            ).tofile(output)
     return str(output_path)
 
 

@@ -58,11 +58,19 @@ def _decompress_field_job(job: FieldDecompressionJob) -> None:
         / f"{logical}.lattice-encoded.{dtype.name}.raw"
     )
     decompress_shaped_lossy_raw(field, str(dense_path), job.force)
-    if job.id_path is None or job.id_dtype is None:
-        raise RuntimeError("Parallel lattice decode is missing its ID field.")
     if job.lattice_metadata is None:
         raise RuntimeError("Parallel lattice decode is missing layout metadata.")
-    sorted_ids = read_raw(job.id_path, np.dtype(job.id_dtype), job.count)
+    implicit_full = bool(
+        job.lattice_metadata.get("implicit_full_lattice", False)
+    )
+    if implicit_full:
+        sorted_ids = None
+    else:
+        if job.id_path is None or job.id_dtype is None:
+            raise RuntimeError(
+                "Parallel lattice decode is missing its ID field."
+            )
+        sorted_ids = read_raw(job.id_path, np.dtype(job.id_dtype), job.count)
     layout = lattice_layout_from_metadata(sorted_ids, job.lattice_metadata)
     dense_values = read_raw(str(dense_path), dtype, layout.dense_count)
     wrap_offsets = None
@@ -173,21 +181,27 @@ class DecompressionPipeline:
     ) -> FieldDecompressionJob:
         field = dict(self.fields[logical])
         is_lattice = field.get("spatial_layout") == LATTICE_LAYOUT_NAME
+        lattice_metadata = (
+            dict(self.manifest.get("lattice_layout", {}))
+            if is_lattice
+            else None
+        )
+        needs_ids = bool(
+            is_lattice
+            and lattice_metadata is not None
+            and not lattice_metadata.get("implicit_full_lattice", False)
+        )
         return FieldDecompressionJob(
             field=field,
             output_path=self.output_paths[logical],
             decompressed_dir=str(self.decompressed_dir),
             force=bool(self.args.force),
             count=self.count,
-            lattice_metadata=(
-                dict(self.manifest.get("lattice_layout", {}))
-                if is_lattice
-                else None
-            ),
-            id_path=self.output_paths["id"] if is_lattice else None,
+            lattice_metadata=lattice_metadata,
+            id_path=self.output_paths["id"] if needs_ids else None,
             id_dtype=(
                 str(self.manifest["fields"]["id"]["dtype"])
-                if is_lattice
+                if needs_ids
                 else None
             ),
         )
@@ -251,12 +265,15 @@ class DecompressionPipeline:
         if self._decoded_lattice is not None:
             return self._decoded_lattice
         metadata = self.manifest.get("lattice_layout", {})
-        id_dtype = np.dtype(self.manifest["fields"]["id"]["dtype"])
-        sorted_ids = read_raw(
-            self.output_paths["id"],
-            id_dtype,
-            self.count,
-        )
+        if metadata.get("implicit_full_lattice", False):
+            sorted_ids = None
+        else:
+            id_dtype = np.dtype(self.manifest["fields"]["id"]["dtype"])
+            sorted_ids = read_raw(
+                self.output_paths["id"],
+                id_dtype,
+                self.count,
+            )
         self._decoded_lattice = lattice_layout_from_metadata(
             sorted_ids,
             metadata,

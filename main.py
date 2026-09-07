@@ -10,17 +10,20 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
+import h5py
+
 from src.batch import (
     BatchFileResult,
     args_for_batch_file,
     build_batch_metrics,
-    discover_h5_files,
+    discover_particle_files,
     print_batch_summary,
     resolve_file_workers,
 )
 from src.cli import build_parser
 from src.compress import compress
 from src.decompress import decompress
+from src.hdf5_io import resolve_fields
 from src.metrics import (
     compute_metrics,
     print_component_summary,
@@ -28,6 +31,7 @@ from src.metrics import (
 )
 from src.merge import merge_h5_files
 from src.manifest import update_compressed_size_metrics
+from src.native_snapshot import AdaptedParticleInput, adapt_particle_inputs
 from src.preprocess import preprocess
 from src.runtime import read_json, resolve_field_workers, write_json
 
@@ -101,7 +105,7 @@ class PipelineApplication:
             return
 
         metrics = compute_metrics(
-            Path(self.args.input_h5).resolve(),
+            Path(manifest.get("input_h5", self.args.input_h5)).resolve(),
             Path(manifest["artifacts"]["reconstructed_h5"]).resolve(),
             manifest,
         )
@@ -137,6 +141,14 @@ class PipelineApplication:
             ("merge", "merge_wall_seconds", False),
             ("preprocess", "preprocess_wall_seconds", False),
             ("compress", "compress_wall_seconds", False),
+            ("canonical_order", "canonical_order_wall_seconds", True),
+            ("lattice_prepare", "lattice_prepare_wall_seconds", True),
+            ("id_compress", "id_compress_wall_seconds", True),
+            (
+                "lattice_field_prepare",
+                "lattice_field_prepare_wall_seconds",
+                True,
+            ),
             ("lossy_fields_compress", "lossy_fields_wall_seconds", True),
             (
                 "decompress_and_recombine",
@@ -183,10 +195,11 @@ class DirectoryPipelineApplication:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.input_directory = Path(args.input_h5).resolve()
-        self.input_files = discover_h5_files(self.input_directory)
+        self.input_files = discover_particle_files(self.input_directory)
         if not self.input_files:
             raise RuntimeError(
-                f"No .h5 files found in directory: {self.input_directory}"
+                "No HDF5 or native dat_* particle files found in directory: "
+                f"{self.input_directory}"
             )
         self.work_dir = Path(args.work_dir).resolve()
         self.workers = resolve_file_workers(
@@ -267,26 +280,32 @@ class DirectoryPipelineApplication:
 
 
 class MergedDirectoryPipelineApplication:
-    """Merge a directory's disjoint chunks and run one common pipeline."""
+    """Merge a directory's disjoint particle chunks into one pipeline."""
 
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.input_directory = Path(args.input_h5).resolve()
-        self.input_files = discover_h5_files(self.input_directory)
+        self.input_files = discover_particle_files(self.input_directory)
         if not self.input_files:
             raise RuntimeError(
-                f"No .h5 files found in directory: {self.input_directory}"
+                "No HDF5 or native dat_* particle files found in directory: "
+                f"{self.input_directory}"
             )
         self.work_dir = Path(args.work_dir).resolve()
 
     def run(self) -> int:
         started = time.perf_counter()
-        result = merge_h5_files(
+        adapted_inputs = adapt_particle_inputs(
             self.input_files,
+            self.work_dir / "input_adapters",
+        )
+        result = merge_h5_files(
+            [item.h5_path for item in adapted_inputs],
             self.work_dir / "merged" / "merged.h5",
             bool(self.args.force),
             input_directory=self.input_directory,
         )
+        _record_native_merge_sources(result.metadata, adapted_inputs)
         merged_args = argparse.Namespace(**vars(self.args))
         merged_args.input_h5 = str(result.output_h5)
         merged_args.merge = False
@@ -304,6 +323,41 @@ class MergedDirectoryPipelineApplication:
             f"{time.perf_counter() - started:.6g}"
         )
         return 0
+
+
+def _record_native_merge_sources(
+    metadata: Dict[str, Any],
+    adapted_inputs: Sequence[AdaptedParticleInput],
+) -> None:
+    if not any(item.native_header is not None for item in adapted_inputs):
+        return
+
+    metadata["input_files"] = [
+        str(item.original_path) for item in adapted_inputs
+    ]
+    metadata["source_particle_counts"] = {
+        item.original_path.name: (
+            item.native_header.npart
+            if item.native_header is not None
+            else _h5_particle_count(item.h5_path)
+        )
+        for item in adapted_inputs
+    }
+    metadata["source_file_bytes_total"] = sum(
+        item.original_path.stat().st_size for item in adapted_inputs
+    )
+    metadata.pop("source_h5_file_bytes_total", None)
+    metadata["native_sources"] = [
+        item.native_header.source_metadata()
+        for item in adapted_inputs
+        if item.native_header is not None
+    ]
+
+
+def _h5_particle_count(path: Path) -> int:
+    with h5py.File(path, "r") as source:
+        fields = resolve_fields(source)
+        return int(source[fields["id"]].shape[0])
 
 
 def _run_file_pipeline(args: argparse.Namespace) -> BatchFileResult:

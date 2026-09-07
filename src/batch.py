@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from src.constants import POSITION_FIELDS
 from src.metrics import field_group_compression_ratios
+from src.native_snapshot import discover_native_data_files
 
 
 MAX_AUTOMATIC_FILE_WORKERS = 128
@@ -39,6 +40,23 @@ def discover_h5_files(directory: Path) -> List[Path]:
     return sorted(
         (path.resolve() for path in directory.glob("*.h5") if path.is_file()),
         key=lambda path: path.name,
+    )
+
+
+def discover_particle_files(directory: Path) -> List[Path]:
+    """Return direct HDF5 and native ``dat_*`` particle files."""
+
+    files = [
+        *discover_h5_files(directory),
+        *discover_native_data_files(directory),
+    ]
+    return sorted(files, key=lambda path: _natural_name_key(path.name))
+
+
+def _natural_name_key(name: str) -> tuple:
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in name.split(".")
     )
 
 

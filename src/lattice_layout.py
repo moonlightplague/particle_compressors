@@ -22,6 +22,7 @@ from src.constants import MIN_CODEC_VALUES, POSITION_FIELDS
 LATTICE_LAYOUT_NAME = "periodic_dense_id_lattice_v1"
 POSITION_RESIDUAL_TRANSFORM = "periodic_lattice_residual_v1"
 IDENTITY_TRANSFORM = "identity"
+IMPLICIT_CHUNK_ROWS = 4_194_304
 
 
 class LatticeLayoutUnavailable(RuntimeError):
@@ -42,6 +43,7 @@ class DenseLatticeLayout:
     coordinates: Tuple[np.ndarray, np.ndarray, np.ndarray]
     dense_order: np.ndarray
     missing_indices: np.ndarray
+    implicit_full_lattice: bool = False
 
     @property
     def dense_count(self) -> int:
@@ -64,6 +66,7 @@ class DenseLatticeLayout:
             "occupancy": self.occupancy,
             "position_digit_axes": list(self.position_digit_axes),
             "hole_fill": "linear_flat_index",
+            "implicit_full_lattice": self.implicit_full_lattice,
         }
 
     def encode_field(
@@ -79,6 +82,12 @@ class DenseLatticeLayout:
             raise RuntimeError(
                 f"Lattice field {logical} expected {self.count} values, "
                 f"got shape {values.shape}."
+            )
+        if self.implicit_full_lattice:
+            return self._encode_implicit_full_field(
+                values,
+                logical,
+                position_residual,
             )
         transformed = values
         roundtrip_error = 0.0
@@ -134,6 +143,62 @@ class DenseLatticeLayout:
             ).astype(transformed.dtype)
         return dense.reshape(self.shape), roundtrip_error, wrap_offsets
 
+    def _encode_implicit_full_field(
+        self,
+        values: np.ndarray,
+        logical: str,
+        position_residual: bool,
+    ) -> Tuple[np.ndarray, float, Optional[np.ndarray]]:
+        if not position_residual:
+            return values.reshape(self.shape), 0.0, None
+
+        try:
+            position_axis = POSITION_FIELDS.index(logical)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Lattice residual requested for non-position field {logical}."
+            ) from exc
+        digit_axis = self.position_digit_axes[position_axis]
+        transformed = np.empty(self.count, dtype=np.float32)
+        wrap_offsets = np.empty(self.count, dtype=np.int8)
+        roundtrip_error = 0.0
+        for start in range(0, self.count, IMPLICIT_CHUNK_ROWS):
+            end = min(self.count, start + IMPLICIT_CHUNK_ROWS)
+            predictor = self._implicit_predictor(digit_axis, start, end)
+            original = values[start:end].astype(np.float64, copy=False)
+            unwrapped_residual = original - predictor
+            wrapped_residual = np.remainder(
+                unwrapped_residual + 0.5,
+                1.0,
+            ) - 0.5
+            chunk_offsets = np.rint(
+                unwrapped_residual - wrapped_residual
+            )
+            if np.any(np.abs(chunk_offsets) > 1):
+                raise RuntimeError(
+                    "Unexpected periodic wrap offset for lattice field "
+                    f"{logical}."
+                )
+            encoded = wrapped_residual.astype(np.float32)
+            offsets = chunk_offsets.astype(np.int8)
+            transformed[start:end] = encoded
+            wrap_offsets[start:end] = offsets
+            restored = (
+                encoded.astype(np.float64)
+                + predictor
+                + offsets.astype(np.float64)
+            ).astype(np.float32)
+            roundtrip_error = max(
+                roundtrip_error,
+                float(
+                    np.max(
+                        np.abs(restored.astype(np.float64) - original),
+                        initial=0.0,
+                    )
+                ),
+            )
+        return transformed.reshape(self.shape), roundtrip_error, wrap_offsets
+
     def decode_field(
         self,
         dense_values: np.ndarray,
@@ -149,6 +214,14 @@ class DenseLatticeLayout:
             raise RuntimeError(
                 f"Lattice field {logical} expected {self.dense_count} dense "
                 f"values, got {dense.size}."
+            )
+        if self.implicit_full_lattice:
+            return self._decode_implicit_full_field(
+                dense,
+                logical,
+                transform,
+                output_dtype,
+                wrap_offsets,
             )
         gathered = dense.reshape(-1)[self.dense_indices]
         if transform == POSITION_RESIDUAL_TRANSFORM:
@@ -181,6 +254,60 @@ class DenseLatticeLayout:
                 f"Unsupported lattice field transform for {logical}: {transform}."
             )
         return np.asarray(gathered, dtype=output_dtype)
+
+    def _decode_implicit_full_field(
+        self,
+        dense_values: np.ndarray,
+        logical: str,
+        transform: str,
+        output_dtype: np.dtype,
+        wrap_offsets: Optional[np.ndarray],
+    ) -> np.ndarray:
+        gathered = dense_values.reshape(-1)
+        if transform == IDENTITY_TRANSFORM:
+            return np.asarray(gathered, dtype=output_dtype)
+        if transform != POSITION_RESIDUAL_TRANSFORM:
+            raise RuntimeError(
+                f"Unsupported lattice field transform for {logical}: "
+                f"{transform}."
+            )
+        position_axis = POSITION_FIELDS.index(logical)
+        digit_axis = self.position_digit_axes[position_axis]
+        if wrap_offsets is not None:
+            wrap_offsets = np.asarray(wrap_offsets)
+            if wrap_offsets.ndim != 1 or wrap_offsets.size != self.count:
+                raise RuntimeError(
+                    f"Lattice wrap offsets for {logical} expected "
+                    f"{self.count} values, got shape {wrap_offsets.shape}."
+                )
+        decoded = np.empty(self.count, dtype=output_dtype)
+        for start in range(0, self.count, IMPLICIT_CHUNK_ROWS):
+            end = min(self.count, start + IMPLICIT_CHUNK_ROWS)
+            predictor = self._implicit_predictor(digit_axis, start, end)
+            values = gathered[start:end].astype(np.float64) + predictor
+            if wrap_offsets is None:
+                values = np.remainder(values, 1.0)
+            else:
+                values += wrap_offsets[start:end].astype(np.float64)
+            decoded[start:end] = values.astype(output_dtype)
+        return decoded
+
+    def _implicit_predictor(
+        self,
+        digit_axis: int,
+        start: int,
+        end: int,
+    ) -> np.ndarray:
+        linear = np.arange(start, end, dtype=np.int64)
+        if digit_axis == 0:
+            coordinate = linear // (self.side * self.side)
+        elif digit_axis == 1:
+            coordinate = (linear // self.side) % self.side
+        elif digit_axis == 2:
+            coordinate = linear % self.side
+        else:
+            raise RuntimeError(f"Invalid implicit lattice axis: {digit_axis}.")
+        return coordinate.astype(np.float64) / self.side
 
 
 def infer_dense_lattice_layout(
@@ -258,8 +385,36 @@ def infer_dense_lattice_layout(
     )
 
 
+def infer_complete_lattice_layout(
+    sampled_ids: np.ndarray,
+    sampled_positions: Mapping[str, np.ndarray],
+    side: int,
+    full_minimum: int,
+    full_maximum: int,
+) -> DenseLatticeLayout:
+    """Infer axis mapping for a proven complete lattice without full arrays."""
+
+    count = side**3
+    if side <= 0 or full_maximum - full_minimum + 1 != count:
+        raise LatticeLayoutUnavailable(
+            "merged IDs do not span one complete cubic lattice"
+        )
+    normalized_positions = _validated_positions(
+        sampled_positions,
+        int(np.asarray(sampled_ids).size),
+    )
+    id_base, position_digit_axes = _infer_id_base_and_axis_mapping(
+        np.asarray(sampled_ids),
+        normalized_positions,
+        side,
+        full_minimum,
+        full_maximum,
+    )
+    return _complete_lattice_layout(side, id_base, position_digit_axes)
+
+
 def lattice_layout_from_metadata(
-    sorted_ids: np.ndarray,
+    sorted_ids: Optional[np.ndarray],
     metadata: Mapping[str, Any],
 ) -> DenseLatticeLayout:
     if metadata.get("name") != LATTICE_LAYOUT_NAME or not metadata.get(
@@ -288,8 +443,38 @@ def lattice_layout_from_metadata(
         )
     if int(metadata["dense_count"]) != math.prod(shape):
         raise RuntimeError("Lattice dense_count does not match dense_shape.")
-    ids = np.asarray(sorted_ids)
     expected_count = int(metadata["particle_count"])
+    if bool(metadata.get("implicit_full_lattice", False)):
+        if starts != (0, 0, 0) or shape != (side, side, side):
+            raise RuntimeError(
+                "Implicit full lattice metadata must describe the full cube."
+            )
+        if expected_count != side**3:
+            raise RuntimeError(
+                "Implicit full lattice particle count does not match side^3."
+            )
+        if sorted_ids is not None:
+            ids = np.asarray(sorted_ids)
+            if ids.size != expected_count:
+                raise RuntimeError(
+                    f"Lattice manifest expected {expected_count} IDs, "
+                    f"got {ids.size}."
+                )
+            if ids.size and (
+                int(ids[0]) != id_base
+                or int(ids[-1]) != id_base + expected_count - 1
+            ):
+                raise RuntimeError(
+                    "Implicit full lattice IDs do not match its recorded base."
+                )
+        return _complete_lattice_layout(
+            side,
+            id_base,
+            position_digit_axes,
+        )
+    if sorted_ids is None:
+        raise RuntimeError("Explicit lattice reconstruction requires IDs.")
+    ids = np.asarray(sorted_ids)
     if ids.size != expected_count:
         raise RuntimeError(
             f"Lattice manifest expected {expected_count} IDs, got {ids.size}."
@@ -307,6 +492,33 @@ def lattice_layout_from_metadata(
         coordinates=coordinates,
         dense_order=np.empty(0, dtype=np.intp),
         missing_indices=np.empty(0, dtype=np.intp),
+    )
+
+
+def _complete_lattice_layout(
+    side: int,
+    id_base: int,
+    position_digit_axes: Tuple[int, int, int],
+) -> DenseLatticeLayout:
+    count = side**3
+    empty = np.empty(0, dtype=np.intp)
+    empty_coordinates = (
+        np.empty(0, dtype=np.int32),
+        np.empty(0, dtype=np.int32),
+        np.empty(0, dtype=np.int32),
+    )
+    return DenseLatticeLayout(
+        side=side,
+        id_base=id_base,
+        starts=(0, 0, 0),
+        shape=(side, side, side),
+        position_digit_axes=position_digit_axes,
+        count=count,
+        dense_indices=empty,
+        coordinates=empty_coordinates,
+        dense_order=empty,
+        missing_indices=empty,
+        implicit_full_lattice=True,
     )
 
 
@@ -485,6 +697,7 @@ __all__ = [
     "LatticeLayoutUnavailable",
     "POSITION_RESIDUAL_TRANSFORM",
     "decode_lattice_coordinates",
+    "infer_complete_lattice_layout",
     "infer_dense_lattice_layout",
     "lattice_layout_from_metadata",
     "position_transform_guard",

@@ -1,4 +1,4 @@
-"""Preprocess HDF5 particle fields and initialize a package manifest."""
+"""Preprocess HDF5 or native particle fields and initialize a manifest."""
 
 import argparse
 import importlib.metadata
@@ -22,6 +22,7 @@ from src.field_export import (
 )
 from src.hdf5_io import collect_attributes, resolve_fields, serialize_attribute
 from src.models import PositionScale
+from src.native_snapshot import AdaptedParticleInput, adapt_particle_input
 from src.runtime import write_json
 
 
@@ -54,15 +55,15 @@ class PreprocessingPipeline:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         _validate_preprocess_args(args)
-        self.input_h5 = Path(args.input_h5).resolve()
-        if not self.input_h5.is_file():
-            raise RuntimeError(
-                f"Input HDF5 file does not exist: {self.input_h5}"
-            )
         self.workspace = PreprocessWorkspace.prepare(
             args.work_dir,
             bool(args.force),
         )
+        self.input = adapt_particle_input(
+            Path(args.input_h5),
+            self.workspace.root / "input_adapters",
+        )
+        self.input_h5 = self.input.h5_path
         self.raw_paths: Dict[str, str] = {}
         self.statistics: Dict[str, Any] = {}
 
@@ -95,6 +96,7 @@ class PreprocessingPipeline:
                 position_scale,
                 bounds,
             )
+            _record_native_source(manifest, self.input)
             selected_payload_bytes = _selected_payload_bytes(
                 source,
                 fields,
@@ -253,6 +255,21 @@ def _make_manifest(
             "tthresh": package_version("tthresh"),
         },
     }
+
+
+def _record_native_source(
+    manifest: Dict[str, Any],
+    adapted_input: AdaptedParticleInput,
+) -> None:
+    header = adapted_input.native_header
+    if header is None:
+        return
+    source_metadata = header.source_metadata()
+    manifest["input_format"] = source_metadata["format"]
+    manifest["input_file"] = str(adapted_input.original_path)
+    manifest["input_file_bytes"] = adapted_input.original_path.stat().st_size
+    manifest["source"] = source_metadata
+    manifest.pop("input_h5_file_bytes", None)
 
 
 def build_compressed_artifacts(

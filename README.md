@@ -1,10 +1,11 @@
 # Particle Compressors
 
 Particle Compressors is a command-line pipeline for lossy compression of
-particle data stored in HDF5. One selected codec—SZO, SZ3, SPERR, QoZ, or
-TTHRESH—compresses all six position and velocity fields. Particle IDs remain
-lossless through pcodec. Roundtrip reconstruction preserves dataset paths,
-dtypes, dataset attributes, and root HDF5 attributes.
+particle data stored in HDF5 or in the field-major `cfg_*`/`dat_*` snapshot
+format. One selected codec—SZO, SZ3, SPERR, QoZ, or TTHRESH—compresses all six
+position and velocity fields. Particle IDs remain lossless through pcodec.
+Roundtrip reconstruction writes HDF5 and preserves dataset paths, dtypes,
+dataset attributes, and root HDF5 attributes.
 
 ## Input Format
 
@@ -22,6 +23,37 @@ Dataset basenames are matched case-insensitively.
 | VZ | `vz`, `velz`, `velocity_z` | `float32` or `float64` |
 
 Datasets may be inside HDF5 groups; matching uses the final path component.
+
+The native snapshot format consists of a data file such as `dat_7.1` and its
+matching text header `cfg_7.1`. The header contains 43 newline-delimited
+values; the local particle count is value 10, `nsidemesh` is value 42, and
+the fixed-point position scale (`bitwidth`) is value 43. The data file has no
+container header and stores seven contiguous, little-endian field arrays:
+
+| Order | Field | Dtype | Bytes per particle |
+| --- | --- | --- | --- |
+| 1 | `posx` | `int32` | 4 |
+| 2 | `posy` | `int32` | 4 |
+| 3 | `posz` | `int32` | 4 |
+| 4 | `velx` | `float32` | 4 |
+| 5 | `vely` | `float32` | 4 |
+| 6 | `velz` | `float32` | 4 |
+| 7 | `id` | `uint64` | 8 |
+
+Consequently, every valid `dat_*` file is exactly `particle_count * 32`
+bytes. The pipeline validates this invariant and exposes the blocks through a
+small HDF5 external-dataset adapter in the work directory; the source payload
+is not copied merely to make it readable. Native header values are mapped to
+the root attributes `rank`, `proc_size`, `npart`, `npart_total`, `nsidemesh`,
+and `bitwidth`. Partitions whose header count is zero legitimately have no
+`dat_*` file and are ignored during directory discovery.
+
+Process one native partition directly, or merge a complete snapshot directory:
+
+```bash
+python main.py preprocess data/new_data/snapshot_7/dat_7.1 --force
+python main.py roundtrip data/new_data/snapshot_7 --merge --force
+```
 
 ## Requirements and Installation
 
@@ -194,9 +226,17 @@ offsets are stored losslessly with pcodec. The compressor bound is reduced by
 the measured transform roundoff guard so the requested final bound remains
 valid.
 
+For a merged particle set whose unique IDs cover the complete lattice, the
+pipeline automatically uses an optimized path: it builds the sorted order in
+linear time, infers axis mapping from a bounded sample, represents the full
+lattice without materialized coordinate/index arrays, and prepares the six
+lattice fields concurrently. Sparse and non-merged layouts continue to use
+the general implementation.
+
 ## Directory Batches
 
-Pass a directory instead of a file to process its direct `.h5` children:
+Pass a directory instead of a file to process its direct `.h5` and native
+`dat_*` children:
 
 ```bash
 python main.py roundtrip data/snapshots \
@@ -206,8 +246,9 @@ python main.py roundtrip data/snapshots \
   --force
 ```
 
-Directory discovery is non-recursive and matches the lowercase `.h5`
-extension exactly. `--file-workers 0` selects up to 128 processes; a positive
+Directory discovery is non-recursive. HDF5 discovery matches the lowercase
+`.h5` extension exactly; native files match `dat_*` and require a paired
+`cfg_*` header. `--file-workers 0` selects up to 128 processes; a positive
 value sets an explicit cap. Each input gets an isolated package directory.
 The batch root receives `batch_metrics.json` with byte-weighted total and
 field-group compression ratios, aggregate stage timings, throughput, per-file
@@ -228,11 +269,13 @@ python main.py roundtrip data/snapshots \
 The merge path checks all IDs exactly and rejects duplicate IDs within or
 across chunks. It also requires matching field dtypes, dataset attributes, and
 common root attributes. The concatenated source is written to
-`WORK_DIR/merged/merged.h5` before preprocessing. Per-file root attributes are
-normalized for the common file: `npart` and `npart_total` become the merged
-particle count, while `rank` and `proc_size` become zero and one. Merge
-provenance and elapsed time are recorded in the manifest. Without `--merge`,
-directory processing retains the existing independent-file behavior.
+`WORK_DIR/merged/merged.h5` before preprocessing. Native `dat_*` blocks are
+read through zero-copy adapters while building that merged file. Per-file
+root attributes are normalized for the common file: `npart` and `npart_total`
+become the merged particle count, while `rank` and `proc_size` become zero and
+one. Merge provenance and elapsed time are recorded in the manifest. Without
+`--merge`, directory processing retains the existing independent-file
+behavior.
 
 ## Package Contents
 

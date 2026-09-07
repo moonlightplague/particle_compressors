@@ -8,6 +8,7 @@ from src.lattice_layout import (
     IDENTITY_TRANSFORM,
     POSITION_RESIDUAL_TRANSFORM,
     LatticeLayoutUnavailable,
+    infer_complete_lattice_layout,
     infer_dense_lattice_layout,
     lattice_layout_from_metadata,
 )
@@ -117,6 +118,55 @@ class DenseLatticeLayoutTests(unittest.TestCase):
             "occupancy",
         ):
             infer_dense_lattice_layout(ids, positions, side, 0.8)
+
+    def test_complete_lattice_uses_implicit_geometry(self):
+        side = 12
+        ids = np.arange(side**3, dtype=np.uint64)
+        high = ids // (side * side)
+        middle = (ids // side) % side
+        low = ids % side
+        positions = {
+            "x": ((low + 0.125) / side).astype(np.float32),
+            "y": ((high + 0.25) / side).astype(np.float32),
+            "z": ((middle + 0.375) / side).astype(np.float32),
+        }
+
+        layout = infer_complete_lattice_layout(
+            ids,
+            positions,
+            side,
+            0,
+            side**3 - 1,
+        )
+
+        self.assertTrue(layout.implicit_full_lattice)
+        self.assertEqual(layout.shape, (side, side, side))
+        self.assertEqual(layout.position_digit_axes, (2, 0, 1))
+        self.assertEqual(layout.dense_indices.size, 0)
+        dense, _, wraps = layout.encode_field(
+            positions["x"],
+            "x",
+            position_residual=True,
+        )
+        restored = layout.decode_field(
+            dense,
+            "x",
+            POSITION_RESIDUAL_TRANSFORM,
+            np.dtype("float32"),
+            wraps,
+        )
+        np.testing.assert_allclose(
+            restored,
+            positions["x"],
+            atol=1e-7,
+            rtol=0,
+        )
+
+        from_metadata = lattice_layout_from_metadata(
+            None,
+            layout.manifest_metadata(),
+        )
+        self.assertTrue(from_metadata.implicit_full_lattice)
 
 
 if __name__ == "__main__":
