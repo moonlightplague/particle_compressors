@@ -148,6 +148,8 @@ class PipelineApplication:
             ("preprocess", "preprocess_wall_seconds", False),
             ("compress", "compress_wall_seconds", False),
             ("canonical_order", "canonical_order_wall_seconds", True),
+            ("structure_prepare", "structure_prepare_wall_seconds", True),
+            ("hybrid_velocity_order", "hybrid_velocity_order_wall_seconds", True),
             ("lattice_prepare", "lattice_prepare_wall_seconds", True),
             ("id_compress", "id_compress_wall_seconds", True),
             (

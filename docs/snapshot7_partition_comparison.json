@@ -1,0 +1,79 @@
+{
+  "baseline_directory": "/home/moonlightplague/chenwei/particle_compressors/particle_pipeline_runs/snapshot_7/dat_7.1",
+  "baseline_provenance": "Existing baseline artifacts; optimized quality freshly verified",
+  "compressed_byte_reduction_percent": 14.05907701881145,
+  "optimized_directory": "/tmp/snapshot7_structured_guarded",
+  "package_count": 1,
+  "packages": [
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 137829873,
+        "id_bytes": 48676203,
+        "manifest_bytes": 16858,
+        "original_bytes": 540059232,
+        "position_bytes": 23490015,
+        "velocity_bytes": 65646797
+      },
+      "ids_exact": true,
+      "input": "dat_7.1",
+      "optimized": {
+        "compressed_bytes": 118452265,
+        "id_bytes": 36592823,
+        "manifest_bytes": 16810,
+        "original_bytes": 540059232,
+        "position_bytes": 23299395,
+        "velocity_bytes": 58543237
+      },
+      "particles": 16876851,
+      "position_l2_bound": 8.594598952294017e-05,
+      "position_l2_error": 8.585841196333232e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 17.581388564780354,
+        "compress_wall_seconds": 26.060289015993476,
+        "decompress_and_recombine_wall_seconds": 12.503062430769205,
+        "hybrid_velocity_order_wall_seconds": 2.5144893266260624,
+        "id_compress_wall_seconds": 5.342023342847824,
+        "lattice_prepare_wall_seconds": 1.432374119758606e-06,
+        "lossy_fields_decompress_wall_seconds": 0.3231957834213972,
+        "lossy_fields_wall_seconds": 0.2843814231455326,
+        "metrics_wall_seconds": 12.770654983818531,
+        "preprocess_wall_seconds": 0.6483784876763821,
+        "recombine_h5_wall_seconds": 0.2593704257160425,
+        "roundtrip_wall_seconds": 52.087155448272824,
+        "structure_prepare_wall_seconds": 0.07759065553545952
+      },
+      "velocity_bounds": {
+        "vx": 0.014336482238769531,
+        "vy": 0.018318717193603517,
+        "vz": 0.016528592681884766
+      },
+      "velocity_errors": {
+        "vx": 0.014336466789245605,
+        "vy": 0.018318653106689453,
+        "vz": 0.016528531908988953
+      }
+    }
+  ],
+  "particle_count": 16876851,
+  "totals": {
+    "baseline": {
+      "compressed_bytes": 137829873,
+      "compression_ratio": 3.9183031968693753,
+      "id_bytes": 48676203,
+      "manifest_bytes": 16858,
+      "original_bytes": 540059232,
+      "position_bytes": 23490015,
+      "velocity_bytes": 65646797
+    },
+    "optimized": {
+      "compressed_bytes": 118452265,
+      "compression_ratio": 4.559298481966554,
+      "id_bytes": 36592823,
+      "manifest_bytes": 16810,
+      "original_bytes": 540059232,
+      "position_bytes": 23299395,
+      "velocity_bytes": 58543237
+    }
+  }
+}

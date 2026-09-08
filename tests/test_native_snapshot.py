@@ -128,6 +128,8 @@ class NativeSnapshotTests(unittest.TestCase):
                 str(work_dir),
                 "--limit",
                 "3",
+                "--pos-compressor",
+                "sz3",
                 "--force",
             ]
             args = build_parser(argv).parse_args(argv)
@@ -183,6 +185,8 @@ class NativeSnapshotTests(unittest.TestCase):
                         "preprocess",
                         str(inputs),
                         "--merge",
+                        "--pos-compressor",
+                        "sz3",
                         "--work-dir",
                         str(outputs),
                         "--force",

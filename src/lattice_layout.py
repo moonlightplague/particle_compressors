@@ -395,6 +395,44 @@ def infer_dense_lattice_layout(
     )
 
 
+def infer_lattice_id_mapping(
+    sampled_ids: np.ndarray,
+    sampled_positions: Mapping[str, np.ndarray],
+    side: int,
+    full_minimum: Optional[int] = None,
+    full_maximum: Optional[int] = None,
+) -> Tuple[int, Tuple[int, int, int]]:
+    """Infer the ID base and physical-position to ID-digit axis mapping.
+
+    Unlike :func:`infer_dense_lattice_layout`, this helper does not construct a
+    dense box or impose an occupancy threshold.  It is intended for reversible
+    ID transforms and deterministic particle orders that remain useful for
+    sparse domain-decomposed partitions.
+    """
+
+    ids = np.asarray(sampled_ids)
+    if ids.ndim != 1 or ids.size == 0:
+        raise LatticeLayoutUnavailable(
+            "particle IDs are empty or not one-dimensional"
+        )
+    if not np.issubdtype(ids.dtype, np.integer):
+        raise LatticeLayoutUnavailable("particle IDs are not integers")
+    if side <= 0:
+        raise LatticeLayoutUnavailable("lattice side must be positive")
+    positions = _validated_positions(sampled_positions, ids.size)
+    minimum = int(ids.min()) if full_minimum is None else int(full_minimum)
+    maximum = int(ids.max()) if full_maximum is None else int(full_maximum)
+    if minimum > maximum:
+        raise LatticeLayoutUnavailable("particle ID range is invalid")
+    return _infer_id_base_and_axis_mapping(
+        ids,
+        positions,
+        side,
+        minimum,
+        maximum,
+    )
+
+
 def infer_complete_lattice_layout(
     sampled_ids: np.ndarray,
     sampled_positions: Mapping[str, np.ndarray],
@@ -709,6 +747,7 @@ __all__ = [
     "decode_lattice_coordinates",
     "infer_complete_lattice_layout",
     "infer_dense_lattice_layout",
+    "infer_lattice_id_mapping",
     "lattice_layout_from_metadata",
     "position_transform_guard",
 ]

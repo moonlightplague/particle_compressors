@@ -33,6 +33,8 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lattice_layout": False,
     "lattice_min_occupancy": 0.8,
     "lattice_axis_search": True,
+    "xnyzip_structure_aware": False,
+    "xnyzip_velocity_cell_bits": 7,
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
     "pos_compressor": ("lcp", "xnyzip", "sz3", "szo"),
@@ -145,7 +147,11 @@ def _validated_advanced_config(
         defaults["vel_chunk_workers"],
         "vel_chunk_workers",
     )
-    for key in ("lattice_layout", "lattice_axis_search"):
+    for key in (
+        "lattice_layout",
+        "lattice_axis_search",
+        "xnyzip_structure_aware",
+    ):
         if not isinstance(defaults[key], bool):
             raise RuntimeError(
                 f"config value advanced.{key} must be a boolean."
@@ -157,6 +163,15 @@ def _validated_advanced_config(
     if not 0.0 < defaults["lattice_min_occupancy"] <= 1.0:
         raise RuntimeError(
             "config value advanced.lattice_min_occupancy must be in (0, 1]."
+        )
+    defaults["xnyzip_velocity_cell_bits"] = _nonnegative_integer(
+        defaults["xnyzip_velocity_cell_bits"],
+        "xnyzip_velocity_cell_bits",
+    )
+    if not 1 <= defaults["xnyzip_velocity_cell_bits"] <= 10:
+        raise RuntimeError(
+            "config value advanced.xnyzip_velocity_cell_bits must be in "
+            "[1, 10]."
         )
     defaults["position_scale"] = _choice(
         defaults["position_scale"],
@@ -464,6 +479,25 @@ def _add_compression_arguments(
         help=(
             "Try all six dense-axis orders and retain the smallest field "
             "payload when using --lattice-layout (default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--xnyzip-structure-aware",
+        action=argparse.BooleanOptionalAction,
+        default=defaults["xnyzip_structure_aware"],
+        help=(
+            "For XnYZip positions with SZO velocities, losslessly Hilbert-"
+            "encode lattice IDs and use a sidecar-free Eulerian/Lagrangian "
+            "hybrid velocity order (default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--xnyzip-velocity-cell-bits",
+        type=int,
+        default=defaults["xnyzip_velocity_cell_bits"],
+        help=(
+            "Bits per Eulerian cell axis in the XnYZip structure-aware "
+            "velocity order (default: %(default)s)."
         ),
     )
     parser.add_argument(

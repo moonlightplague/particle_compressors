@@ -13,9 +13,16 @@ from src.runtime import (
     read_raw,
     require_output_path,
 )
+from src.structured_layout import (
+    LATTICE_HILBERT_ID_CODEC,
+    StructuredParticleLayout,
+    decode_lattice_ids,
+    encode_lattice_ids,
+)
 
 
 FLOAT_DTYPES = (np.dtype("float32"), np.dtype("float64"))
+SZO_LORENZO_1D_PROFILE = "lorenzo_1d"
 
 
 def compress_pcodec_raw(
@@ -68,6 +75,56 @@ def compress_integer_raw(
     )
 
 
+def compress_lattice_hilbert_ids(
+    values: np.ndarray,
+    dtype: str,
+    compressed_path: str,
+    field_name: str,
+    layout: StructuredParticleLayout,
+    force: bool,
+) -> Dict[str, Any]:
+    """Losslessly compress IDs after a physical-axis Hilbert transform."""
+
+    data_type = np.dtype(dtype)
+    if not np.issubdtype(data_type, np.integer):
+        raise RuntimeError(
+            f"Structured ID compression expected an integer dtype, got {data_type}."
+        )
+    source = np.asarray(values)
+    if source.ndim != 1:
+        raise RuntimeError(
+            f"Structured ID compression expected one dimension, got {source.shape}."
+        )
+    output = Path(compressed_path)
+    require_output_path(output, force)
+    encoded = np.ascontiguousarray(encode_lattice_ids(source, layout))
+    standalone, chunk_config_type = load_pcodec()
+    chunk_config = chunk_config_type()
+    # Level 12 is measurably smaller for the transformed permutation while
+    # retaining pcodec's self-describing, backward-compatible payload.
+    chunk_config.compression_level = 12
+    payload = standalone.simple_compress(encoded, chunk_config)
+    output.write_bytes(payload)
+    metadata = _field_metadata(
+        field_name,
+        LATTICE_HILBERT_ID_CODEC,
+        data_type,
+        int(source.size),
+        output,
+        len(payload),
+    )
+    metadata.update(
+        {
+            "encoded_dtype": str(encoded.dtype),
+            "transform": "physical_axis_hilbert_3d",
+            "lossless_backend": "pcodec",
+            "pcodec_compression_level": 12,
+            "structured_layout": layout.metadata(),
+        }
+    )
+    return metadata
+
+
 def compress_szo_raw(
     raw_path: str,
     dtype: str,
@@ -76,6 +133,7 @@ def compress_szo_raw(
     count: int,
     abs_error_bound: float,
     force: bool,
+    profile: str | None = None,
 ) -> Dict[str, Any]:
     data_type = _require_float_dtype(dtype, field_name, "SZO compression")
     output = Path(compressed_path)
@@ -91,6 +149,14 @@ def compress_szo_raw(
     # deliberately retain their INTERP_LORENZO default.
     if getattr(config, "cmprAlgo", None) is None:
         config.cmprAlgo = algorithm.LORENZO_REG
+    if profile is not None:
+        if profile != SZO_LORENZO_1D_PROFILE:
+            raise RuntimeError(f"Unsupported SZO compression profile: {profile}.")
+        config.cmprAlgo = algorithm.LORENZO_REG
+        config.lorenzo = True
+        config.lorenzo2 = False
+        config.regression = False
+        config.regression2 = False
     try:
         compressed, _ = szo.compress(encoded, config, copy=True)
     except Exception as exc:
@@ -112,6 +178,8 @@ def compress_szo_raw(
             "encoded_count": encoded_count,
         }
     )
+    if profile is not None:
+        metadata["compression_profile"] = profile
     return metadata
 
 
@@ -170,6 +238,7 @@ def compress_lossy_raw(
     count: int,
     abs_error_bound: float,
     force: bool,
+    szo_profile: str | None = None,
 ) -> Dict[str, Any]:
     compressors = {
         "sz3": compress_pysz_raw,
@@ -179,7 +248,7 @@ def compress_lossy_raw(
         compressor = compressors[codec]
     except KeyError as exc:
         raise RuntimeError(f"Unsupported lossy compressor: {codec}.") from exc
-    return compressor(
+    arguments = (
         raw_path,
         dtype,
         compressed_path,
@@ -188,6 +257,9 @@ def compress_lossy_raw(
         abs_error_bound,
         force,
     )
+    if codec == "szo":
+        return compressor(*arguments, profile=szo_profile)
+    return compressor(*arguments)
 
 
 def decompress_pcodec_raw(
@@ -217,7 +289,38 @@ def decompress_integer_raw(
     out_path: str,
     force: bool,
 ) -> None:
-    decompress_pcodec_raw(field, out_path, force)
+    codec = str(field.get("codec", "pcodec"))
+    if codec == "pcodec":
+        decompress_pcodec_raw(field, out_path, force)
+        return
+    if codec != LATTICE_HILBERT_ID_CODEC:
+        raise RuntimeError(
+            f"Unsupported lossless field codec for {field.get('field')}: {codec}."
+        )
+
+    output = Path(out_path)
+    require_output_path(output, force)
+    standalone, _ = load_pcodec()
+    payload = Path(field["path"]).read_bytes()
+    decoded = standalone.simple_decompress(payload)
+    if decoded is None:
+        raise RuntimeError(
+            "pcodec decompression for structured IDs returned no data."
+        )
+    codes = np.asarray(decoded)
+    encoded_dtype = np.dtype(field.get("encoded_dtype", "uint32"))
+    _validate_decoded_field(
+        codes,
+        encoded_dtype,
+        int(field["count"]),
+        str(field["field"]),
+        LATTICE_HILBERT_ID_CODEC,
+    )
+    layout = StructuredParticleLayout.from_metadata(
+        field["structured_layout"]
+    )
+    ids = decode_lattice_ids(codes, layout, np.dtype(field["dtype"]))
+    ids.tofile(output)
 
 
 def decompress_szo_raw(

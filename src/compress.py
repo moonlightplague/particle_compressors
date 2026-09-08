@@ -35,6 +35,7 @@ from src.lattice_layout import (
     POSITION_RESIDUAL_TRANSFORM,
     infer_complete_lattice_layout,
     infer_dense_lattice_layout,
+    infer_lattice_id_mapping,
     position_transform_guard,
 )
 from src.lcp_codec import (
@@ -48,12 +49,20 @@ from src.lcp_codec import (
 from src.manifest import update_compressed_size_metrics
 from src.models import CanonicalOrder, ToolPaths
 from src.raw_codecs import (
+    SZO_LORENZO_1D_PROFILE,
     compress_integer_raw,
+    compress_lattice_hilbert_ids,
     compress_lossy_raw,
     compress_pcodec_raw,
     compress_pysz_raw,
     compress_szo_raw,
     pad_codec_input,
+)
+from src.structured_layout import (
+    HYBRID_VELOCITY_LAYOUT,
+    StructuredParticleLayout,
+    hybrid_velocity_order,
+    make_structured_layout,
 )
 from src.shaped_codecs import compress_shaped_lossy_raw
 from src.runtime import (
@@ -66,12 +75,14 @@ from src.runtime import (
 from src.xnyzip_codec import (
     XNYZIP_CURVE,
     XNYZIP_DIRECT_THRESHOLD,
+    XNYZIP_HILBERT_CURVE,
     XNYZIP_ORDER_DTYPE,
     XNYZIP_QUANTIZER,
     XNYZIP_STORAGE_MODE,
     compress_chunked_xnyzip_triplet,
     compress_xnyzip_triplet,
     read_xnyzip_permutation,
+    run_xnyzip_decompress,
 )
 
 
@@ -91,6 +102,9 @@ class CompressionSettings:
     lattice_velocity_only: bool = False
     lattice_min_occupancy: float = 0.8
     lattice_axis_search: bool = True
+    structure_aware_requested: bool = False
+    structure_aware: bool = False
+    structure_velocity_cell_bits: int = 7
     field_workers: int = 1
 
     @classmethod
@@ -100,6 +114,16 @@ class CompressionSettings:
         validate_compressor_combination(position_codec, velocity_codec)
         sort_requested = bool(getattr(args, "sort", False))
         lattice_requested = bool(getattr(args, "lattice_layout", False))
+        structure_aware_requested = bool(
+            getattr(args, "xnyzip_structure_aware", False)
+        )
+        structure_velocity_cell_bits = int(
+            getattr(args, "xnyzip_velocity_cell_bits", 7)
+        )
+        if not 1 <= structure_velocity_cell_bits <= 10:
+            raise RuntimeError(
+                "--xnyzip-velocity-cell-bits must be in [1, 10]."
+            )
         fieldwise_pair = (
             position_codec not in ("lcp", "xnyzip")
             and velocity_codec not in ("lcp", "xnyzip")
@@ -112,6 +136,16 @@ class CompressionSettings:
         lattice_layout = lattice_requested and (
             fieldwise_pair or lattice_velocity_only
         )
+        structure_aware = (
+            structure_aware_requested
+            and position_codec == "xnyzip"
+            and velocity_codec == "szo"
+        )
+        if lattice_requested and structure_aware_requested:
+            raise RuntimeError(
+                "--xnyzip-structure-aware cannot be combined with "
+                "--lattice-layout."
+            )
         sort_by_id = (
             (sort_requested or lattice_layout)
             and fieldwise_pair
@@ -146,6 +180,9 @@ class CompressionSettings:
             lattice_axis_search=bool(
                 getattr(args, "lattice_axis_search", True)
             ),
+            structure_aware_requested=structure_aware_requested,
+            structure_aware=structure_aware,
+            structure_velocity_cell_bits=structure_velocity_cell_bits,
             velocity_chunk_size=chunk_size,
             configured_chunk_workers=configured_workers,
             effective_chunk_workers=resolve_velocity_chunk_workers(
@@ -171,6 +208,7 @@ class LossyCompressionJob:
     force: bool
     encoded_shape: Optional[Tuple[int, int, int]] = None
     axis_search: bool = False
+    szo_profile: Optional[str] = None
 
 
 def _compress_lossy_job(job: LossyCompressionJob) -> Dict[str, Any]:
@@ -184,6 +222,7 @@ def _compress_lossy_job(job: LossyCompressionJob) -> Dict[str, Any]:
             job.count,
             job.abs_error_bound,
             job.force,
+            **({"szo_profile": job.szo_profile} if job.szo_profile else {}),
         )
     return compress_shaped_lossy_raw(
         job.codec,
@@ -221,6 +260,7 @@ class CompressionPipeline:
         self.count = int(manifest["count"])
         self.dense_merged_id_base = self._dense_merged_id_base()
         self.lattice: Optional[DenseLatticeLayout] = None
+        self.structured_layout: Optional[StructuredParticleLayout] = None
         self._lattice_ordered_values: Dict[str, np.ndarray] = {}
         self.field_workers = resolve_field_workers(
             self.settings.field_workers,
@@ -229,11 +269,16 @@ class CompressionPipeline:
         self.lossy_fields_seconds = 0.0
         self.canonical_order_seconds = 0.0
         self.lattice_prepare_seconds = 0.0
+        self.structure_prepare_seconds = 0.0
+        self.hybrid_velocity_order_seconds = 0.0
         self.id_compress_seconds = 0.0
         self.lattice_field_prepare_seconds = 0.0
 
     def run(self) -> Dict[str, Any]:
         started = time.perf_counter()
+        stage_started = time.perf_counter()
+        self._prepare_structure_aware_layout()
+        self.structure_prepare_seconds = time.perf_counter() - stage_started
         stage_started = time.perf_counter()
         canonical_order = self._select_canonical_order()
         self.canonical_order_seconds = time.perf_counter() - stage_started
@@ -260,6 +305,51 @@ class CompressionPipeline:
             self._compress_velocities(canonical_order)
         self._finalize(started)
         return self.manifest
+
+    def _prepare_structure_aware_layout(self) -> None:
+        if not self.settings.structure_aware_requested:
+            return
+        try:
+            if not self.settings.structure_aware:
+                raise LatticeLayoutUnavailable(
+                    "requires XnYZip positions and SZO velocities"
+                )
+            payload = self.manifest.get("root_attrs", {}).get("nsidemesh", {})
+            if "value" not in payload:
+                raise LatticeLayoutUnavailable(
+                    "root attribute 'nsidemesh' is unavailable"
+                )
+            side = int(payload["value"])
+            make_structured_layout(
+                side, 0, (0, 1, 2), self.settings.structure_velocity_cell_bits
+            )
+            ids = np.memmap(
+                self.raw_paths["id"], mode="r",
+                dtype=self.manifest["fields"]["id"]["dtype"], shape=(self.count,),
+            )
+            sample = np.linspace(
+                0, self.count - 1, min(self.count, 200_000), dtype=np.intp
+            )
+            positions = {
+                logical: np.memmap(
+                    self.raw_paths[logical], mode="r", dtype="float32",
+                    shape=(self.count,),
+                )[sample]
+                for logical in POSITION_FIELDS
+            }
+            base, axes = infer_lattice_id_mapping(
+                ids[sample], positions, side, int(ids.min()), int(ids.max())
+            )
+            self.structured_layout = make_structured_layout(
+                side, base, axes, self.settings.structure_velocity_cell_bits
+            )
+            self.manifest["structured_layout"] = {
+                "requested": True, **self.structured_layout.metadata(),
+            }
+        except LatticeLayoutUnavailable as exc:
+            self.manifest["structured_layout"] = {
+                "requested": True, "enabled": False, "reason": str(exc),
+            }
 
     def _select_canonical_order(self) -> CanonicalOrder:
         if self.settings.position_codec == "lcp":
@@ -554,9 +644,32 @@ class CompressionPipeline:
             l2_error_bound,
             order_path,
             self.settings.force,
+            **({"curve": XNYZIP_HILBERT_CURVE} if self.structured_layout else {}),
         )
         if order is None:
             order = read_xnyzip_permutation(str(order_path), self.count)
+        curve = XNYZIP_CURVE
+        quantizer = XNYZIP_QUANTIZER
+        if self.structured_layout is not None:
+            curve = XNYZIP_HILBERT_CURVE
+            if not self._validate_structured_positions(order, l2_error_bound):
+                # Native TO can choose z=-1 at a zero-boundary tie, which
+                # its unsigned block encoder cannot represent. Cube avoids
+                # that case while preserving the same requested L2 bound.
+                quantizer = "cube"
+                order = compress_xnyzip_triplet(
+                    self.tools, self.raw_paths["positions_xnyzip"], compressed_path,
+                    self.count, l2_error_bound, order_path, True,
+                    curve=curve, quantizer=quantizer)
+                if not self._validate_structured_positions(
+                    order, l2_error_bound, quantizer
+                ):
+                    raise RuntimeError(
+                        "XnYZip positions failed the structure-aware L2 validation."
+                    )
+                self.manifest["structured_layout"][
+                    "position_quantizer_fallback"
+                ] = "to_roundtrip_failed"
         self.compressed_fields["positions"] = (
             self._xnyzip_field_metadata(
                 "positions",
@@ -565,6 +678,8 @@ class CompressionPipeline:
                 l2_error_bound,
             )
         )
+        self.compressed_fields["positions"]["curve"] = curve
+        self.compressed_fields["positions"]["quantizer"] = quantizer
         return CanonicalOrder(
             mapping="xnyzip_position_sorted",
             field="positions",
@@ -572,6 +687,36 @@ class CompressionPipeline:
             artifact_dtype=str(XNYZIP_ORDER_DTYPE),
             values=order,
         )
+
+    def _validate_structured_positions(
+        self, order: np.ndarray, bound: float, quantizer: str = XNYZIP_QUANTIZER,
+    ) -> bool:
+        """Decode and check every canonical position before transforming rows."""
+
+        decoded_paths = {
+            logical: str(self.preprocessed_dir / f"{logical}.structured-decoded.f32.raw")
+            for logical in POSITION_FIELDS
+        }
+        self.raw_paths.update({f"{key}_structured_decoded": value
+                               for key, value in decoded_paths.items()})
+        run_xnyzip_decompress(
+            self.tools, self.artifacts["positions"], decoded_paths, POSITION_FIELDS,
+            self.count, bound, self.preprocessed_dir / "structured-decoded.interleaved.f32.raw", True,
+            quantizer=quantizer)
+        source = {key: np.memmap(self.raw_paths[key], mode="r", dtype="float32", shape=(self.count,))
+                  for key in POSITION_FIELDS}
+        decoded = {key: np.memmap(path, mode="r", dtype="float32", shape=(self.count,))
+                   for key, path in decoded_paths.items()}
+        for start in range(0, self.count, 1_048_576):
+            end = min(self.count, start + 1_048_576)
+            squared = np.zeros(end - start, dtype=np.float64)
+            for key in POSITION_FIELDS:
+                difference = (decoded[key][start:end].astype(np.float64)
+                              - source[key][order[start:end]].astype(np.float64))
+                squared += difference * difference
+            if not np.all(np.isfinite(squared)) or float(squared.max()) > bound * bound:
+                return False
+        return True
 
     def _record_ordering(self, order: CanonicalOrder) -> None:
         reconstructed_rows = {
@@ -617,6 +762,11 @@ class CompressionPipeline:
     def _compress_id(self, order: CanonicalOrder) -> None:
         dtype = self.manifest["fields"]["id"]["dtype"]
         raw_path = self._ordered_raw_path("id", dtype, order)
+        if self.structured_layout is not None:
+            self.compressed_fields["id"] = compress_lattice_hilbert_ids(
+                read_raw(raw_path, np.dtype(dtype), self.count), dtype,
+                self.artifacts["id"], "id", self.structured_layout, self.settings.force)
+            return
         self.compressed_fields["id"] = compress_integer_raw(
             self.args.lossless,
             raw_path,
@@ -747,6 +897,9 @@ class CompressionPipeline:
         return jobs, field_updates
 
     def _compress_velocities(self, order: CanonicalOrder) -> None:
+        if self.structured_layout is not None:
+            self._compress_structured_velocities(order)
+            return
         if self.settings.velocity_codec == "lcp":
             self._compress_lcp_velocities(order)
             return
@@ -773,6 +926,50 @@ class CompressionPipeline:
         ):
             self.compressed_fields[logical] = field
         self.manifest["ordering"]["velocities"] = {"mapping": order.mapping}
+
+    def _compress_structured_velocities(self, order: CanonicalOrder) -> None:
+        assert self.structured_layout is not None and order.values is not None
+        started = time.perf_counter()
+        decoded_paths = {
+            logical: self.raw_paths[f"{logical}_structured_decoded"]
+            for logical in POSITION_FIELDS
+        }
+        ids = read_raw(
+            self.raw_paths["id_canonical_ordered"],
+            np.dtype(self.manifest["fields"]["id"]["dtype"]), self.count,
+        )
+        decoded = {
+            logical: read_raw(path, np.dtype("float32"), self.count)
+            for logical, path in decoded_paths.items()
+        }
+        permutation = hybrid_velocity_order(ids, decoded, self.structured_layout)
+        source_order = order.values[permutation]
+        del permutation, ids, decoded
+        self.hybrid_velocity_order_seconds = time.perf_counter() - started
+        jobs = []
+        for logical in VELOCITY_FIELDS:
+            dtype = self.manifest["fields"][logical]["dtype"]
+            path = (
+                self.preprocessed_dir / f"{logical}.hybrid.{np.dtype(dtype).name}.raw"
+            )
+            require_output_path(path, self.settings.force)
+            values = read_raw(self.raw_paths[logical], np.dtype(dtype), self.count)
+            values[source_order].tofile(path)
+            del values
+            self.raw_paths[f"{logical}_hybrid"] = str(path)
+            jobs.append(LossyCompressionJob(
+                "szo", str(path), dtype, self.artifacts[logical], logical, self.count,
+                float(self.manifest["field_error_bounds"][logical]["abs"]),
+                self.settings.force, szo_profile=SZO_LORENZO_1D_PROFILE,
+            ))
+        del source_order
+        for logical, field in zip(VELOCITY_FIELDS, self._compress_jobs(jobs)):
+            field["spatial_layout"] = HYBRID_VELOCITY_LAYOUT
+            self.compressed_fields[logical] = field
+        self.manifest["ordering"]["velocities"] = {
+            "mapping": HYBRID_VELOCITY_LAYOUT,
+            "reconstructed_mapping": order.mapping,
+        }
 
     def _compress_flat_fieldwise_fields(
         self,
@@ -1457,7 +1654,9 @@ class CompressionPipeline:
                 else 1
             ),
         }
-        if self.lattice is not None:
+        if self.structured_layout is not None:
+            self.manifest["format_version"] = 9
+        elif self.lattice is not None:
             self.manifest["format_version"] = 8
         elif self.settings.blockwise_order:
             self.manifest["format_version"] = 7
@@ -1475,6 +1674,9 @@ class CompressionPipeline:
             self.manifest["format_version"] = 4 if chunk_size else 3
         timing = self.manifest.setdefault("timing", {})
         timing["canonical_order_wall_seconds"] = self.canonical_order_seconds
+        if self.structured_layout is not None:
+            timing["structure_prepare_wall_seconds"] = self.structure_prepare_seconds
+            timing["hybrid_velocity_order_wall_seconds"] = self.hybrid_velocity_order_seconds
         timing["lattice_prepare_wall_seconds"] = self.lattice_prepare_seconds
         timing["id_compress_wall_seconds"] = self.id_compress_seconds
         if self.lattice is not None:

@@ -44,6 +44,10 @@ from src.raw_codecs import (
     decompress_szo_raw,
 )
 from src.shaped_codecs import decompress_shaped_lossy_raw
+from src.structured_layout import (
+    HYBRID_VELOCITY_LAYOUT, StructuredParticleLayout, hybrid_velocity_order,
+    validate_structured_package,
+)
 from src.runtime import (
     read_json,
     read_raw,
@@ -134,6 +138,7 @@ class DecompressionPipeline:
             raise RuntimeError(f"Missing manifest: {self.manifest_path}")
 
         self.manifest = read_json(self.manifest_path)
+        validate_structured_package(self.manifest)
         self.fields = self.manifest.get("compressed_fields")
         if not self.fields:
             raise RuntimeError(
@@ -258,6 +263,8 @@ class DecompressionPipeline:
                 ),
                 self.decompressed_dir / "positions.xnyzip.f32.raw",
                 self.args.force,
+                **({"quantizer": self.fields["positions"]["quantizer"]}
+                   if self.manifest.get("structured_layout", {}).get("enabled") else {}),
             )
             return
         for logical in POSITION_FIELDS:
@@ -329,6 +336,8 @@ class DecompressionPipeline:
             return
         if self.velocity_codec != "lcp":
             self._decompress_fieldwise_fields(VELOCITY_FIELDS)
+            if self.manifest.get("structured_layout", {}).get("enabled", False):
+                self._restore_structured_velocities()
             return
 
         velocity_field = self.fields["velocities"]
@@ -473,6 +482,24 @@ class DecompressionPipeline:
         output = Path(self.output_paths[logical])
         require_output_path(output, self.args.force)
         decoded.tofile(output)
+
+    def _restore_structured_velocities(self) -> None:
+        if self.position_codec != "xnyzip" or self.velocity_codec != "szo":
+            raise RuntimeError("Structured layout requires XnYZip positions and SZO velocities.")
+        layout = StructuredParticleLayout.from_metadata(self.manifest["structured_layout"])
+        ids = read_raw(self.output_paths["id"], np.dtype(self.fields["id"]["dtype"]), self.count)
+        positions = {logical: read_raw(self.output_paths[logical], np.dtype("float32"), self.count)
+                     for logical in POSITION_FIELDS}
+        permutation = hybrid_velocity_order(ids, positions, layout)
+        del ids, positions
+        for logical in VELOCITY_FIELDS:
+            if self.fields[logical].get("spatial_layout") != HYBRID_VELOCITY_LAYOUT:
+                raise RuntimeError(f"Missing hybrid layout metadata for {logical}.")
+            values = read_raw(self.output_paths[logical], np.dtype(self.fields[logical]["dtype"]), self.count)
+            restored = np.empty_like(values)
+            restored[permutation] = values
+            del values
+            restored.tofile(self.output_paths[logical])
 
     def _decompress_fieldwise_fields(
         self,

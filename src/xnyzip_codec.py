@@ -23,6 +23,7 @@ FieldTriplet = Tuple[str, str, str]
 
 XNYZIP_QUANTIZER = "to"
 XNYZIP_CURVE = "-z"
+XNYZIP_HILBERT_CURVE = "-h"
 XNYZIP_STORAGE_MODE = "-rle"
 # The submodule's monolithic runner also forces block mode because its direct
 # encoder is not reliable for every quantized range.
@@ -68,12 +69,19 @@ def compress_xnyzip_triplet(
     l2_error_bound: float,
     order_path: Path,
     force: bool,
+    *,
+    curve: str = XNYZIP_CURVE,
+    quantizer: str = XNYZIP_QUANTIZER,
 ) -> np.ndarray:
     bound = _positive_l2_bound(l2_error_bound)
     _validate_interleaved_size(Path(input_path), count, "input")
     compressed = Path(compressed_path)
     require_output_path(compressed, force)
     require_output_path(order_path, force)
+    if curve not in (XNYZIP_CURVE, XNYZIP_HILBERT_CURVE):
+        raise RuntimeError(f"Unsupported XnYZip curve: {curve}.")
+    if quantizer not in ("to", "cube"):
+        raise RuntimeError(f"Unsupported XnYZip quantizer: {quantizer}.")
     run_command(
         [
             str(_xnyzip_tool(tools)),
@@ -81,9 +89,9 @@ def compress_xnyzip_triplet(
             input_path,
             str(compressed),
             str(order_path),
-            XNYZIP_QUANTIZER,
+            quantizer,
             str(bound),
-            XNYZIP_CURVE,
+            curve,
             XNYZIP_STORAGE_MODE,
             str(XNYZIP_DIRECT_THRESHOLD),
         ]
@@ -207,7 +215,11 @@ def run_xnyzip_decompress(
     l2_error_bound: float,
     interleaved_path: Path,
     force: bool,
+    *,
+    quantizer: str = XNYZIP_QUANTIZER,
 ) -> None:
+    if quantizer not in ("to", "cube"):
+        raise RuntimeError(f"Unsupported XnYZip quantizer: {quantizer}.")
     bound = _positive_l2_bound(l2_error_bound)
     require_output_path(interleaved_path, force)
     for field in fields:
@@ -218,7 +230,7 @@ def run_xnyzip_decompress(
             "--decompress",
             compressed_path,
             str(interleaved_path),
-            XNYZIP_QUANTIZER,
+            quantizer,
             str(bound),
             XNYZIP_STORAGE_MODE,
         ]
@@ -461,6 +473,7 @@ __all__ = [
     "XNYZIP_CURVE",
     "XNYZIP_CHUNK_CONTAINER",
     "XNYZIP_DIRECT_THRESHOLD",
+    "XNYZIP_HILBERT_CURVE",
     "XNYZIP_ORDER_DTYPE",
     "XNYZIP_QUANTIZER",
     "XNYZIP_STORAGE_MODE",

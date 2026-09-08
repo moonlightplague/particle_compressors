@@ -1,0 +1,1598 @@
+{
+  "baseline_directory": "/home/moonlightplague/chenwei/particle_compressors/particle_pipeline_runs/snapshot_7",
+  "baseline_provenance": "Existing baseline artifacts; optimized quality freshly verified",
+  "compressed_byte_reduction_percent": 12.394638273664738,
+  "optimized_directory": "/tmp/snapshot7_structured_final",
+  "package_count": 32,
+  "packages": [
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 137829873,
+        "id_bytes": 48676203,
+        "manifest_bytes": 16858,
+        "original_bytes": 540059232,
+        "position_bytes": 23490015,
+        "velocity_bytes": 65646797
+      },
+      "ids_exact": true,
+      "input": "dat_7.1",
+      "optimized": {
+        "compressed_bytes": 118452474,
+        "id_bytes": 36592823,
+        "manifest_bytes": 17019,
+        "original_bytes": 540059232,
+        "position_bytes": 23299395,
+        "velocity_bytes": 58543237
+      },
+      "particles": 16876851,
+      "position_l2_bound": 8.594598952294017e-05,
+      "position_l2_error": 8.585841196333232e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 18.555651806294918,
+        "compress_wall_seconds": 29.750418381765485,
+        "decompress_and_recombine_wall_seconds": 14.244832361117005,
+        "hybrid_velocity_order_wall_seconds": 2.8837355487048626,
+        "id_compress_wall_seconds": 6.71275269985199,
+        "lattice_prepare_wall_seconds": 5.448237061500549e-06,
+        "lossy_fields_decompress_wall_seconds": 0.8880801480263472,
+        "lossy_fields_wall_seconds": 0.9173288233578205,
+        "metrics_wall_seconds": 13.173438033089042,
+        "preprocess_wall_seconds": 1.1963046323508024,
+        "recombine_h5_wall_seconds": 0.2738841325044632,
+        "roundtrip_wall_seconds": 58.45976547524333,
+        "structure_prepare_wall_seconds": 0.08861218392848969
+      },
+      "velocity_bounds": {
+        "vx": 0.014336482238769531,
+        "vy": 0.018318717193603517,
+        "vz": 0.016528592681884766
+      },
+      "velocity_errors": {
+        "vx": 0.014336466789245605,
+        "vy": 0.018318653106689453,
+        "vz": 0.016528531908988953
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 118771214,
+        "id_bytes": 42850014,
+        "manifest_bytes": 16886,
+        "original_bytes": 511027136,
+        "position_bytes": 17071708,
+        "velocity_bytes": 58832606
+      },
+      "ids_exact": true,
+      "input": "dat_7.10",
+      "optimized": {
+        "compressed_bytes": 104780848,
+        "id_bytes": 33348591,
+        "manifest_bytes": 17052,
+        "original_bytes": 511027136,
+        "position_bytes": 16941789,
+        "velocity_bytes": 54473416
+      },
+      "particles": 15969598,
+      "position_l2_bound": 0.000171891982245192,
+      "position_l2_error": 0.00017153688219330134,
+      "timing": {
+        "canonical_order_wall_seconds": 16.88222873583436,
+        "compress_wall_seconds": 25.724820090457797,
+        "decompress_and_recombine_wall_seconds": 13.75624156370759,
+        "hybrid_velocity_order_wall_seconds": 2.280183607712388,
+        "id_compress_wall_seconds": 5.5740494430065155,
+        "lattice_prepare_wall_seconds": 1.4230608940124512e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5431682951748371,
+        "lossy_fields_wall_seconds": 0.5747896060347557,
+        "metrics_wall_seconds": 12.465833799913526,
+        "preprocess_wall_seconds": 0.7070375587791204,
+        "recombine_h5_wall_seconds": 0.2603527996689081,
+        "roundtrip_wall_seconds": 52.76799980737269,
+        "structure_prepare_wall_seconds": 0.06578213162720203
+      },
+      "velocity_bounds": {
+        "vx": 0.013738164520263673,
+        "vy": 0.012293782806396486,
+        "vz": 0.01653148193359375
+      },
+      "velocity_errors": {
+        "vx": 0.013738155364990234,
+        "vy": 0.012293756008148193,
+        "vz": 0.01653146743774414
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 119282328,
+        "id_bytes": 43001451,
+        "manifest_bytes": 16892,
+        "original_bytes": 513143456,
+        "position_bytes": 17011234,
+        "velocity_bytes": 59252751
+      },
+      "ids_exact": true,
+      "input": "dat_7.11",
+      "optimized": {
+        "compressed_bytes": 105295558,
+        "id_bytes": 33467282,
+        "manifest_bytes": 17060,
+        "original_bytes": 513143456,
+        "position_bytes": 16893610,
+        "velocity_bytes": 54917606
+      },
+      "particles": 16035733,
+      "position_l2_bound": 0.00017189197157185915,
+      "position_l2_error": 0.00017158364125341265,
+      "timing": {
+        "canonical_order_wall_seconds": 16.939148377627134,
+        "compress_wall_seconds": 26.17912247404456,
+        "decompress_and_recombine_wall_seconds": 13.651799404993653,
+        "hybrid_velocity_order_wall_seconds": 2.343859350308776,
+        "id_compress_wall_seconds": 5.808384977281094,
+        "lattice_prepare_wall_seconds": 1.5012919902801514e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5652085971087217,
+        "lossy_fields_wall_seconds": 0.6364499162882566,
+        "metrics_wall_seconds": 12.21992396749556,
+        "preprocess_wall_seconds": 0.6422439478337765,
+        "recombine_h5_wall_seconds": 0.2804773822426796,
+        "roundtrip_wall_seconds": 52.8161485735327,
+        "structure_prepare_wall_seconds": 0.07623432576656342
+      },
+      "velocity_bounds": {
+        "vx": 0.013548477935791016,
+        "vy": 0.014415050506591797,
+        "vz": 0.016286721801757813
+      },
+      "velocity_errors": {
+        "vx": 0.01354844868183136,
+        "vy": 0.014415040612220764,
+        "vz": 0.01628667116165161
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 131872857,
+        "id_bytes": 47497752,
+        "manifest_bytes": 16889,
+        "original_bytes": 530527104,
+        "position_bytes": 19477015,
+        "velocity_bytes": 64881201
+      },
+      "ids_exact": true,
+      "input": "dat_7.12",
+      "optimized": {
+        "compressed_bytes": 113097658,
+        "id_bytes": 35858857,
+        "manifest_bytes": 17059,
+        "original_bytes": 530527104,
+        "position_bytes": 19307711,
+        "velocity_bytes": 57914031
+      },
+      "particles": 16578972,
+      "position_l2_bound": 0.00012373853325378325,
+      "position_l2_error": 0.00012365099488254066,
+      "timing": {
+        "canonical_order_wall_seconds": 17.733706204220653,
+        "compress_wall_seconds": 27.71717924438417,
+        "decompress_and_recombine_wall_seconds": 12.969692829996347,
+        "hybrid_velocity_order_wall_seconds": 2.7898270413279533,
+        "id_compress_wall_seconds": 5.733490699902177,
+        "lattice_prepare_wall_seconds": 1.9837170839309692e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6473294068127871,
+        "lossy_fields_wall_seconds": 0.6608246732503176,
+        "metrics_wall_seconds": 12.943490132689476,
+        "preprocess_wall_seconds": 0.659434100612998,
+        "recombine_h5_wall_seconds": 0.23142789490520954,
+        "roundtrip_wall_seconds": 54.43246473558247,
+        "structure_prepare_wall_seconds": 0.08600633591413498
+      },
+      "velocity_bounds": {
+        "vx": 0.017906670379638674,
+        "vy": 0.015479994583129883,
+        "vz": 0.013585189819335939
+      },
+      "velocity_errors": {
+        "vx": 0.017906665802001953,
+        "vy": 0.015479981899261475,
+        "vz": 0.013585150241851807
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 124368905,
+        "id_bytes": 44469244,
+        "manifest_bytes": 16890,
+        "original_bytes": 529063168,
+        "position_bytes": 18973536,
+        "velocity_bytes": 60909235
+      },
+      "ids_exact": true,
+      "input": "dat_7.13",
+      "optimized": {
+        "compressed_bytes": 110094856,
+        "id_bytes": 34676815,
+        "manifest_bytes": 17058,
+        "original_bytes": 529063168,
+        "position_bytes": 18883520,
+        "velocity_bytes": 56517463
+      },
+      "particles": 16533224,
+      "position_l2_bound": 0.0001457530545728982,
+      "position_l2_error": 0.00014550695257372693,
+      "timing": {
+        "canonical_order_wall_seconds": 17.695455487817526,
+        "compress_wall_seconds": 27.16630045324564,
+        "decompress_and_recombine_wall_seconds": 12.607315294444561,
+        "hybrid_velocity_order_wall_seconds": 3.140448210760951,
+        "id_compress_wall_seconds": 5.324286185204983,
+        "lattice_prepare_wall_seconds": 1.1213123798370361e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6003926824778318,
+        "lossy_fields_wall_seconds": 0.5884925685822964,
+        "metrics_wall_seconds": 13.066278792917728,
+        "preprocess_wall_seconds": 0.6370728202164173,
+        "recombine_h5_wall_seconds": 0.1972946971654892,
+        "roundtrip_wall_seconds": 53.58080589212477,
+        "structure_prepare_wall_seconds": 0.06276635825634003
+      },
+      "velocity_bounds": {
+        "vx": 0.017402198791503908,
+        "vy": 0.01383383140563965,
+        "vz": 0.014820838928222656
+      },
+      "velocity_errors": {
+        "vx": 0.017402172088623047,
+        "vy": 0.013833820819854736,
+        "vz": 0.014820832759141922
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 129243677,
+        "id_bytes": 47926750,
+        "manifest_bytes": 16888,
+        "original_bytes": 533103456,
+        "position_bytes": 16898169,
+        "velocity_bytes": 64401870
+      },
+      "ids_exact": true,
+      "input": "dat_7.14",
+      "optimized": {
+        "compressed_bytes": 112200520,
+        "id_bytes": 35772741,
+        "manifest_bytes": 17111,
+        "original_bytes": 533103456,
+        "position_bytes": 18705350,
+        "velocity_bytes": 57705318
+      },
+      "particles": 16659483,
+      "position_l2_bound": 0.000168222075243259,
+      "position_l2_error": 0.00016759297888480708,
+      "timing": {
+        "canonical_order_wall_seconds": 34.643220314756036,
+        "compress_wall_seconds": 43.50482057221234,
+        "decompress_and_recombine_wall_seconds": 12.877056600525975,
+        "hybrid_velocity_order_wall_seconds": 2.5553286094218493,
+        "id_compress_wall_seconds": 5.32639679685235,
+        "lattice_prepare_wall_seconds": 1.3820827007293701e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6899590585380793,
+        "lossy_fields_wall_seconds": 0.6578978486359119,
+        "metrics_wall_seconds": 11.740755936130881,
+        "preprocess_wall_seconds": 0.7354830652475357,
+        "recombine_h5_wall_seconds": 0.22844471223652363,
+        "roundtrip_wall_seconds": 68.95145611278713,
+        "structure_prepare_wall_seconds": 0.08398375101387501
+      },
+      "velocity_bounds": {
+        "vx": 0.014212715911865235,
+        "vy": 0.014277672576904297,
+        "vz": 0.015430535125732423
+      },
+      "velocity_errors": {
+        "vx": 0.014212697744369507,
+        "vy": 0.014277637004852295,
+        "vz": 0.0154305100440979
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 121153684,
+        "id_bytes": 43969946,
+        "manifest_bytes": 16883,
+        "original_bytes": 518393600,
+        "position_bytes": 16656327,
+        "velocity_bytes": 60510528
+      },
+      "ids_exact": true,
+      "input": "dat_7.15",
+      "optimized": {
+        "compressed_bytes": 106673400,
+        "id_bytes": 34134060,
+        "manifest_bytes": 17054,
+        "original_bytes": 518393600,
+        "position_bytes": 16540159,
+        "velocity_bytes": 55982127
+      },
+      "particles": 16199800,
+      "position_l2_bound": 0.00017189195831757417,
+      "position_l2_error": 0.00017157752513869375,
+      "timing": {
+        "canonical_order_wall_seconds": 17.238530449569225,
+        "compress_wall_seconds": 25.16720412671566,
+        "decompress_and_recombine_wall_seconds": 13.021053664386272,
+        "hybrid_velocity_order_wall_seconds": 1.947726571932435,
+        "id_compress_wall_seconds": 5.0777106042951345,
+        "lattice_prepare_wall_seconds": 1.1213123798370361e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5826396867632866,
+        "lossy_fields_wall_seconds": 0.5852021798491478,
+        "metrics_wall_seconds": 13.246920421719551,
+        "preprocess_wall_seconds": 0.6238542851060629,
+        "recombine_h5_wall_seconds": 0.21808437071740627,
+        "roundtrip_wall_seconds": 52.175587210804224,
+        "structure_prepare_wall_seconds": 0.07845591008663177
+      },
+      "velocity_bounds": {
+        "vx": 0.017640811920166016,
+        "vy": 0.01625802917480469,
+        "vz": 0.014339997863769532
+      },
+      "velocity_errors": {
+        "vx": 0.017640799283981323,
+        "vy": 0.01625800132751465,
+        "vz": 0.014339983463287354
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 121700769,
+        "id_bytes": 43890368,
+        "manifest_bytes": 16881,
+        "original_bytes": 521266624,
+        "position_bytes": 17096575,
+        "velocity_bytes": 60696945
+      },
+      "ids_exact": true,
+      "input": "dat_7.16",
+      "optimized": {
+        "compressed_bytes": 107159560,
+        "id_bytes": 34211406,
+        "manifest_bytes": 17048,
+        "original_bytes": 521266624,
+        "position_bytes": 16959910,
+        "velocity_bytes": 55971196
+      },
+      "particles": 16289582,
+      "position_l2_bound": 0.0001718919409498818,
+      "position_l2_error": 0.0001715515382269169,
+      "timing": {
+        "canonical_order_wall_seconds": 17.136592883616686,
+        "compress_wall_seconds": 26.193718930706382,
+        "decompress_and_recombine_wall_seconds": 13.09298369847238,
+        "hybrid_velocity_order_wall_seconds": 2.7086410112679005,
+        "id_compress_wall_seconds": 5.412437614053488,
+        "lattice_prepare_wall_seconds": 1.082196831703186e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5759024769067764,
+        "lossy_fields_wall_seconds": 0.5865702591836452,
+        "metrics_wall_seconds": 12.920977681875229,
+        "preprocess_wall_seconds": 0.7257001902908087,
+        "recombine_h5_wall_seconds": 0.28453331626951694,
+        "roundtrip_wall_seconds": 53.02703486569226,
+        "structure_prepare_wall_seconds": 0.06660996936261654
+      },
+      "velocity_bounds": {
+        "vx": 0.014358756256103517,
+        "vy": 0.015792405700683593,
+        "vz": 0.014900195312500001
+      },
+      "velocity_errors": {
+        "vx": 0.014358729124069214,
+        "vy": 0.015792399644851685,
+        "vz": 0.014900177717208862
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 120921235,
+        "id_bytes": 44016181,
+        "manifest_bytes": 16882,
+        "original_bytes": 517715200,
+        "position_bytes": 16923720,
+        "velocity_bytes": 59964452
+      },
+      "ids_exact": true,
+      "input": "dat_7.17",
+      "optimized": {
+        "compressed_bytes": 106237794,
+        "id_bytes": 34053020,
+        "manifest_bytes": 17049,
+        "original_bytes": 517715200,
+        "position_bytes": 16819865,
+        "velocity_bytes": 55347860
+      },
+      "particles": 16178600,
+      "position_l2_bound": 0.0001718919921926289,
+      "position_l2_error": 0.00017173745341469453,
+      "timing": {
+        "canonical_order_wall_seconds": 17.116589479148388,
+        "compress_wall_seconds": 25.798503134399652,
+        "decompress_and_recombine_wall_seconds": 12.918999964371324,
+        "hybrid_velocity_order_wall_seconds": 2.553396824747324,
+        "id_compress_wall_seconds": 5.242821475490928,
+        "lattice_prepare_wall_seconds": 1.3727694749832153e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5753657408058643,
+        "lossy_fields_wall_seconds": 0.5824571885168552,
+        "metrics_wall_seconds": 12.520999638363719,
+        "preprocess_wall_seconds": 0.5446457806974649,
+        "recombine_h5_wall_seconds": 0.1923234537243843,
+        "roundtrip_wall_seconds": 51.89227463491261,
+        "structure_prepare_wall_seconds": 0.06359328515827656
+      },
+      "velocity_bounds": {
+        "vx": 0.01627969436645508,
+        "vy": 0.015028976440429689,
+        "vz": 0.014679315185546877
+      },
+      "velocity_errors": {
+        "vx": 0.016279608011245728,
+        "vy": 0.015028953552246094,
+        "vz": 0.014679312705993652
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 128835618,
+        "id_bytes": 47281399,
+        "manifest_bytes": 16884,
+        "original_bytes": 538155552,
+        "position_bytes": 17222958,
+        "velocity_bytes": 64314377
+      },
+      "ids_exact": true,
+      "input": "dat_7.19",
+      "optimized": {
+        "compressed_bytes": 111047545,
+        "id_bytes": 35813039,
+        "manifest_bytes": 17051,
+        "original_bytes": 538155552,
+        "position_bytes": 17180319,
+        "velocity_bytes": 58037136
+      },
+      "particles": 16817361,
+      "position_l2_bound": 0.00017189199057953284,
+      "position_l2_error": 0.00017162517405997733,
+      "timing": {
+        "canonical_order_wall_seconds": 17.250025345012546,
+        "compress_wall_seconds": 25.64305161498487,
+        "decompress_and_recombine_wall_seconds": 12.896446788683534,
+        "hybrid_velocity_order_wall_seconds": 2.0901946555823088,
+        "id_compress_wall_seconds": 5.3015744574368,
+        "lattice_prepare_wall_seconds": 1.3615936040878296e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5959654450416565,
+        "lossy_fields_wall_seconds": 0.6763620655983686,
+        "metrics_wall_seconds": 13.74923051521182,
+        "preprocess_wall_seconds": 0.6212382595986128,
+        "recombine_h5_wall_seconds": 0.21852075308561325,
+        "roundtrip_wall_seconds": 53.00379943475127,
+        "structure_prepare_wall_seconds": 0.06545143015682697
+      },
+      "velocity_bounds": {
+        "vx": 0.015598856353759766,
+        "vy": 0.015683484649658203,
+        "vz": 0.013727481842041016
+      },
+      "velocity_errors": {
+        "vx": 0.015598833560943604,
+        "vy": 0.015683472156524658,
+        "vz": 0.013727471232414246
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 133081415,
+        "id_bytes": 45596885,
+        "manifest_bytes": 16847,
+        "original_bytes": 530859488,
+        "position_bytes": 23442872,
+        "velocity_bytes": 64024811
+      },
+      "ids_exact": true,
+      "input": "dat_7.2",
+      "optimized": {
+        "compressed_bytes": 117478632,
+        "id_bytes": 35458889,
+        "manifest_bytes": 17015,
+        "original_bytes": 530859488,
+        "position_bytes": 23346922,
+        "velocity_bytes": 58655806
+      },
+      "particles": 16589359,
+      "position_l2_bound": 8.594600025004195e-05,
+      "position_l2_error": 8.582656935784471e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 18.270740378648043,
+        "compress_wall_seconds": 29.41779839619994,
+        "decompress_and_recombine_wall_seconds": 14.190967189148068,
+        "hybrid_velocity_order_wall_seconds": 2.837647905573249,
+        "id_compress_wall_seconds": 6.721488451585174,
+        "lattice_prepare_wall_seconds": 3.6265701055526733e-06,
+        "lossy_fields_decompress_wall_seconds": 0.8931028619408607,
+        "lossy_fields_wall_seconds": 0.9618868455290794,
+        "metrics_wall_seconds": 13.02400722913444,
+        "preprocess_wall_seconds": 1.2164303567260504,
+        "recombine_h5_wall_seconds": 0.2614218629896641,
+        "roundtrip_wall_seconds": 57.94974085688591,
+        "structure_prepare_wall_seconds": 0.08152397349476814
+      },
+      "velocity_bounds": {
+        "vx": 0.015620597839355469,
+        "vy": 0.012661036682128908,
+        "vz": 0.014083468246459962
+      },
+      "velocity_errors": {
+        "vx": 0.015620589256286621,
+        "vy": 0.012661010026931763,
+        "vz": 0.014083445072174072
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 126802323,
+        "id_bytes": 45511217,
+        "manifest_bytes": 16871,
+        "original_bytes": 539408032,
+        "position_bytes": 17634070,
+        "velocity_bytes": 63640165
+      },
+      "ids_exact": true,
+      "input": "dat_7.20",
+      "optimized": {
+        "compressed_bytes": 111856822,
+        "id_bytes": 35366664,
+        "manifest_bytes": 17038,
+        "original_bytes": 539408032,
+        "position_bytes": 17505023,
+        "velocity_bytes": 58968097
+      },
+      "particles": 16856501,
+      "position_l2_bound": 0.00017189198818677042,
+      "position_l2_error": 0.00017170808207526552,
+      "timing": {
+        "canonical_order_wall_seconds": 17.95182190090418,
+        "compress_wall_seconds": 27.08968668244779,
+        "decompress_and_recombine_wall_seconds": 13.791508369147778,
+        "hybrid_velocity_order_wall_seconds": 2.556755067780614,
+        "id_compress_wall_seconds": 5.63042626157403,
+        "lattice_prepare_wall_seconds": 1.7527490854263306e-06,
+        "lossy_fields_decompress_wall_seconds": 0.662962744012475,
+        "lossy_fields_wall_seconds": 0.6321194339543581,
+        "metrics_wall_seconds": 13.73962139338255,
+        "preprocess_wall_seconds": 0.7846056595444679,
+        "recombine_h5_wall_seconds": 0.30684481002390385,
+        "roundtrip_wall_seconds": 55.49932749569416,
+        "structure_prepare_wall_seconds": 0.07666207477450371
+      },
+      "velocity_bounds": {
+        "vx": 0.012211009597778322,
+        "vy": 0.01357771453857422,
+        "vz": 0.01428005599975586
+      },
+      "velocity_errors": {
+        "vx": 0.012210965156555176,
+        "vy": 0.013577699661254883,
+        "vz": 0.014280036091804504
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 130097665,
+        "id_bytes": 48336939,
+        "manifest_bytes": 16886,
+        "original_bytes": 537171072,
+        "position_bytes": 16732718,
+        "velocity_bytes": 65011122
+      },
+      "ids_exact": true,
+      "input": "dat_7.22",
+      "optimized": {
+        "compressed_bytes": 111513996,
+        "id_bytes": 36299284,
+        "manifest_bytes": 17054,
+        "original_bytes": 537171072,
+        "position_bytes": 16768851,
+        "velocity_bytes": 58428807
+      },
+      "particles": 16786596,
+      "position_l2_bound": 0.0001684474887411869,
+      "position_l2_error": 0.0001681655453542495,
+      "timing": {
+        "canonical_order_wall_seconds": 16.90655802562833,
+        "compress_wall_seconds": 26.422288479283452,
+        "decompress_and_recombine_wall_seconds": 13.100332403555512,
+        "hybrid_velocity_order_wall_seconds": 2.8664382714778185,
+        "id_compress_wall_seconds": 5.6527316346764565,
+        "lattice_prepare_wall_seconds": 1.2814998626708984e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6207035761326551,
+        "lossy_fields_wall_seconds": 0.6604288034141064,
+        "metrics_wall_seconds": 13.471311511471868,
+        "preprocess_wall_seconds": 0.7608575448393822,
+        "recombine_h5_wall_seconds": 0.34262525103986263,
+        "roundtrip_wall_seconds": 53.88659127242863,
+        "structure_prepare_wall_seconds": 0.0652410201728344
+      },
+      "velocity_bounds": {
+        "vx": 0.014270580291748047,
+        "vy": 0.01588171844482422,
+        "vz": 0.014599056243896485
+      },
+      "velocity_errors": {
+        "vx": 0.014270573854446411,
+        "vy": 0.015881717205047607,
+        "vz": 0.014599055051803589
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 124849526,
+        "id_bytes": 44729097,
+        "manifest_bytes": 16894,
+        "original_bytes": 531423776,
+        "position_bytes": 19022519,
+        "velocity_bytes": 61081016
+      },
+      "ids_exact": true,
+      "input": "dat_7.23",
+      "optimized": {
+        "compressed_bytes": 110361265,
+        "id_bytes": 34886242,
+        "manifest_bytes": 17065,
+        "original_bytes": 531423776,
+        "position_bytes": 18920119,
+        "velocity_bytes": 56537839
+      },
+      "particles": 16606993,
+      "position_l2_bound": 0.00014702018736663852,
+      "position_l2_error": 0.00014686089881452166,
+      "timing": {
+        "canonical_order_wall_seconds": 17.755620626732707,
+        "compress_wall_seconds": 26.6804535780102,
+        "decompress_and_recombine_wall_seconds": 13.317866316065192,
+        "hybrid_velocity_order_wall_seconds": 2.5702435858547688,
+        "id_compress_wall_seconds": 5.269654834643006,
+        "lattice_prepare_wall_seconds": 1.2926757335662842e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5632351469248533,
+        "lossy_fields_wall_seconds": 0.7421886641532183,
+        "metrics_wall_seconds": 12.232763404026628,
+        "preprocess_wall_seconds": 0.5826433096081018,
+        "recombine_h5_wall_seconds": 0.28574301302433014,
+        "roundtrip_wall_seconds": 52.89725034125149,
+        "structure_prepare_wall_seconds": 0.060474246740341187
+      },
+      "velocity_bounds": {
+        "vx": 0.014166351318359376,
+        "vy": 0.015430749511718751,
+        "vz": 0.015082247161865235
+      },
+      "velocity_errors": {
+        "vx": 0.014166325330734253,
+        "vy": 0.015430748462677002,
+        "vz": 0.015082240104675293
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 126823232,
+        "id_bytes": 45772592,
+        "manifest_bytes": 16878,
+        "original_bytes": 542597696,
+        "position_bytes": 17603965,
+        "velocity_bytes": 63429797
+      },
+      "ids_exact": true,
+      "input": "dat_7.24",
+      "optimized": {
+        "compressed_bytes": 113677784,
+        "id_bytes": 35466035,
+        "manifest_bytes": 17103,
+        "original_bytes": 542597696,
+        "position_bytes": 19572156,
+        "velocity_bytes": 58622490
+      },
+      "particles": 16956178,
+      "position_l2_bound": 0.0001718919709266252,
+      "position_l2_error": 0.00017165865620443987,
+      "timing": {
+        "canonical_order_wall_seconds": 36.02999314293265,
+        "compress_wall_seconds": 45.21616945415735,
+        "decompress_and_recombine_wall_seconds": 13.29217547737062,
+        "hybrid_velocity_order_wall_seconds": 2.8774256501346827,
+        "id_compress_wall_seconds": 5.237194441258907,
+        "lattice_prepare_wall_seconds": 1.2014061212539673e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6286019403487444,
+        "lossy_fields_wall_seconds": 0.6688460540026426,
+        "metrics_wall_seconds": 12.34090868756175,
+        "preprocess_wall_seconds": 0.7890804726630449,
+        "recombine_h5_wall_seconds": 0.2653008699417114,
+        "roundtrip_wall_seconds": 71.7251859381795,
+        "structure_prepare_wall_seconds": 0.06717737205326557
+      },
+      "velocity_bounds": {
+        "vx": 0.013612628173828125,
+        "vy": 0.014017365264892579,
+        "vz": 0.016653643798828124
+      },
+      "velocity_errors": {
+        "vx": 0.013612627983093262,
+        "vy": 0.014017350971698761,
+        "vz": 0.016653627157211304
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 129599471,
+        "id_bytes": 47555598,
+        "manifest_bytes": 16894,
+        "original_bytes": 543679680,
+        "position_bytes": 17172856,
+        "velocity_bytes": 64854123
+      },
+      "ids_exact": true,
+      "input": "dat_7.25",
+      "optimized": {
+        "compressed_bytes": 112275683,
+        "id_bytes": 36238650,
+        "manifest_bytes": 17060,
+        "original_bytes": 543679680,
+        "position_bytes": 17134269,
+        "velocity_bytes": 58885704
+      },
+      "particles": 16989990,
+      "position_l2_bound": 0.0001718919708459698,
+      "position_l2_error": 0.00017173113664645893,
+      "timing": {
+        "canonical_order_wall_seconds": 17.223894765600562,
+        "compress_wall_seconds": 25.47470797598362,
+        "decompress_and_recombine_wall_seconds": 12.712394651025534,
+        "hybrid_velocity_order_wall_seconds": 2.040123328566551,
+        "id_compress_wall_seconds": 5.293726045638323,
+        "lattice_prepare_wall_seconds": 1.4621764421463013e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6254744473844767,
+        "lossy_fields_wall_seconds": 0.599864860996604,
+        "metrics_wall_seconds": 14.217251516878605,
+        "preprocess_wall_seconds": 0.6578030344098806,
+        "recombine_h5_wall_seconds": 0.37076367996633053,
+        "roundtrip_wall_seconds": 53.17647862806916,
+        "structure_prepare_wall_seconds": 0.06908107548952103
+      },
+      "velocity_bounds": {
+        "vx": 0.014873621368408203,
+        "vy": 0.015552184295654298,
+        "vz": 0.017152223205566405
+      },
+      "velocity_errors": {
+        "vx": 0.014873504638671875,
+        "vy": 0.015552163124084473,
+        "vz": 0.017152220010757446
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 126494132,
+        "id_bytes": 46181468,
+        "manifest_bytes": 16892,
+        "original_bytes": 545829632,
+        "position_bytes": 17483120,
+        "velocity_bytes": 62812652
+      },
+      "ids_exact": true,
+      "input": "dat_7.26",
+      "optimized": {
+        "compressed_bytes": 111533490,
+        "id_bytes": 35911380,
+        "manifest_bytes": 17059,
+        "original_bytes": 545829632,
+        "position_bytes": 17349315,
+        "velocity_bytes": 58255736
+      },
+      "particles": 17057176,
+      "position_l2_bound": 0.00017189197904588058,
+      "position_l2_error": 0.00017171297166251675,
+      "timing": {
+        "canonical_order_wall_seconds": 18.022624541074038,
+        "compress_wall_seconds": 26.66448113694787,
+        "decompress_and_recombine_wall_seconds": 13.788193410262465,
+        "hybrid_velocity_order_wall_seconds": 2.337232396006584,
+        "id_compress_wall_seconds": 5.402260083705187,
+        "lattice_prepare_wall_seconds": 1.0225921869277954e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6218152977526188,
+        "lossy_fields_wall_seconds": 0.590751713141799,
+        "metrics_wall_seconds": 14.078507671132684,
+        "preprocess_wall_seconds": 0.6351467240601778,
+        "recombine_h5_wall_seconds": 0.30109393037855625,
+        "roundtrip_wall_seconds": 55.26728588715196,
+        "structure_prepare_wall_seconds": 0.062473876401782036
+      },
+      "velocity_bounds": {
+        "vx": 0.016653750610351563,
+        "vy": 0.015314173126220704,
+        "vz": 0.020903907775878906
+      },
+      "velocity_errors": {
+        "vx": 0.016653716564178467,
+        "vy": 0.01531413197517395,
+        "vz": 0.020903825759887695
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 132618814,
+        "id_bytes": 47956691,
+        "manifest_bytes": 16896,
+        "original_bytes": 534241248,
+        "position_bytes": 19538162,
+        "velocity_bytes": 65107065
+      },
+      "ids_exact": true,
+      "input": "dat_7.27",
+      "optimized": {
+        "compressed_bytes": 114051082,
+        "id_bytes": 36261465,
+        "manifest_bytes": 17063,
+        "original_bytes": 534241248,
+        "position_bytes": 19524314,
+        "velocity_bytes": 58248240
+      },
+      "particles": 16695039,
+      "position_l2_bound": 0.0001244087737728347,
+      "position_l2_error": 0.00012429967290421463,
+      "timing": {
+        "canonical_order_wall_seconds": 17.505029879510403,
+        "compress_wall_seconds": 26.08697368390858,
+        "decompress_and_recombine_wall_seconds": 13.192761577665806,
+        "hybrid_velocity_order_wall_seconds": 2.297822868451476,
+        "id_compress_wall_seconds": 5.2238794490695,
+        "lattice_prepare_wall_seconds": 1.212581992149353e-06,
+        "lossy_fields_decompress_wall_seconds": 0.616654796525836,
+        "lossy_fields_wall_seconds": 0.7300139851868153,
+        "metrics_wall_seconds": 13.096298592165112,
+        "preprocess_wall_seconds": 0.5856619291007519,
+        "recombine_h5_wall_seconds": 0.30059151723980904,
+        "roundtrip_wall_seconds": 53.04477138258517,
+        "structure_prepare_wall_seconds": 0.06369505263864994
+      },
+      "velocity_bounds": {
+        "vx": 0.013317583465576172,
+        "vy": 0.014033469772338868,
+        "vz": 0.016289202117919923
+      },
+      "velocity_errors": {
+        "vx": 0.013317583128809929,
+        "vy": 0.01403343677520752,
+        "vz": 0.016289174556732178
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 129085098,
+        "id_bytes": 44960176,
+        "manifest_bytes": 16894,
+        "original_bytes": 532989536,
+        "position_bytes": 22262267,
+        "velocity_bytes": 61845761
+      },
+      "ids_exact": true,
+      "input": "dat_7.28",
+      "optimized": {
+        "compressed_bytes": 114782182,
+        "id_bytes": 35180842,
+        "manifest_bytes": 17060,
+        "original_bytes": 532989536,
+        "position_bytes": 22174922,
+        "velocity_bytes": 57409358
+      },
+      "particles": 16655923,
+      "position_l2_bound": 0.00010297060128393142,
+      "position_l2_error": 0.00010284358421136112,
+      "timing": {
+        "canonical_order_wall_seconds": 17.906804902479053,
+        "compress_wall_seconds": 26.06616106443107,
+        "decompress_and_recombine_wall_seconds": 13.548813665285707,
+        "hybrid_velocity_order_wall_seconds": 2.010892102494836,
+        "id_compress_wall_seconds": 5.206861257553101,
+        "lattice_prepare_wall_seconds": 1.3932585716247559e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5868576858192682,
+        "lossy_fields_wall_seconds": 0.6396848224103451,
+        "metrics_wall_seconds": 13.357836509123445,
+        "preprocess_wall_seconds": 0.7407462131232023,
+        "recombine_h5_wall_seconds": 0.3328202422708273,
+        "roundtrip_wall_seconds": 53.80690624564886,
+        "structure_prepare_wall_seconds": 0.06700780615210533
+      },
+      "velocity_bounds": {
+        "vx": 0.015674694061279297,
+        "vy": 0.01549875717163086,
+        "vz": 0.01704386444091797
+      },
+      "velocity_errors": {
+        "vx": 0.015674680471420288,
+        "vy": 0.015498697757720947,
+        "vz": 0.0170438289642334
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 136326240,
+        "id_bytes": 48629242,
+        "manifest_bytes": 16905,
+        "original_bytes": 540345120,
+        "position_bytes": 23296293,
+        "velocity_bytes": 64383800
+      },
+      "ids_exact": true,
+      "input": "dat_7.29",
+      "optimized": {
+        "compressed_bytes": 117758959,
+        "id_bytes": 36665466,
+        "manifest_bytes": 17069,
+        "original_bytes": 540345120,
+        "position_bytes": 23319893,
+        "velocity_bytes": 57756531
+      },
+      "particles": 16885785,
+      "position_l2_bound": 8.59459862160891e-05,
+      "position_l2_error": 8.582487410812609e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 18.01156267337501,
+        "compress_wall_seconds": 26.655095238238573,
+        "decompress_and_recombine_wall_seconds": 13.490121997892857,
+        "hybrid_velocity_order_wall_seconds": 2.306267051026225,
+        "id_compress_wall_seconds": 5.360821794718504,
+        "lattice_prepare_wall_seconds": 1.3727694749832153e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5989554580301046,
+        "lossy_fields_wall_seconds": 0.6055269557982683,
+        "metrics_wall_seconds": 13.163017863407731,
+        "preprocess_wall_seconds": 0.5859775394201279,
+        "recombine_h5_wall_seconds": 0.21653250977396965,
+        "roundtrip_wall_seconds": 53.996853766962886,
+        "structure_prepare_wall_seconds": 0.0656942781060934
+      },
+      "velocity_bounds": {
+        "vx": 0.01617951889038086,
+        "vy": 0.02265182571411133,
+        "vz": 0.017215726470947268
+      },
+      "velocity_errors": {
+        "vx": 0.01617950201034546,
+        "vy": 0.022651799023151398,
+        "vz": 0.01721566915512085
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 127898988,
+        "id_bytes": 47248184,
+        "manifest_bytes": 16891,
+        "original_bytes": 537154560,
+        "position_bytes": 16785529,
+        "velocity_bytes": 63848384
+      },
+      "ids_exact": true,
+      "input": "dat_7.30",
+      "optimized": {
+        "compressed_bytes": 110893291,
+        "id_bytes": 35967466,
+        "manifest_bytes": 17063,
+        "original_bytes": 537154560,
+        "position_bytes": 16760925,
+        "velocity_bytes": 58147837
+      },
+      "particles": 16786080,
+      "position_l2_bound": 0.00017189195950051035,
+      "position_l2_error": 0.00017171098319369873,
+      "timing": {
+        "canonical_order_wall_seconds": 16.968224031850696,
+        "compress_wall_seconds": 25.553997987881303,
+        "decompress_and_recombine_wall_seconds": 12.621388234198093,
+        "hybrid_velocity_order_wall_seconds": 2.0515205301344395,
+        "id_compress_wall_seconds": 5.551627391949296,
+        "lattice_prepare_wall_seconds": 1.2703239917755127e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6018759962171316,
+        "lossy_fields_wall_seconds": 0.5929793175309896,
+        "metrics_wall_seconds": 13.001454573124647,
+        "preprocess_wall_seconds": 0.5947499088943005,
+        "recombine_h5_wall_seconds": 0.21730000711977482,
+        "roundtrip_wall_seconds": 51.879314448684454,
+        "structure_prepare_wall_seconds": 0.07013453543186188
+      },
+      "velocity_bounds": {
+        "vx": 0.016369024658203127,
+        "vy": 0.016011792755126954,
+        "vz": 0.016098001098632814
+      },
+      "velocity_errors": {
+        "vx": 0.016368985176086426,
+        "vy": 0.01601177453994751,
+        "vz": 0.016097985208034515
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 128004600,
+        "id_bytes": 46619590,
+        "manifest_bytes": 16882,
+        "original_bytes": 546845152,
+        "position_bytes": 17357989,
+        "velocity_bytes": 64010139
+      },
+      "ids_exact": true,
+      "input": "dat_7.31",
+      "optimized": {
+        "compressed_bytes": 112578410,
+        "id_bytes": 36221966,
+        "manifest_bytes": 17050,
+        "original_bytes": 546845152,
+        "position_bytes": 17221981,
+        "velocity_bytes": 59117413
+      },
+      "particles": 17088911,
+      "position_l2_bound": 0.00017189199348310784,
+      "position_l2_error": 0.0001716893245963699,
+      "timing": {
+        "canonical_order_wall_seconds": 18.057090766727924,
+        "compress_wall_seconds": 26.95396574959159,
+        "decompress_and_recombine_wall_seconds": 13.529642384499311,
+        "hybrid_velocity_order_wall_seconds": 2.5753341130912304,
+        "id_compress_wall_seconds": 5.349011229351163,
+        "lattice_prepare_wall_seconds": 1.1920928955078125e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6937708295881748,
+        "lossy_fields_wall_seconds": 0.6260400153696537,
+        "metrics_wall_seconds": 12.36281076259911,
+        "preprocess_wall_seconds": 0.6166146844625473,
+        "recombine_h5_wall_seconds": 0.226352846249938,
+        "roundtrip_wall_seconds": 53.56152849458158,
+        "structure_prepare_wall_seconds": 0.06289858929812908
+      },
+      "velocity_bounds": {
+        "vx": 0.015135946655273439,
+        "vy": 0.01754344253540039,
+        "vz": 0.016326507568359377
+      },
+      "velocity_errors": {
+        "vx": 0.01513594388961792,
+        "vy": 0.017543435096740723,
+        "vz": 0.016326487064361572
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 128322972,
+        "id_bytes": 46568596,
+        "manifest_bytes": 16857,
+        "original_bytes": 547038976,
+        "position_bytes": 17743634,
+        "velocity_bytes": 63993885
+      },
+      "ids_exact": true,
+      "input": "dat_7.32",
+      "optimized": {
+        "compressed_bytes": 112820223,
+        "id_bytes": 35947609,
+        "manifest_bytes": 17023,
+        "original_bytes": 547038976,
+        "position_bytes": 17623755,
+        "velocity_bytes": 59231836
+      },
+      "particles": 17094968,
+      "position_l2_bound": 0.00017189199711257791,
+      "position_l2_error": 0.00017170913587709338,
+      "timing": {
+        "canonical_order_wall_seconds": 18.407163500785828,
+        "compress_wall_seconds": 26.64995943196118,
+        "decompress_and_recombine_wall_seconds": 14.310330169275403,
+        "hybrid_velocity_order_wall_seconds": 2.0218990687280893,
+        "id_compress_wall_seconds": 5.275424499064684,
+        "lattice_prepare_wall_seconds": 9.723007678985596e-07,
+        "lossy_fields_decompress_wall_seconds": 0.6720241960138083,
+        "lossy_fields_wall_seconds": 0.6649227943271399,
+        "metrics_wall_seconds": 13.819133449345827,
+        "preprocess_wall_seconds": 0.6496988981962204,
+        "recombine_h5_wall_seconds": 0.288889616727829,
+        "roundtrip_wall_seconds": 55.51822543889284,
+        "structure_prepare_wall_seconds": 0.042680416256189346
+      },
+      "velocity_bounds": {
+        "vx": 0.014829560089111328,
+        "vy": 0.01401866683959961,
+        "vz": 0.016131591796875
+      },
+      "velocity_errors": {
+        "vx": 0.014829516410827637,
+        "vy": 0.014018663205206394,
+        "vz": 0.016131579875946045
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 130649184,
+        "id_bytes": 45225351,
+        "manifest_bytes": 16910,
+        "original_bytes": 527044352,
+        "position_bytes": 23484986,
+        "velocity_bytes": 61921937
+      },
+      "ids_exact": true,
+      "input": "dat_7.33",
+      "optimized": {
+        "compressed_bytes": 115015521,
+        "id_bytes": 35080187,
+        "manifest_bytes": 17076,
+        "original_bytes": 527044352,
+        "position_bytes": 23402523,
+        "velocity_bytes": 56515735
+      },
+      "particles": 16470136,
+      "position_l2_bound": 8.59459837695574e-05,
+      "position_l2_error": 8.582717801877632e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 17.56147206388414,
+        "compress_wall_seconds": 26.461972711607814,
+        "decompress_and_recombine_wall_seconds": 13.244520347565413,
+        "hybrid_velocity_order_wall_seconds": 2.638599431142211,
+        "id_compress_wall_seconds": 5.252915423363447,
+        "lattice_prepare_wall_seconds": 1.1622905731201172e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6052757743746042,
+        "lossy_fields_wall_seconds": 0.6165363155305386,
+        "metrics_wall_seconds": 13.014016715809703,
+        "preprocess_wall_seconds": 0.5748287066817284,
+        "recombine_h5_wall_seconds": 0.19285327941179276,
+        "roundtrip_wall_seconds": 53.37636183574796,
+        "structure_prepare_wall_seconds": 0.0687769316136837
+      },
+      "velocity_bounds": {
+        "vx": 0.014739159393310547,
+        "vy": 0.018850575256347656,
+        "vz": 0.014297859954833986
+      },
+      "velocity_errors": {
+        "vx": 0.014739155769348145,
+        "vy": 0.01885056495666504,
+        "vz": 0.014297842979431152
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 132465617,
+        "id_bytes": 45729406,
+        "manifest_bytes": 16912,
+        "original_bytes": 532072928,
+        "position_bytes": 23845029,
+        "velocity_bytes": 62874270
+      },
+      "ids_exact": true,
+      "input": "dat_7.34",
+      "optimized": {
+        "compressed_bytes": 116323414,
+        "id_bytes": 35412629,
+        "manifest_bytes": 17081,
+        "original_bytes": 532072928,
+        "position_bytes": 23747100,
+        "velocity_bytes": 57146604
+      },
+      "particles": 16627279,
+      "position_l2_bound": 8.59459876947634e-05,
+      "position_l2_error": 8.578760628469988e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 18.300283048301935,
+        "compress_wall_seconds": 26.648085637018085,
+        "decompress_and_recombine_wall_seconds": 13.542130716145039,
+        "hybrid_velocity_order_wall_seconds": 2.0431241523474455,
+        "id_compress_wall_seconds": 5.310011466965079,
+        "lattice_prepare_wall_seconds": 1.1418014764785767e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6174821835011244,
+        "lossy_fields_wall_seconds": 0.6778622958809137,
+        "metrics_wall_seconds": 12.566121527925134,
+        "preprocess_wall_seconds": 0.6229551210999489,
+        "recombine_h5_wall_seconds": 0.21662513352930546,
+        "roundtrip_wall_seconds": 53.4604258518666,
+        "structure_prepare_wall_seconds": 0.06609327532351017
+      },
+      "velocity_bounds": {
+        "vx": 0.015263399505615236,
+        "vy": 0.012984486389160157,
+        "vz": 0.014416285705566407
+      },
+      "velocity_errors": {
+        "vx": 0.015263378620147705,
+        "vy": 0.012984409928321838,
+        "vz": 0.014416277408599854
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 132878080,
+        "id_bytes": 46092718,
+        "manifest_bytes": 16891,
+        "original_bytes": 533780768,
+        "position_bytes": 23849610,
+        "velocity_bytes": 62918861
+      },
+      "ids_exact": true,
+      "input": "dat_7.35",
+      "optimized": {
+        "compressed_bytes": 116985148,
+        "id_bytes": 35548101,
+        "manifest_bytes": 17061,
+        "original_bytes": 533780768,
+        "position_bytes": 23750560,
+        "velocity_bytes": 57669426
+      },
+      "particles": 16680649,
+      "position_l2_bound": 8.594598075844103e-05,
+      "position_l2_error": 8.579153993357611e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 17.76716387271881,
+        "compress_wall_seconds": 26.79768466949463,
+        "decompress_and_recombine_wall_seconds": 13.707762397825718,
+        "hybrid_velocity_order_wall_seconds": 2.600775135681033,
+        "id_compress_wall_seconds": 5.358178010210395,
+        "lattice_prepare_wall_seconds": 1.212581992149353e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5885344352573156,
+        "lossy_fields_wall_seconds": 0.7466565556824207,
+        "metrics_wall_seconds": 11.88869471475482,
+        "preprocess_wall_seconds": 0.5604433063417673,
+        "recombine_h5_wall_seconds": 0.22435233555734158,
+        "roundtrip_wall_seconds": 53.03297078423202,
+        "structure_prepare_wall_seconds": 0.06475802510976791
+      },
+      "velocity_bounds": {
+        "vx": 0.013848402404785158,
+        "vy": 0.014037973785400391,
+        "vz": 0.015566558837890626
+      },
+      "velocity_errors": {
+        "vx": 0.013848336762748659,
+        "vy": 0.01403796672821045,
+        "vz": 0.015566527843475342
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 120020899,
+        "id_bytes": 43426794,
+        "manifest_bytes": 16857,
+        "original_bytes": 514222784,
+        "position_bytes": 16873915,
+        "velocity_bytes": 59703333
+      },
+      "ids_exact": true,
+      "input": "dat_7.4",
+      "optimized": {
+        "compressed_bytes": 105828911,
+        "id_bytes": 33720903,
+        "manifest_bytes": 17017,
+        "original_bytes": 514222784,
+        "position_bytes": 16759398,
+        "velocity_bytes": 55331593
+      },
+      "particles": 16069462,
+      "position_l2_bound": 0.00017189198369698088,
+      "position_l2_error": 0.00017170117689070463,
+      "timing": {
+        "canonical_order_wall_seconds": 17.016588671132922,
+        "compress_wall_seconds": 27.42537952400744,
+        "decompress_and_recombine_wall_seconds": 13.860772365704179,
+        "hybrid_velocity_order_wall_seconds": 2.63778455555439,
+        "id_compress_wall_seconds": 6.470758745446801,
+        "lattice_prepare_wall_seconds": 1.9837170839309692e-06,
+        "lossy_fields_decompress_wall_seconds": 0.755043838173151,
+        "lossy_fields_wall_seconds": 0.8715945277363062,
+        "metrics_wall_seconds": 13.125582560896873,
+        "preprocess_wall_seconds": 1.1385856326669455,
+        "recombine_h5_wall_seconds": 0.38882290199398994,
+        "roundtrip_wall_seconds": 55.66130489856005,
+        "structure_prepare_wall_seconds": 0.10946705564856529
+      },
+      "velocity_bounds": {
+        "vx": 0.016784508514404297,
+        "vy": 0.013283345413208008,
+        "vz": 0.014305164337158205
+      },
+      "velocity_errors": {
+        "vx": 0.016784489154815674,
+        "vy": 0.013283312320709229,
+        "vz": 0.014305144548416138
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 120883424,
+        "id_bytes": 43152930,
+        "manifest_bytes": 16865,
+        "original_bytes": 514724896,
+        "position_bytes": 17003228,
+        "velocity_bytes": 60710401
+      },
+      "ids_exact": true,
+      "input": "dat_7.5",
+      "optimized": {
+        "compressed_bytes": 106986965,
+        "id_bytes": 33635943,
+        "manifest_bytes": 17025,
+        "original_bytes": 514724896,
+        "position_bytes": 16883806,
+        "velocity_bytes": 56450191
+      },
+      "particles": 16085153,
+      "position_l2_bound": 0.00017189197221709846,
+      "position_l2_error": 0.00017166617539625528,
+      "timing": {
+        "canonical_order_wall_seconds": 17.01938211545348,
+        "compress_wall_seconds": 27.51951746456325,
+        "decompress_and_recombine_wall_seconds": 14.236835800111294,
+        "hybrid_velocity_order_wall_seconds": 2.6932790614664555,
+        "id_compress_wall_seconds": 6.504465065896511,
+        "lattice_prepare_wall_seconds": 1.9222497940063477e-06,
+        "lossy_fields_decompress_wall_seconds": 0.8162158541381359,
+        "lossy_fields_wall_seconds": 0.8707013390958309,
+        "metrics_wall_seconds": 12.825344573706388,
+        "preprocess_wall_seconds": 1.1915015652775764,
+        "recombine_h5_wall_seconds": 0.46168519370257854,
+        "roundtrip_wall_seconds": 55.875710336491466,
+        "structure_prepare_wall_seconds": 0.08804329857230186
+      },
+      "velocity_bounds": {
+        "vx": 0.013489769744873047,
+        "vy": 0.012933787155151368,
+        "vz": 0.011407240676879883
+      },
+      "velocity_errors": {
+        "vx": 0.013489753007888794,
+        "vy": 0.012933731079101562,
+        "vz": 0.011407192796468735
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 132171802,
+        "id_bytes": 45495981,
+        "manifest_bytes": 16855,
+        "original_bytes": 530645792,
+        "position_bytes": 23715819,
+        "velocity_bytes": 62943147
+      },
+      "ids_exact": true,
+      "input": "dat_7.6",
+      "optimized": {
+        "compressed_bytes": 116487742,
+        "id_bytes": 35279019,
+        "manifest_bytes": 17020,
+        "original_bytes": 530645792,
+        "position_bytes": 23636496,
+        "velocity_bytes": 57555207
+      },
+      "particles": 16582681,
+      "position_l2_bound": 8.594598726460293e-05,
+      "position_l2_error": 8.588033037998271e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 17.849780187010765,
+        "compress_wall_seconds": 27.626762537285686,
+        "decompress_and_recombine_wall_seconds": 14.453823152929544,
+        "hybrid_velocity_order_wall_seconds": 2.456163326278329,
+        "id_compress_wall_seconds": 6.128771640360355,
+        "lattice_prepare_wall_seconds": 1.8719583749771118e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6274030264467001,
+        "lossy_fields_wall_seconds": 0.7832662351429462,
+        "metrics_wall_seconds": 13.117548612877727,
+        "preprocess_wall_seconds": 0.697539646178484,
+        "recombine_h5_wall_seconds": 0.3345216568559408,
+        "roundtrip_wall_seconds": 55.99189184047282,
+        "structure_prepare_wall_seconds": 0.06901552528142929
+      },
+      "velocity_bounds": {
+        "vx": 0.014997628021240236,
+        "vy": 0.0125130126953125,
+        "vz": 0.014724068450927734
+      },
+      "velocity_errors": {
+        "vx": 0.014997601509094238,
+        "vy": 0.01251298189163208,
+        "vz": 0.014724016189575195
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 133726670,
+        "id_bytes": 47133629,
+        "manifest_bytes": 16867,
+        "original_bytes": 526007520,
+        "position_bytes": 23055700,
+        "velocity_bytes": 63520474
+      },
+      "ids_exact": true,
+      "input": "dat_7.7",
+      "optimized": {
+        "compressed_bytes": 114992704,
+        "id_bytes": 35671119,
+        "manifest_bytes": 17026,
+        "original_bytes": 526007520,
+        "position_bytes": 23019638,
+        "velocity_bytes": 56284921
+      },
+      "particles": 16437735,
+      "position_l2_bound": 8.637094296677098e-05,
+      "position_l2_error": 8.61919536647323e-05,
+      "timing": {
+        "canonical_order_wall_seconds": 17.56454984098673,
+        "compress_wall_seconds": 27.18184276111424,
+        "decompress_and_recombine_wall_seconds": 14.015788808465004,
+        "hybrid_velocity_order_wall_seconds": 2.45221577771008,
+        "id_compress_wall_seconds": 6.013716243207455,
+        "lattice_prepare_wall_seconds": 1.9744038581848145e-06,
+        "lossy_fields_decompress_wall_seconds": 0.5863202791661024,
+        "lossy_fields_wall_seconds": 0.7558474689722061,
+        "metrics_wall_seconds": 13.395782234147191,
+        "preprocess_wall_seconds": 0.6447235066443682,
+        "recombine_h5_wall_seconds": 0.2504069656133652,
+        "roundtrip_wall_seconds": 55.33743832819164,
+        "structure_prepare_wall_seconds": 0.08742452971637249
+      },
+      "velocity_bounds": {
+        "vx": 0.013972178649902344,
+        "vy": 0.016928047943115237,
+        "vz": 0.015209850311279298
+      },
+      "velocity_errors": {
+        "vx": 0.013972163200378418,
+        "vy": 0.016928017139434814,
+        "vz": 0.015209823846817017
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 132536521,
+        "id_bytes": 46532823,
+        "manifest_bytes": 16850,
+        "original_bytes": 548791936,
+        "position_bytes": 22583047,
+        "velocity_bytes": 63403801
+      },
+      "ids_exact": true,
+      "input": "dat_7.8",
+      "optimized": {
+        "compressed_bytes": 117323857,
+        "id_bytes": 36185389,
+        "manifest_bytes": 17014,
+        "original_bytes": 548791936,
+        "position_bytes": 22507213,
+        "velocity_bytes": 58614241
+      },
+      "particles": 17149748,
+      "position_l2_bound": 0.00010373283019897795,
+      "position_l2_error": 0.00010358470411002495,
+      "timing": {
+        "canonical_order_wall_seconds": 18.293697990477085,
+        "compress_wall_seconds": 28.68912181071937,
+        "decompress_and_recombine_wall_seconds": 13.283090617507696,
+        "hybrid_velocity_order_wall_seconds": 3.3157668318599463,
+        "id_compress_wall_seconds": 5.934625659137964,
+        "lattice_prepare_wall_seconds": 2.4531036615371704e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6150372661650181,
+        "lossy_fields_wall_seconds": 0.7209928147494793,
+        "metrics_wall_seconds": 13.37132554128766,
+        "preprocess_wall_seconds": 0.6909862384200096,
+        "recombine_h5_wall_seconds": 0.23387635685503483,
+        "roundtrip_wall_seconds": 56.125105833634734,
+        "structure_prepare_wall_seconds": 0.07943697273731232
+      },
+      "velocity_bounds": {
+        "vx": 0.017726809692382814,
+        "vy": 0.01718198013305664,
+        "vz": 0.01781030960083008
+      },
+      "velocity_errors": {
+        "vx": 0.017726778984069824,
+        "vy": 0.017181873321533203,
+        "vz": 0.017810236662626266
+      }
+    },
+    {
+      "all_bounds_satisfied": true,
+      "baseline": {
+        "compressed_bytes": 121583416,
+        "id_bytes": 43524533,
+        "manifest_bytes": 16839,
+        "original_bytes": 516782528,
+        "position_bytes": 16938781,
+        "velocity_bytes": 61103263
+      },
+      "ids_exact": true,
+      "input": "dat_7.9",
+      "optimized": {
+        "compressed_bytes": 107281667,
+        "id_bytes": 33859057,
+        "manifest_bytes": 17010,
+        "original_bytes": 516782528,
+        "position_bytes": 16823503,
+        "velocity_bytes": 56582097
+      },
+      "particles": 16149454,
+      "position_l2_bound": 0.0001718920002043489,
+      "position_l2_error": 0.00017160738860339,
+      "timing": {
+        "canonical_order_wall_seconds": 17.416276859119534,
+        "compress_wall_seconds": 27.133782928809524,
+        "decompress_and_recombine_wall_seconds": 13.000239038839936,
+        "hybrid_velocity_order_wall_seconds": 2.6739760618656874,
+        "id_compress_wall_seconds": 5.6314263585954905,
+        "lattice_prepare_wall_seconds": 2.1532177925109863e-06,
+        "lossy_fields_decompress_wall_seconds": 0.6326302010565996,
+        "lossy_fields_wall_seconds": 0.659223910421133,
+        "metrics_wall_seconds": 12.678384702652693,
+        "preprocess_wall_seconds": 0.5841845721006393,
+        "recombine_h5_wall_seconds": 0.21162587590515614,
+        "roundtrip_wall_seconds": 53.512308755889535,
+        "structure_prepare_wall_seconds": 0.06536160223186016
+      },
+      "velocity_bounds": {
+        "vx": 0.01384731330871582,
+        "vy": 0.012724977493286133,
+        "vz": 0.012662117385864258
+      },
+      "velocity_errors": {
+        "vx": 0.013847291469573975,
+        "vy": 0.012724965810775757,
+        "vz": 0.012662112712860107
+      }
+    }
+  ],
+  "particle_count": 531441000,
+  "totals": {
+    "baseline": {
+      "compressed_bytes": 4090900249,
+      "compression_ratio": 4.157058584881667,
+      "id_bytes": 1465559748,
+      "manifest_bytes": 540166,
+      "original_bytes": 17006112000,
+      "position_bytes": 618247366,
+      "velocity_bytes": 2006552969
+    },
+    "optimized": {
+      "compressed_bytes": 3583847961,
+      "compression_ratio": 4.74521022796257,
+      "id_bytes": 1128192939,
+      "manifest_bytes": 545613,
+      "original_bytes": 17006112000,
+      "position_bytes": 619284310,
+      "velocity_bytes": 1835825099
+    }
+  }
+}

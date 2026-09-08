@@ -63,6 +63,11 @@ environment:
 bash install.sh
 ```
 
+See [INSTALL.md](INSTALL.md) for build verification and the structure-aware
+mode's resource requirements. That mode uses the existing XnYZip, pcodec,
+and SZO dependencies; no additional native library or rebuild is required
+when those dependencies are already installed.
+
 ## Code Structure
 
 The Python implementation is separated by responsibility:
@@ -72,6 +77,8 @@ The Python implementation is separated by responsibility:
 - `raw_codecs.py` adapts pcodec, SZ3, and SZO field streams.
 - `lattice_layout.py` infers periodic ID lattices and implements reversible
   dense-field transforms; `shaped_codecs.py` adds adaptive 3-D codec layouts.
+- `structured_layout.py` provides reversible Hilbert ID codes and a
+  reproducible Eulerian/Lagrangian velocity order for XnYZip/SZO packages.
 - `lcp_codec.py` owns native LCP commands and the chunked velocity container;
   `xnyzip_codec.py` owns native XnYZip commands and its `uint64` order files.
 - `huffman_encode.py` provides the canonical delta-Huffman transform used for
@@ -87,6 +94,69 @@ The Python implementation is separated by responsibility:
 
 
 ## Quick Start
+
+### Higher compression for `snapshot_7`
+
+Enable the opt-in structure-aware XnYZip/SZO mode:
+
+```bash
+python main.py roundtrip data/new_data/snapshot_7 \
+  --work-dir particle_pipeline_runs/snapshot7_structured \
+  --pos-compressor xnyzip --vel-compressor szo \
+  --xnyzip-structure-aware --rel-eb 1e-4 \
+  --file-workers 4 --field-workers 1 --metrics --clean-raw
+```
+
+This processes the native partitions independently. Add `--merge` to compress
+one combined particle set (with substantially higher memory use). The YAML
+equivalent is `advanced.xnyzip_structure_aware: true`; its default is `false`.
+Existing methods, error-bound semantics, and default codec behavior are unchanged.
+
+The mode exploits two kinds of structure in this snapshot: particle IDs encode
+an `810³` initial mesh, while current positions describe its displaced particles.
+It uses Hilbert order for XnYZip positions, losslessly maps mesh IDs to physical-axis
+Hilbert codes before pcodec compression, and groups velocities by coarse current
+position cells followed by mesh Morton order. First-order SZO Lorenzo prediction
+then compresses each velocity component at its original error bound.
+
+Crucially, velocity cell keys use **decoded float32 positions**, at both encode
+and decode time. IDs remain exact, and velocities are restored to the same
+canonical particle rows as positions. No velocity permutation sidecar is stored.
+Reconstruction does not restore original input row order, matching ordinary
+XnYZip behavior; comparisons align particles by ID.
+
+The encoder checks every decoded position against the codec's L2 bound.
+If native truncated-octahedron quantization fails that check, it retries with
+XnYZip's cube quantizer at the **same bound**, records the choice, and checks
+again. It refuses to emit a completed package if both attempts fail. This
+handles a native boundary-coordinate issue without modifying existing methods.
+
+Requirements: XnYZip positions, SZO velocities, an `nsidemesh` attribute with
+side length 2–1024, mesh-range integer IDs (zero- or one-based), and normalized
+periodic positions. Sparse partitions are supported without allocating a dense
+mesh. Unsupported geometry or codec combinations fall back to the ordinary
+pipeline, with the reason in `manifest.json` under `structured_layout`.
+Combining this option with `--lattice-layout` is rejected.
+
+`--xnyzip-velocity-cell-bits 7` selects 128 cells per axis; values 1–10 are
+supported. Seven was selected from a sweep on `dat_7.1`, not guaranteed optimal
+for every dataset or error bound. Extra ID transforms, a position decode during
+compression, and sorting during both compression and decompression trade runtime
+and memory for CR. New packages use manifest format 9 and require this updated
+decoder; the updated decoder continues to support existing packages.
+
+On the complete `dat_7.1` partition (16,876,851 particles), at the same `1e-4`
+relative error bound, packaged CR improved from **3.9183 to 4.5593**: about
+**14.1% fewer compressed bytes**. IDs were exact and all component and position
+L2 bounds passed. For the **entire merged snapshot**, CR improved from
+**4.1507 to 4.9755**, reducing 4.097 GB to 3.418 GB (**16.6% fewer bytes**), with
+exact IDs and all bounds satisfied for all 531,441,000 particles.
+Independent partition processing improves aggregate CR from **4.1571 to 4.7452**
+(**12.4% fewer bytes**), with all 32 final packages passing the same checks.
+See [the snapshot analysis](docs/snapshot7_structure_aware.md)
+for full-data results, limitations, and reproducible comparisons.
+
+### General usage
 
 Start with a limited roundtrip to validate the environment and input schema:
 
