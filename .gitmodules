@@ -3,10 +3,10 @@
 	url = https://github.com/pcodec/pcodec.git
 [submodule "tools/LCP"]
 	path = tools/LCP
-	url = git@github.com:moonlightplague/LCP.git
+	url = https://github.com/moonlightplague/LCP.git
 [submodule "tools/SZo"]
 	path = tools/SZo
 	url = https://github.com/BingluCS/SZo.git
 [submodule "tools/XnYZip"]
 	path = tools/XnYZip
-	url = git@github.com:moonlightplague/XnYZip.git
+	url = https://github.com/moonlightplague/XnYZip.git
