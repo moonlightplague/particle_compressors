@@ -125,21 +125,27 @@ def validate_structured_package(manifest: Mapping[str, Any]) -> None:
     fields = manifest.get("compressed_fields", {})
     hybrid_fields = [key for key in ("vx", "vy", "vz")
                      if fields.get(key, {}).get("spatial_layout") == HYBRID_VELOCITY_LAYOUT]
+    hybrid_triplet = fields.get("velocities", {}).get("spatial_layout") == HYBRID_VELOCITY_LAYOUT
     structured_ids = fields.get("id", {}).get("codec") == LATTICE_HILBERT_ID_CODEC
     if not metadata.get("enabled", False):
-        if hybrid_fields or structured_ids:
+        if hybrid_fields or hybrid_triplet or structured_ids:
             raise RuntimeError("Structured fields are missing enabled package layout metadata.")
         return
     layout = StructuredParticleLayout.from_metadata(metadata)
-    if len(hybrid_fields) != 3 or not structured_ids:
+    szo_velocities = len(hybrid_fields) == 3 and all(
+        fields[key].get("codec") == "szo" for key in hybrid_fields
+    )
+    xnyzip_velocities = (
+        hybrid_triplet and fields["velocities"].get("codec") == "xnyzip"
+        and "velocity_order" in fields
+    )
+    if not structured_ids or not (szo_velocities or xnyzip_velocities):
         raise RuntimeError("Structured package requires transformed IDs and three hybrid velocities.")
     id_layout = StructuredParticleLayout.from_metadata(fields["id"]["structured_layout"])
     if id_layout != layout:
         raise RuntimeError("Structured ID and velocity layout metadata disagree.")
-    if fields.get("positions", {}).get("codec") != "xnyzip" or any(
-        fields[key].get("codec") != "szo" for key in hybrid_fields
-    ):
-        raise RuntimeError("Structured package requires XnYZip positions and SZO velocities.")
+    if fields.get("positions", {}).get("codec") != "xnyzip" or (hybrid_fields and hybrid_triplet):
+        raise RuntimeError("Structured package requires XnYZip positions and SZO or XnYZip velocities.")
 
 
 def lattice_code_bits(side: int) -> int:

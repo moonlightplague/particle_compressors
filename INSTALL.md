@@ -16,7 +16,7 @@ python -m unittest discover -s tests -q
 including the local SZO and pcodec bindings. Initial setup requires network
 access for dependencies. Python development headers must be available.
 
-## Structure-aware XnYZip/SZO mode
+## Structure-aware XnYZip mode
 
 No new dependencies or native-source changes are required. Existing working
 installations only need the updated Python sources. If bindings are missing,
@@ -33,7 +33,9 @@ are unavailable; check that it actually runs when verifying an installation.
 It tests mixed velocity dtypes, exact IDs, bounded errors, constant fields, and
 decoding after source and temporary raw files have been removed.
 
-Use `--xnyzip-structure-aware` with `--pos-compressor xnyzip --vel-compressor szo`.
+Use `--xnyzip-structure-aware` with `--pos-compressor xnyzip` and either
+`--vel-compressor szo` or `--vel-compressor xnyzip`. XnYZip velocities also
+support `--vel-chunk-size` in this mode and retain their codec-order sidecar.
 The existing configuration stays opt-out. Format-9 packages need the updated
 decoder; old packages remain supported.
 

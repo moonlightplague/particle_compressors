@@ -639,7 +639,10 @@ class XnYZipOrderingTests(unittest.TestCase):
             ), patch(
                 "src.compress.compress_lossy_raw",
                 side_effect=fake_lossy,
-            ), patch("src.compress.update_compressed_size_metrics"):
+            ), patch("src.compress.update_compressed_size_metrics"), patch(
+                "src.compress.CompressionPipeline._measure_xnyzip_position_error",
+                return_value=0.0,
+            ):
                 result = compress(
                     _args(root, velocity_codec),
                     manifest,
@@ -739,7 +742,10 @@ class XnYZipOrderingTests(unittest.TestCase):
             ), patch(
                 "src.compress.compress_integer_raw",
                 side_effect=fake_integer,
-            ), patch("src.compress.update_compressed_size_metrics"):
+            ), patch("src.compress.update_compressed_size_metrics"), patch(
+                "src.compress.CompressionPipeline._measure_xnyzip_position_error",
+                return_value=0.0,
+            ):
                 result = compress(
                     _args(root, "xnyzip"),
                     manifest,
@@ -872,7 +878,10 @@ class XnYZipOrderingTests(unittest.TestCase):
             ), patch(
                 "src.compress.compress_integer_raw",
                 side_effect=fake_integer,
-            ), patch("src.compress.update_compressed_size_metrics"):
+            ), patch("src.compress.update_compressed_size_metrics"), patch(
+                "src.compress.CompressionPipeline._measure_xnyzip_position_error",
+                return_value=0.0,
+            ):
                 result = compress(
                     args,
                     manifest,

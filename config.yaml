@@ -17,14 +17,14 @@ advanced:
   vel_chunk_workers: 0
   id_abs_eb: 0.0
   pos_compressor: xnyzip
-  vel_compressor: szo
+  vel_compressor: xnyzip
   lossless: pcodec
   # Opt-in periodic ID-lattice layout. Existing codec pipelines remain the
   # default unless this is enabled here or with --lattice-layout.
   lattice_layout: false
   lattice_min_occupancy: 0.69
   lattice_axis_search: true
-  # Opt-in XnYZip/SZO mesh-ID + hybrid velocity layout (snapshot_7).
+  # Opt-in mesh-ID + hybrid velocity layout: XnYZip positions, SZO/XnYZip velocities.
   # Existing methods and their defaults are unchanged.
   xnyzip_structure_aware: false
   xnyzip_velocity_cell_bits: 7

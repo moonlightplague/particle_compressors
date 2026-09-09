@@ -97,7 +97,7 @@ The Python implementation is separated by responsibility:
 
 ### Higher compression for `snapshot_7`
 
-Enable the opt-in structure-aware XnYZip/SZO mode:
+Enable the opt-in structure-aware XnYZip mode:
 
 ```bash
 python main.py roundtrip data/new_data/snapshot_7 \
@@ -119,9 +119,19 @@ Hilbert codes before pcodec compression, and groups velocities by coarse current
 position cells followed by mesh Morton order. First-order SZO Lorenzo prediction
 then compresses each velocity component at its original error bound.
 
+This also supports `--pos-compressor xnyzip --vel-compressor xnyzip`.
+XnYZip compresses the velocity triplet in hybrid input order and retains its
+velocity permutation sidecar. With `--vel-chunk-size`, chunks follow hybrid
+order and sidecar indices remain local to each chunk. Decoding composes that
+sidecar with the regenerated hybrid order to restore canonical particle rows.
+The hybrid order itself needs no additional sidecar. For a single unchunked
+velocity stream, XnYZip sorts the whole triplet internally, so the hybrid input
+order may offer little compression benefit; the structured position and ID
+transforms still apply.
+
 Crucially, velocity cell keys use **decoded float32 positions**, at both encode
 and decode time. IDs remain exact, and velocities are restored to the same
-canonical particle rows as positions. No velocity permutation sidecar is stored.
+canonical particle rows as positions. SZO velocities need no permutation sidecar.
 Reconstruction does not restore original input row order, matching ordinary
 XnYZip behavior; comparisons align particles by ID.
 
@@ -131,7 +141,7 @@ XnYZip's cube quantizer at the **same bound**, records the choice, and checks
 again. It refuses to emit a completed package if both attempts fail. This
 handles a native boundary-coordinate issue without modifying existing methods.
 
-Requirements: XnYZip positions, SZO velocities, an `nsidemesh` attribute with
+Requirements: XnYZip positions, SZO or XnYZip velocities, an `nsidemesh` attribute with
 side length 2–1024, mesh-range integer IDs (zero- or one-based), and normalized
 periodic positions. Sparse partitions are supported without allocating a dense
 mesh. Unsupported geometry or codec combinations fall back to the ordinary
@@ -319,6 +329,18 @@ Unlike the per-axis L-infinity bounds used by the other triplet paths, the
 XnYZip bound is an L2 bound. Relative bounds are therefore derived from the
 three-dimensional bounding-box diagonal. The manifest and roundtrip metrics
 record the requested and observed maximum per-particle L2 error.
+
+XnYZip positions are decoded and checked against the available L2 budget
+before their particle order is used, including when structure-aware mode is
+disabled. The native TO quantizer can corrupt boundary nodes, and both native
+quantizers can slightly exceed small bounds through float32 rounding. On
+failure, the pipeline retries cube quantization and then tighter codec bounds,
+checking each result against the original budget. The manifest records the
+accepted quantizer, codec bound, safety margin, and measured error; the requested
+bound stays unchanged. This adds a validation decode and, when needed, extra
+compression attempts. After at most six attempts, an unmet bound remains an
+error. Existing XnYZip binaries and package formats are supported; no native
+rebuild is required. See [the small-bound investigation](docs/xnyzip-small-bounds.md).
 
 Like LCP, XnYZip sorts particles during compression. Its position order becomes
 the canonical package row order, and the pipeline applies it to IDs and

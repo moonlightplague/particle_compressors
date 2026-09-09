@@ -486,9 +486,10 @@ def _add_compression_arguments(
         action=argparse.BooleanOptionalAction,
         default=defaults["xnyzip_structure_aware"],
         help=(
-            "For XnYZip positions with SZO velocities, losslessly Hilbert-"
-            "encode lattice IDs and use a sidecar-free Eulerian/Lagrangian "
-            "hybrid velocity order (default: %(default)s)."
+            "For XnYZip positions with SZO or XnYZip velocities, losslessly "
+            "Hilbert-encode lattice IDs and use an Eulerian/Lagrangian "
+            "hybrid velocity order (XnYZip retains its codec-order sidecar; "
+            "default: %(default)s)."
         ),
     )
     parser.add_argument(

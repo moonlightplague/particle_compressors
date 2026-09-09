@@ -18,6 +18,11 @@ from src.manifest import (
     velocity_compressor_from_manifest,
 )
 from src.runtime import read_raw
+from src.structured_layout import (
+    HYBRID_VELOCITY_LAYOUT,
+    StructuredParticleLayout,
+    hybrid_velocity_order,
+)
 
 
 def resolve_fields(h5: h5py.File) -> Dict[str, str]:
@@ -197,7 +202,7 @@ class HDF5Recombiner:
         field = self.manifest["compressed_fields"]["velocity_order"]
         if field.get("applied_during_lcp_decompression"):
             return None
-        return read_lcp_order(
+        order = read_lcp_order(
             self.paths["velocity_order"],
             np.dtype(field["dtype"]),
             self.count,
@@ -208,6 +213,22 @@ class HDF5Recombiner:
             ),
             int(field.get("chunk_size", 0)),
         )
+        velocity_field = self.manifest["compressed_fields"].get("velocities", {})
+        if velocity_field.get("spatial_layout") == HYBRID_VELOCITY_LAYOUT:
+            layout = StructuredParticleLayout.from_metadata(
+                self.manifest["structured_layout"]
+            )
+            ids = read_raw(
+                self.paths["id"],
+                np.dtype(self.manifest["fields"]["id"]["dtype"]), self.count,
+            )
+            positions = {
+                logical: read_raw(self.paths[logical], np.dtype("float32"), self.count)
+                for logical in POSITION_FIELDS
+            }
+            # Compose hybrid-to-canonical after expanding chunk-local indices.
+            order = hybrid_velocity_order(ids, positions, layout)[order]
+        return order
 
     @staticmethod
     def _restore_order(

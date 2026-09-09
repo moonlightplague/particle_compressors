@@ -7,6 +7,6 @@ WORK_DIR="particle_pipeline_runs/$(basename -- "${INPUT_H5}")"
 python main.py roundtrip "${INPUT_H5}" \
   --config "config.yaml" \
   --work-dir "${WORK_DIR}" \
-  --rel-eb 1e-4  \
+  --rel-eb 1e-6  \
   --xnyzip-structure-aware \
   --force --clean-raw

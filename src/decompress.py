@@ -264,7 +264,7 @@ class DecompressionPipeline:
                 self.decompressed_dir / "positions.xnyzip.f32.raw",
                 self.args.force,
                 **({"quantizer": self.fields["positions"]["quantizer"]}
-                   if self.manifest.get("structured_layout", {}).get("enabled") else {}),
+                   if "quantizer" in self.fields["positions"] else {}),
             )
             return
         for logical in POSITION_FIELDS:

@@ -139,7 +139,7 @@ class CompressionSettings:
         structure_aware = (
             structure_aware_requested
             and position_codec == "xnyzip"
-            and velocity_codec == "szo"
+            and velocity_codec in ("szo", "xnyzip")
         )
         if lattice_requested and structure_aware_requested:
             raise RuntimeError(
@@ -312,7 +312,7 @@ class CompressionPipeline:
         try:
             if not self.settings.structure_aware:
                 raise LatticeLayoutUnavailable(
-                    "requires XnYZip positions and SZO velocities"
+                    "requires XnYZip positions and SZO or XnYZip velocities"
                 )
             payload = self.manifest.get("root_attrs", {}).get("nsidemesh", {})
             if "value" not in payload:
@@ -633,43 +633,66 @@ class CompressionPipeline:
         order_path = self.preprocessed_dir / "order.u64.raw"
         self.raw_paths["position_order"] = str(order_path)
         compressed_path = self.artifacts["positions"]
-        l2_error_bound = float(
+        validation_bound = float(
             self.manifest["error_bounds"]["positions_xnyzip_abs"]
         )
-        order = compress_xnyzip_triplet(
-            self.tools,
-            self.raw_paths["positions_xnyzip"],
-            compressed_path,
-            self.count,
-            l2_error_bound,
-            order_path,
-            self.settings.force,
-            **({"curve": XNYZIP_HILBERT_CURVE} if self.structured_layout else {}),
-        )
-        if order is None:
-            order = read_xnyzip_permutation(str(order_path), self.count)
-        curve = XNYZIP_CURVE
+        l2_error_bound = validation_bound
+        curve = XNYZIP_HILBERT_CURVE if self.structured_layout else XNYZIP_CURVE
         quantizer = XNYZIP_QUANTIZER
-        if self.structured_layout is not None:
-            curve = XNYZIP_HILBERT_CURVE
-            if not self._validate_structured_positions(order, l2_error_bound):
-                # Native TO can choose z=-1 at a zero-boundary tie, which
-                # its unsigned block encoder cannot represent. Cube avoids
-                # that case while preserving the same requested L2 bound.
+        max_attempts = 6
+        for attempt in range(max_attempts):
+            options = {"curve": curve} if self.structured_layout else {}
+            if quantizer != XNYZIP_QUANTIZER:
+                options["quantizer"] = quantizer
+            order = compress_xnyzip_triplet(
+                self.tools, self.raw_paths["positions_xnyzip"], compressed_path,
+                self.count, l2_error_bound, order_path,
+                self.settings.force if attempt == 0 else True, **options,
+            )
+            if order is None:
+                order = read_xnyzip_permutation(str(order_path), self.count)
+            maximum = self._measure_xnyzip_position_error(
+                order, l2_error_bound, quantizer
+            )
+            if math.isfinite(maximum) and maximum <= validation_bound:
+                break
+            if quantizer == XNYZIP_QUANTIZER:
+                # TO can select a negative boundary node that the unsigned
+                # block encoder corrupts. Try cube before adjusting precision.
                 quantizer = "cube"
-                order = compress_xnyzip_triplet(
-                    self.tools, self.raw_paths["positions_xnyzip"], compressed_path,
-                    self.count, l2_error_bound, order_path, True,
-                    curve=curve, quantizer=quantizer)
-                if not self._validate_structured_positions(
-                    order, l2_error_bound, quantizer
-                ):
-                    raise RuntimeError(
-                        "XnYZip positions failed the structure-aware L2 validation."
-                    )
-                self.manifest["structured_layout"][
-                    "position_quantizer_fallback"
-                ] = "to_roundtrip_failed"
+                continue
+            # Native quantization spends the full bound, leaving no room for
+            # float32 shift/recovery rounding. Reserve at least 1%, or twice
+            # the measured excess. Always validate against the ORIGINAL budget.
+            margin = max(
+                0.01 * validation_bound, 2 * (maximum - validation_bound)
+            )
+            next_bound = l2_error_bound - margin
+            if (
+                attempt + 1 == max_attempts
+                or not math.isfinite(next_bound)
+                or next_bound <= 0
+            ):
+                raise RuntimeError(
+                    "XnYZip positions failed L2 validation after codec retries: "
+                    f"observed {maximum:.9g}, allowed {validation_bound:.9g}. "
+                    "Try a larger position bound or another position compressor."
+                )
+            l2_error_bound = next_bound
+
+        # The native decoder takes its scale from the command line. Persist
+        # the accepted scale everywhere it is consumed or reported.
+        self.manifest["error_bounds"]["positions_xnyzip_abs"] = l2_error_bound
+        vector_bounds = self.manifest.get("field_error_bounds", {}).get(
+            "positions_xnyzip"
+        )
+        if vector_bounds is not None:
+            vector_bounds["compressor_abs"] = l2_error_bound
+            vector_bounds["codec_l2_safety_margin"] = validation_bound - l2_error_bound
+        if self.structured_layout is not None and quantizer != XNYZIP_QUANTIZER:
+            self.manifest["structured_layout"][
+                "position_quantizer_fallback"
+            ] = "to_roundtrip_failed"
         self.compressed_fields["positions"] = (
             self._xnyzip_field_metadata(
                 "positions",
@@ -680,6 +703,14 @@ class CompressionPipeline:
         )
         self.compressed_fields["positions"]["curve"] = curve
         self.compressed_fields["positions"]["quantizer"] = quantizer
+        self.compressed_fields["positions"]["validated_max_l2_error"] = maximum
+        self.compressed_fields["positions"]["validation_l2_bound"] = validation_bound
+        self.compressed_fields["positions"]["compression_attempts"] = attempt + 1
+        if self.structured_layout is None:
+            for key in POSITION_FIELDS:
+                decoded_path = self.raw_paths.pop(f"{key}_structured_decoded", None)
+                if decoded_path is not None:
+                    Path(decoded_path).unlink()
         return CanonicalOrder(
             mapping="xnyzip_position_sorted",
             field="positions",
@@ -688,10 +719,10 @@ class CompressionPipeline:
             values=order,
         )
 
-    def _validate_structured_positions(
+    def _measure_xnyzip_position_error(
         self, order: np.ndarray, bound: float, quantizer: str = XNYZIP_QUANTIZER,
-    ) -> bool:
-        """Decode and check every canonical position before transforming rows."""
+    ) -> float:
+        """Measure every decoded position in float64 before accepting its order."""
 
         decoded_paths = {
             logical: str(self.preprocessed_dir / f"{logical}.structured-decoded.f32.raw")
@@ -707,6 +738,7 @@ class CompressionPipeline:
                   for key in POSITION_FIELDS}
         decoded = {key: np.memmap(path, mode="r", dtype="float32", shape=(self.count,))
                    for key, path in decoded_paths.items()}
+        maximum_squared = 0.0
         for start in range(0, self.count, 1_048_576):
             end = min(self.count, start + 1_048_576)
             squared = np.zeros(end - start, dtype=np.float64)
@@ -714,9 +746,10 @@ class CompressionPipeline:
                 difference = (decoded[key][start:end].astype(np.float64)
                               - source[key][order[start:end]].astype(np.float64))
                 squared += difference * difference
-            if not np.all(np.isfinite(squared)) or float(squared.max()) > bound * bound:
-                return False
-        return True
+            if not np.all(np.isfinite(squared)):
+                return math.inf
+            maximum_squared = max(maximum_squared, float(squared.max(initial=0.0)))
+        return math.sqrt(maximum_squared)
 
     def _record_ordering(self, order: CanonicalOrder) -> None:
         reconstructed_rows = {
@@ -897,7 +930,7 @@ class CompressionPipeline:
         return jobs, field_updates
 
     def _compress_velocities(self, order: CanonicalOrder) -> None:
-        if self.structured_layout is not None:
+        if self.structured_layout is not None and self.settings.velocity_codec == "szo":
             self._compress_structured_velocities(order)
             return
         if self.settings.velocity_codec == "lcp":
@@ -927,7 +960,7 @@ class CompressionPipeline:
             self.compressed_fields[logical] = field
         self.manifest["ordering"]["velocities"] = {"mapping": order.mapping}
 
-    def _compress_structured_velocities(self, order: CanonicalOrder) -> None:
+    def _structured_velocity_source_order(self, order: CanonicalOrder) -> np.ndarray:
         assert self.structured_layout is not None and order.values is not None
         started = time.perf_counter()
         decoded_paths = {
@@ -946,6 +979,10 @@ class CompressionPipeline:
         source_order = order.values[permutation]
         del permutation, ids, decoded
         self.hybrid_velocity_order_seconds = time.perf_counter() - started
+        return source_order
+
+    def _compress_structured_velocities(self, order: CanonicalOrder) -> None:
+        source_order = self._structured_velocity_source_order(order)
         jobs = []
         for logical in VELOCITY_FIELDS:
             dtype = self.manifest["fields"][logical]["dtype"]
@@ -1122,8 +1159,13 @@ class CompressionPipeline:
                 "Position-ordered XnYZip velocities require a canonical "
                 "order."
             )
+        input_mapping = order.mapping
+        source_order = order.values
+        if self.structured_layout is not None:
+            input_mapping = HYBRID_VELOCITY_LAYOUT
+            source_order = self._structured_velocity_source_order(order)
         velocity_mapping = (
-            f"xnyzip_velocity_sorted_index_to_{order.mapping}_row"
+            f"xnyzip_velocity_sorted_index_to_{input_mapping}_row"
         )
 
         interleaved_path, interleaved_metadata = (
@@ -1136,10 +1178,11 @@ class CompressionPipeline:
                 self.preprocessed_dir
                 / "velocities.xnyzip.canonical.f32.raw",
                 self.count,
-                order.values,
+                source_order,
                 self.settings.force,
             )
         )
+        del source_order
         self.raw_paths["velocities_xnyzip"] = interleaved_path
 
         order_path = self.preprocessed_dir / "velocity_order.u64.raw"
@@ -1183,6 +1226,8 @@ class CompressionPipeline:
             chunk_size=self.settings.velocity_chunk_size,
         )
         velocity_field["preprocessed_interleaved"] = interleaved_metadata
+        if self.structured_layout is not None:
+            velocity_field["spatial_layout"] = HYBRID_VELOCITY_LAYOUT
         self.compressed_fields["velocities"] = velocity_field
 
         order_field = compress_integer_raw(
@@ -1228,6 +1273,8 @@ class CompressionPipeline:
             "index_scope": order_metadata["index_scope"],
             "chunk_size": self.settings.velocity_chunk_size,
         }
+        if self.structured_layout is not None:
+            self.manifest["ordering"]["velocities"]["reconstructed_mapping"] = order.mapping
 
     def _compress_lcp_velocities(self, order: CanonicalOrder) -> None:
         self._compress_secondary_lcp_velocities(order)

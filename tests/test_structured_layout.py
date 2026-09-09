@@ -90,14 +90,17 @@ class StructuredLayoutTests(unittest.TestCase):
                                   for key in ("x", "y", "z")}, layout)
 
     def test_cli_opt_in_and_conflicting_layout(self):
-        argv = ["compress", "input.h5", "--pos-compressor", "xnyzip", "--vel-compressor", "szo"]
-        parser = build_parser(argv)
-        self.assertFalse(CompressionSettings.from_args(parser.parse_args(argv)).structure_aware)
-        args = parser.parse_args(argv + ["--xnyzip-structure-aware"])
-        self.assertTrue(CompressionSettings.from_args(args).structure_aware)
-        args.lattice_layout = True
-        with self.assertRaises(RuntimeError):
-            CompressionSettings.from_args(args)
+        for codec in ("szo", "xnyzip"):
+            with self.subTest(velocity_codec=codec):
+                argv = ["compress", "input.h5", "--pos-compressor", "xnyzip",
+                        "--vel-compressor", codec]
+                parser = build_parser(argv)
+                self.assertFalse(CompressionSettings.from_args(parser.parse_args(argv)).structure_aware)
+                args = parser.parse_args(argv + ["--xnyzip-structure-aware"])
+                self.assertTrue(CompressionSettings.from_args(args).structure_aware)
+                args.lattice_layout = True
+                with self.assertRaises(RuntimeError):
+                    CompressionSettings.from_args(args)
 
     def test_missing_mesh_metadata_falls_back_without_touching_raw_fields(self):
         argv = ["compress", "input.h5", "--pos-compressor", "xnyzip",
@@ -119,6 +122,37 @@ class StructuredLayoutTests(unittest.TestCase):
             validate_structured_package({"structured_layout":
                 make_structured_layout(3, 0, (0, 1, 2), 7).metadata()})
 
+    def test_xnyzip_structured_metadata_requires_layout_ids_and_sidecar(self):
+        from copy import deepcopy
+        from src.structured_layout import HYBRID_VELOCITY_LAYOUT, LATTICE_HILBERT_ID_CODEC
+        layout = make_structured_layout(3, 0, (0, 1, 2), 7).metadata()
+        manifest = {
+            "structured_layout": layout,
+            "compressed_fields": {
+                "id": {"codec": LATTICE_HILBERT_ID_CODEC, "structured_layout": layout},
+                "positions": {"codec": "xnyzip"},
+                "velocities": {"codec": "xnyzip", "spatial_layout": HYBRID_VELOCITY_LAYOUT},
+                "velocity_order": {"dtype": "uint64"},
+            },
+        }
+        validate_structured_package(manifest)
+        for missing in ("id", "positions", "velocities", "velocity_order"):
+            with self.subTest(missing=missing):
+                invalid = deepcopy(manifest)
+                del invalid["compressed_fields"][missing]
+                with self.assertRaises(RuntimeError):
+                    validate_structured_package(invalid)
+        invalid = deepcopy(manifest)
+        del invalid["structured_layout"]
+        with self.assertRaises(RuntimeError):
+            validate_structured_package(invalid)
+        invalid = deepcopy(manifest)
+        invalid["compressed_fields"]["id"]["structured_layout"] = (
+            make_structured_layout(3, 1, (0, 1, 2), 7).metadata()
+        )
+        with self.assertRaisesRegex(RuntimeError, "disagree"):
+            validate_structured_package(invalid)
+
     def test_failed_native_validation_refuses_to_finish_package(self):
         with tempfile.TemporaryDirectory() as temp:
             pipeline = object.__new__(CompressionPipeline)
@@ -131,7 +165,7 @@ class StructuredLayoutTests(unittest.TestCase):
             pipeline.settings = SimpleNamespace(force=False)
             pipeline.structured_layout = make_structured_layout(3, 0, (0, 1, 2), 7)
             with patch("src.compress.compress_xnyzip_triplet", return_value=np.array([0])) as encode:
-                with patch.object(pipeline, "_validate_structured_positions", return_value=False):
+                with patch.object(pipeline, "_measure_xnyzip_position_error", return_value=float("inf")):
                     with self.assertRaisesRegex(RuntimeError, "L2 validation"):
                         pipeline._compress_canonical_xnyzip_positions()
             self.assertEqual(encode.call_count, 2)
@@ -145,9 +179,8 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
         if not binary.is_file():
             raise unittest.SkipTest("Build XnYZip to run native structured roundtrip coverage")
         try:
-            from src.runtime import load_pcodec, load_pyszo
+            from src.runtime import load_pcodec
             load_pcodec()
-            load_pyszo()
         except (ImportError, RuntimeError) as exc:
             raise unittest.SkipTest(str(exc))
 
@@ -158,9 +191,23 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
         self.assertEqual(result, 0, errors.getvalue() + output.getvalue())
 
     def test_mixed_dtype_roundtrip_and_decode_without_source_or_raws(self):
+        try:
+            from src.runtime import load_pyszo
+            load_pyszo()
+        except (ImportError, RuntimeError) as exc:
+            self.skipTest(str(exc))
+        self._assert_structured_roundtrip("szo")
+
+    def test_xnyzip_roundtrip_and_standalone_decode_with_optional_chunks(self):
+        for chunk_size in (0, 257):
+            with self.subTest(chunk_size=chunk_size):
+                self._assert_structured_roundtrip("xnyzip", chunk_size)
+
+    def _assert_structured_roundtrip(self, velocity_codec, chunk_size=0):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source, work = root / "input.h5", root / "package"
+            velocity_bound = .05 if velocity_codec == "xnyzip" else .0001
             side = 16
             ids = np.random.default_rng(19).permutation(side**3).astype(np.uint64) + 1
             linear = ids - 1
@@ -175,10 +222,14 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
                     handle[key] = np.rint(values * (2**31 - 1)).astype(np.int32)
                 handle["vx"] = np.sin(linear * .01).astype(np.float32)
                 handle["vy"] = np.cos(linear * .02).astype(np.float64)
-                handle["vz"] = np.full(ids.size, .125, dtype=np.float32)
+                handle["vz"] = (np.sin(linear * .03).astype(np.float32)
+                                if velocity_codec == "xnyzip" else
+                                np.full(ids.size, .125, dtype=np.float32))
             self._run(["roundtrip", str(source), "--work-dir", str(work),
-                       "--pos-compressor", "xnyzip", "--vel-compressor", "szo",
-                       "--pos-abs-eb", "0.0001", "--vel-abs-eb", "0.0001",
+                       "--pos-compressor", "xnyzip", "--vel-compressor", velocity_codec,
+                       "--vel-chunk-size", str(chunk_size), "--vel-chunk-workers", "2",
+                       "--xnyzip-velocity-cell-bits", "2",
+                       "--pos-abs-eb", "0.0001", "--vel-abs-eb", str(velocity_bound),
                        "--xnyzip-structure-aware",
                        "--field-workers", "2", "--metrics", "--clean-raw"])
             manifest = json.loads((work / "manifest.json").read_text())
@@ -187,21 +238,39 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
             self.assertEqual(manifest["format_version"], 9)
             self.assertIn(manifest["compressed_fields"]["positions"]["curve"], ("-h", "-z"))
             self.assertEqual(manifest["compressed_fields"]["positions"]["quantizer"], "cube")
-            self.assertEqual(len(list((work / "compressed").iterdir())), 5)
+            self.assertEqual(len(list((work / "compressed").iterdir())),
+                             4 if velocity_codec == "xnyzip" else 5)
+            validate_structured_package(manifest)
+            if velocity_codec == "xnyzip":
+                from src.structured_layout import HYBRID_VELOCITY_LAYOUT
+                fields = manifest["compressed_fields"]
+                self.assertEqual(fields["id"]["codec"], "lattice_hilbert_pcodec_v1")
+                self.assertEqual(fields["velocities"]["codec"], "xnyzip")
+                self.assertEqual(fields["velocities"]["spatial_layout"], HYBRID_VELOCITY_LAYOUT)
+                self.assertEqual(fields["velocity_order"]["index_scope"],
+                                 "chunk_local" if chunk_size else "global")
+                self.assertIn(HYBRID_VELOCITY_LAYOUT, fields["velocity_order"]["order_mapping"])
             metrics = json.loads((work / "metrics.json").read_text())
             self.assertTrue(metrics["fields"]["id"]["exact_match"])
             self.assertTrue(all(check["satisfied"]
                                 for check in metrics["error_bound_consistency"].values()),
                             metrics["error_bound_consistency"])
-            self.assertTrue(metrics["xnyzip_l2_error_bound_consistency"]["positions"]["satisfied"])
+            self.assertTrue(all(check["satisfied"] for check in
+                                metrics["xnyzip_l2_error_bound_consistency"].values()),
+                            metrics["xnyzip_l2_error_bound_consistency"])
             with h5py.File(manifest["artifacts"]["reconstructed_h5"], "r") as handle:
                 expected = {key: handle[key][:] for key in handle}
                 indices = np.argsort(expected["id"])
                 np.testing.assert_array_equal(expected["id"][indices], np.arange(1, side**3 + 1))
                 for key, original in (("vx", np.sin(np.arange(side**3) * .01).astype(np.float32)),
                                       ("vy", np.cos(np.arange(side**3) * .02))):
-                    self.assertLessEqual(np.max(np.abs(expected[key][indices] - original)), .0001)
-                np.testing.assert_array_equal(expected["vz"], np.full(ids.size, .125))
+                    self.assertLessEqual(np.max(np.abs(expected[key][indices] - original)), velocity_bound)
+                if velocity_codec == "xnyzip":
+                    np.testing.assert_allclose(expected["vz"][indices],
+                                               np.sin(np.arange(side**3) * .03).astype(np.float32),
+                                               rtol=0, atol=velocity_bound)
+                else:
+                    np.testing.assert_array_equal(expected["vz"], np.full(ids.size, .125))
                 self.assertEqual(expected["vy"].dtype, np.dtype("float64"))
             source.unlink()
             self.assertFalse((work / "preprocessed").exists())
