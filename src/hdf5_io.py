@@ -157,6 +157,10 @@ class HDF5Recombiner:
         logical: str,
         target_dtype: np.dtype,
     ) -> np.ndarray:
+        field = self.manifest.get("compressed_fields", {}).get(logical, {})
+        if field.get("codec") == "pcodec":
+            decoded = read_raw(self.paths[logical], target_dtype, self.count)
+            return self._restore_order(decoded, self.position_order)
         decoded = read_raw(
             self.paths[logical],
             np.dtype("float32"),

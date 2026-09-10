@@ -514,6 +514,19 @@ IDs are reconstructed exactly with pcodec. When both triplets use LCP or both
 use XnYZip, pcodec also compresses the velocity permutation sidecar. Blockwise
 LCP additionally uses pcodec for the Huffman-coded block-ID sidecar.
 
+## Lossless Position and Velocity Compression
+
+Select `--pos-compressor pcodec`, `--vel-compressor pcodec`, or both.
+The corresponding YAML values are `pos_compressor: pcodec` and
+`vel_compressor: pcodec`. Each selected triplet ignores its absolute and
+relative error bounds and preserves the original values and dtype exactly.
+Positions bypass float32 conversion and position scaling on reconstruction.
+Other triplets retain their selected compressor and error bounds. Existing
+codec defaults and combination restrictions are unchanged.
+
+Pcodec combinations use flat field streams when `--lattice-layout` is
+requested; `--sort` remains supported.
+
 ## Error Bounds
 
 The default `--rel-eb 1e-3` applies to positions and velocities.

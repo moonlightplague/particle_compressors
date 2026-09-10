@@ -240,6 +240,11 @@ def compress_lossy_raw(
     force: bool,
     szo_profile: str | None = None,
 ) -> Dict[str, Any]:
+    # Keep this entry point compatible with existing fieldwise callers.
+    if codec == "pcodec":
+        return compress_pcodec_raw(
+            raw_path, dtype, compressed_path, field_name, count, force,
+        )
     compressors = {
         "sz3": compress_pysz_raw,
         "szo": compress_szo_raw,
@@ -371,6 +376,7 @@ def decompress_lossy_raw(
     force: bool,
 ) -> None:
     decompressors = {
+        "pcodec": decompress_pcodec_raw,
         "pysz": decompress_pysz_raw,
         "szo": decompress_szo_raw,
     }

@@ -8,5 +8,5 @@ python main.py roundtrip "${INPUT_H5}" \
   --config "config.yaml" \
   --work-dir "${WORK_DIR}" \
   --rel-eb 1e-6  \
-  --xnyzip-structure-aware \
-  --force --clean-raw
+  --force --clean-raw --metrics
+  #--xnyzip-structure-aware 

@@ -37,8 +37,8 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "xnyzip_velocity_cell_bits": 7,
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
-    "pos_compressor": ("lcp", "xnyzip", "sz3", "szo"),
-    "vel_compressor": ("sz3", "szo", "lcp", "xnyzip"),
+    "pos_compressor": ("lcp", "xnyzip", "sz3", "szo", "pcodec"),
+    "vel_compressor": ("sz3", "szo", "lcp", "xnyzip", "pcodec"),
     "lossless": ("pcodec",),
 }
 NULLABLE_NUMBER_KEYS = (
@@ -430,14 +430,18 @@ def _add_compression_arguments(
         "--pos-compressor",
         choices=AVAILABLE_COMPRESSORS["pos_compressor"],
         default=defaults["pos_compressor"],
-        help="Position triplet compressor (default: %(default)s).",
+        help=(
+            "Position triplet compressor; pcodec is lossless and ignores "
+            "position error bounds (default: %(default)s)."
+        ),
     )
     parser.add_argument(
         "--vel-compressor",
         choices=AVAILABLE_COMPRESSORS["vel_compressor"],
         default=defaults["vel_compressor"],
         help=(
-            "Velocity triplet compressor; lcp requires lcp positions and "
+            "Velocity triplet compressor; pcodec is lossless and ignores "
+            "velocity error bounds; lcp requires lcp positions and "
             "xnyzip requires lcp or xnyzip positions "
             "(default: %(default)s)."
         ),

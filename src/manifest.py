@@ -80,6 +80,8 @@ def velocity_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
         return "lcp"
     if compressed_fields.get("velocities", {}).get("codec") == "xnyzip":
         return "xnyzip"
+    if _all_fields_use_codec(compressed_fields, VELOCITY_FIELDS, "pcodec"):
+        return "pcodec"
     if _all_fields_use_codec(compressed_fields, VELOCITY_FIELDS, "szo"):
         return "szo"
     return "sz3"
@@ -91,6 +93,8 @@ def position_compressor_from_manifest(manifest: Mapping[str, Any]) -> str:
         return "lcp"
     if compressed_fields.get("positions", {}).get("codec") == "xnyzip":
         return "xnyzip"
+    if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "pcodec"):
+        return "pcodec"
     if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "pysz"):
         return "sz3"
     if _all_fields_use_codec(compressed_fields, POSITION_FIELDS, "szo"):

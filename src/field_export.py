@@ -129,6 +129,7 @@ def export_positions_for_lcp(
     scale: PositionScale,
     force: bool,
     xnyzip_output: Optional[Path] = None,
+    lossless: bool = False,
 ) -> Tuple[Dict[str, str], Dict[str, Dict[str, float]]]:
     paths = {}
     statistics = {}
@@ -145,16 +146,17 @@ def export_positions_for_lcp(
 
     for axis, logical in enumerate(POSITION_FIELDS):
         dataset = h5[fields[logical]]
-        output = output_dir / f"{logical}.f32.raw"
+        dtype_name = dataset.dtype.name if lossless else "f32"
+        output = output_dir / f"{logical}.{dtype_name}.raw"
         require_output_path(output, force)
 
         source = dataset[:count]
         scaled64 = source.astype(np.float64, copy=False) / scale.value
         scaled32 = scaled64.astype(np.float32)
-        scaled32.tofile(output)
+        (source if lossless else scaled32).tofile(output)
         if xnyzip_interleaved is not None:
             xnyzip_interleaved[:, axis] = scaled32
-        cast_error = float(
+        cast_error = 0.0 if lossless else float(
             np.abs(scaled32.astype(np.float64) - scaled64).max(initial=0.0)
         )
         range_stats = {

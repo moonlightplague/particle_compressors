@@ -39,6 +39,8 @@ def select_relative_or_absolute(
     default_abs: float,
     compressor_abs: Optional[float] = None,
 ) -> ErrorBoundSelection:
+    if getattr(args, f"{prefix}_compressor", None) == "pcodec":
+        return ErrorBoundSelection("lossless", {field: 0.0 for field in fields})
     specific_relative = getattr(args, f"{prefix}_rel_eb")
     specific_absolute = getattr(args, f"{prefix}_abs_eb")
     option_prefix = prefix.replace("_", "-")

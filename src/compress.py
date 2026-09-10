@@ -133,7 +133,11 @@ class CompressionSettings:
             and position_codec in ("lcp", "xnyzip")
             and velocity_codec not in ("lcp", "xnyzip")
         )
-        lattice_layout = lattice_requested and (
+        # Lattice position residuals use floating-point arithmetic. Preserve
+        # source bits by using flat streams for lossless field combinations.
+        lattice_layout = lattice_requested and "pcodec" not in (
+            position_codec, velocity_codec
+        ) and (
             fieldwise_pair or lattice_velocity_only
         )
         structure_aware = (
@@ -818,11 +822,16 @@ class CompressionPipeline:
             return
         jobs = []
         for logical in POSITION_FIELDS:
-            raw_path = self._ordered_raw_path(logical, "float32", order)
+            dtype = (
+                self.manifest["fields"][logical]["dtype"]
+                if self.settings.position_codec == "pcodec"
+                else "float32"
+            )
+            raw_path = self._ordered_raw_path(logical, dtype, order)
             jobs.append(LossyCompressionJob(
                 self.settings.position_codec,
                 raw_path,
-                "float32",
+                dtype,
                 self.artifacts[logical],
                 logical,
                 self.count,
@@ -1018,7 +1027,7 @@ class CompressionPipeline:
             is_position = logical in POSITION_FIELDS
             dtype = (
                 "float32"
-                if is_position
+                if is_position and self.settings.position_codec != "pcodec"
                 else self.manifest["fields"][logical]["dtype"]
             )
             raw_path = self._ordered_raw_path(logical, dtype, order)

@@ -160,6 +160,7 @@ class PreprocessingPipeline:
             position_scale,
             self.args.force,
             xnyzip_output=xnyzip_position_path,
+            lossless=self.args.pos_compressor == "pcodec",
         )
         self.raw_paths.update(position_paths)
         self.statistics["positions"] = position_stats
@@ -563,7 +564,7 @@ def _selected_payload_bytes(
 
 def _lossy_extension(codec: str) -> str:
     try:
-        return {"sz3": "psz", "szo": "szo"}[codec]
+        return {"sz3": "psz", "szo": "szo", "pcodec": "pco"}[codec]
     except KeyError as exc:
         raise RuntimeError(f"Unsupported lossy compressor: {codec}.") from exc
 
