@@ -2,3 +2,5 @@ data
 particle_pipeline_runs/
 analysis
 *__pycache__/
+docs/
+paper/
