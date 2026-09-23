@@ -9,6 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import h5py
 import numpy as np
 
+from src.hacc_snapshot import is_hacc_directory, write_hacc_adapter
+
 
 CONFIG_VALUE_COUNT = 43
 BYTES_PER_PARTICLE = 32
@@ -166,9 +168,13 @@ def adapt_particle_input(
     input_path: Path,
     adapter_directory: Path,
 ) -> AdaptedParticleInput:
-    """Expose native blocks as HDF5 external datasets, or pass HDF5 through."""
+    """Expose native/HACC fields as external datasets, or pass HDF5 through."""
 
     input_path = input_path.resolve()
+    if is_hacc_directory(input_path):
+        return AdaptedParticleInput(
+            input_path, write_hacc_adapter(input_path, adapter_directory)
+        )
     if not input_path.is_file():
         raise RuntimeError(f"Particle input file does not exist: {input_path}")
     if h5py.is_hdf5(input_path):

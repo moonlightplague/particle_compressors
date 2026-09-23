@@ -9,16 +9,16 @@ root HDF5 attributes in the reconstructed file.
 
 ## Input Format
 
-The input must be an HDF5 file containing seven one-dimensional datasets with
-the same length. Dataset basenames are matched case-insensitively using these
+HDF5 input contains six one-dimensional position/velocity datasets and an
+optional integer ID dataset, all with the same length. Dataset basenames are matched case-insensitively using these
 aliases:
 
 | Logical field | Accepted dataset basenames | Required dtype |
 | --- | --- | --- |
 | ID | `id`, `particle_id`, `pid` | Any integer dtype |
-| X | `x`, `posx`, `position_x` | Numeric |
-| Y | `y`, `posy`, `position_y` | Numeric |
-| Z | `z`, `posz`, `position_z` | Numeric |
+| X | `x`, `xx`, `posx`, `position_x` | Numeric |
+| Y | `y`, `yy`, `posy`, `position_y` | Numeric |
+| Z | `z`, `zz`, `posz`, `position_z` | Numeric |
 | VX | `vx`, `velx`, `velocity_x` | `float32` or `float64` |
 | VY | `vy`, `vely`, `velocity_y` | `float32` or `float64` |
 | VZ | `vz`, `velz`, `velocity_z` | `float32` or `float64` |
@@ -32,6 +32,36 @@ snapshot header used by the source simulation, and the data file must contain
 field-major little-endian `int32` positions, `float32` velocities, and `uint64`
 IDs. Native data is exposed through a lightweight HDF5 adapter in the work
 directory, so the compressor paths—including LCP and XnYZip—remain unchanged.
+
+### HACC input
+
+Pass the HACC field directory as one particle input:
+
+```bash
+python main.py roundtrip data/EXASKY-HACC-data-medium-size \
+  --work-dir particle_pipeline_runs/hacc \
+  --pos-compressor szo --vel-compressor szo --rel-eb 1e-3 --metrics
+```
+
+The directory must contain `xx.f32`, `yy.f32`, `zz.f32`, `vx.f32`, `vy.f32`,
+and `vz.f32`: equal-length, non-empty arrays of little-endian float32 values.
+The adapter references these files without copying them. Positions use their
+original floating-point units with the default automatic scale of 1. Add
+`--limit 1000000` for a smaller validation run.
+
+HACC has no IDs: none are synthesized, exported, compressed, or reconstructed.
+The lossless codec runs only for explicitly selected pcodec fields or required
+permutation sidecars (including blockwise order metadata). Reconstruction writes
+`reconstructed.h5` with the six original field names and float32 dtypes. Payload
+ratios count 24 source bytes per particle.
+
+LCP/XnYZip positions establish canonical row order as usual, with velocities
+following the same particles. Roundtrip metrics use the temporary position
+permutation; compute them before deleting raw files (`--metrics --clean-raw`
+does this automatically). Without IDs, later metrics cannot recover that mapping
+once the temporary permutation is gone. `--sort` is ignored and ID-dependent
+lattice/structure-aware modes fall back with a reason in the manifest. `--merge`
+is unavailable because disjoint particle IDs cannot be verified.
 
 ## Requirements
 

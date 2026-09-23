@@ -13,7 +13,6 @@ import numpy as np
 
 from src.cli import validate_compressor_combination
 from src.constants import (
-    LOGICAL_ORDER,
     MAX_INT32_ORDER_VALUES,
     POSITION_FIELDS,
     VELOCITY_FIELDS,
@@ -37,6 +36,7 @@ from src.field_export import (
     update_numeric_stats,
     update_numeric_stats_int,
 )
+from src.hacc_snapshot import hacc_source_metadata
 from src.hdf5_io import (
     as_jsonable_attr,
     collect_attrs,
@@ -187,6 +187,8 @@ class PreprocessingPipeline:
         fields: Mapping[str, str],
         count: int,
     ) -> None:
+        if "id" not in fields:
+            return
         dtype = np.dtype(source[fields["id"]].dtype)
         path, statistics = export_id_for_pcodec(
             source,
@@ -291,6 +293,8 @@ class PreprocessingPipeline:
                 bool(getattr(self.args, "blockwise_ord", False)),
             ),
         }
+        if "id" not in manifest["fields"]:
+            manifest["artifacts"]["compressed"].pop("id", None)
         manifest["order_dtype"] = (
             "uint64"
             if self.args.pos_compressor == "xnyzip"
@@ -427,6 +431,18 @@ def _record_native_source(
     manifest: Dict[str, Any],
     adapted_input: AdaptedParticleInput,
 ) -> None:
+    if adapted_input.original_path.is_dir():
+        metadata = hacc_source_metadata(adapted_input.original_path)
+        manifest.update(
+            input_format=metadata["format"],
+            input_file=str(adapted_input.original_path),
+            source=metadata,
+            input_file_bytes=sum(
+                field["byte_count"] for field in metadata["fields"].values()
+            ),
+        )
+        manifest.pop("input_h5_file_bytes", None)
+        return
     header = adapted_input.native_header
     if header is None:
         return
@@ -558,7 +574,7 @@ def _selected_payload_bytes(
 ) -> int:
     return sum(
         int(np.dtype(h5[fields[field]].dtype).itemsize * count)
-        for field in LOGICAL_ORDER
+        for field in fields
     )
 
 

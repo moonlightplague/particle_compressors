@@ -189,10 +189,6 @@ class DecompressionPipeline:
             "x": str(self.decompressed_dir / "x.f32.raw"),
             "y": str(self.decompressed_dir / "y.f32.raw"),
             "z": str(self.decompressed_dir / "z.f32.raw"),
-            "id": str(
-                self.decompressed_dir
-                / f"id.{np.dtype(field_metadata['id']['dtype']).name}.raw"
-            ),
             "vx": str(
                 self.decompressed_dir
                 / f"vx.{field_metadata['vx']['dtype']}.raw"
@@ -206,6 +202,11 @@ class DecompressionPipeline:
                 / f"vz.{field_metadata['vz']['dtype']}.raw"
             ),
         }
+        if "id" in field_metadata:
+            paths["id"] = str(
+                self.decompressed_dir
+                / f"id.{np.dtype(field_metadata['id']['dtype']).name}.raw"
+            )
         if "order" in self.fields:
             order_dtype = order_dtype_from_manifest(self.manifest)
             paths["order"] = str(
@@ -277,11 +278,10 @@ class DecompressionPipeline:
                 self.output_paths["order"],
                 self.args.force,
             )
-        decompress_integer_raw(
-            self.fields["id"],
-            self.output_paths["id"],
-            self.args.force,
-        )
+        if "id" in self.fields:
+            decompress_integer_raw(
+                self.fields["id"], self.output_paths["id"], self.args.force,
+            )
 
     def _decompress_velocities(self) -> None:
         if self.velocity_codec == "xnyzip":

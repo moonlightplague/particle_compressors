@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 import h5py
 import numpy as np
 
-from src.constants import LOGICAL_ORDER, POSITION_FIELDS, VELOCITY_FIELDS
+from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
 from src.manifest import (
     compressed_sizes,
     order_dtype_from_manifest,
@@ -102,7 +102,7 @@ def report_count(report: Mapping[str, Any]) -> int:
     sizes = report.get("sizes", {})
     if "selected_particle_count" in sizes:
         return int(sizes["selected_particle_count"])
-    first_field = report["fields"][LOGICAL_ORDER[0]]
+    first_field = next(iter(report["fields"].values()))
     return int(first_field.get("count", 0))
 
 
@@ -112,7 +112,10 @@ def original_bytes_for_fields(
 ) -> int:
     count = report_count(report)
     return int(
-        sum(report_field_dtype(report, field).itemsize * count for field in fields)
+        sum(
+            report_field_dtype(report, field).itemsize * count
+            for field in fields if field in report["fields"]
+        )
     )
 
 
@@ -276,7 +279,8 @@ def print_component_summary(report: Mapping[str, Any]) -> None:
     names = list(POSITION_FIELDS) if fieldwise_triplets else ["xyz"]
     if ratios["order"]["compressed_bytes"] > 0:
         names.append("order")
-    names.append("id")
+    if "id" in report["fields"]:
+        names.append("id")
     if ratios["vxyz"]["compressed_bytes"] > 0:
         names.append("vxyz")
         if ratios["velocity_order"]["compressed_bytes"] > 0:
@@ -319,7 +323,7 @@ def print_summary(metrics: Mapping[str, Any], metrics_path: Path) -> None:
     )
     print_component_summary(metrics)
 
-    for logical in LOGICAL_ORDER:
+    for logical in metrics["fields"]:
         field = metrics["fields"][logical]
         bound = metrics["error_bound_consistency"][logical]
         display_field = (
@@ -476,7 +480,7 @@ def _compute_field_metrics(
         )
     vector_squared_errors: Dict[str, np.ndarray] = {}
 
-    for logical in LOGICAL_ORDER:
+    for logical in manifest["fields"]:
         field = manifest["fields"][logical]
         original_dataset = original[field["h5_path"]]
         reconstructed_dataset = reconstructed[field["h5_path"]]
@@ -644,7 +648,7 @@ def _evaluate_error_bounds(
     manifest: Mapping[str, Any],
 ) -> Dict[str, Dict[str, Any]]:
     results = {}
-    for logical in LOGICAL_ORDER:
+    for logical in manifest["fields"]:
         target = _error_bound_target(logical, manifest)
         observed = float(field_metrics[logical]["max_absolute_error"])
         effective_bound = float(target["effective_final_abs_bound"])
@@ -860,6 +864,11 @@ def _align_rows_by_particle_id(
     manifest: Mapping[str, Any],
     count: int,
 ) -> Tuple[np.ndarray, str]:
+    if "id" not in manifest["fields"]:
+        raise RuntimeError(
+            "Cannot align ID-free reordered particles after the temporary position "
+            "permutation was removed. Compute metrics before --clean-raw."
+        )
     id_path = manifest["fields"]["id"]["h5_path"]
     original_ids = original[id_path][:count]
     reconstructed_ids = reconstructed[id_path][:count]

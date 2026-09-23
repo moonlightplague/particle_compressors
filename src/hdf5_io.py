@@ -8,7 +8,6 @@ import numpy as np
 
 from src.constants import (
     FIELD_ALIASES,
-    LOGICAL_ORDER,
     POSITION_FIELDS,
     VELOCITY_FIELDS,
 )
@@ -26,7 +25,7 @@ from src.structured_layout import (
 
 
 def resolve_fields(h5: h5py.File) -> Dict[str, str]:
-    """Map logical particle fields to datasets using basename aliases."""
+    """Map particle fields by basename aliases; particle IDs are optional."""
 
     available: Dict[str, str] = {}
 
@@ -41,6 +40,8 @@ def resolve_fields(h5: h5py.File) -> Dict[str, str]:
             (available[alias.lower()] for alias in aliases if alias.lower() in available),
             None,
         )
+        if matched is None and logical == "id":
+            continue
         if matched is None:
             raise RuntimeError(
                 f"Could not find dataset for logical field {logical!r}; "
@@ -118,7 +119,7 @@ class HDF5Recombiner:
     def run(self) -> None:
         with h5py.File(self.output_h5, "w") as output:
             apply_attributes(output, self.manifest.get("root_attrs", {}))
-            for logical in LOGICAL_ORDER:
+            for logical in self.manifest["fields"]:
                 self._write_field(output, logical)
 
     def _write_field(self, output: h5py.File, logical: str) -> None:

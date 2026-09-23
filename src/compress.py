@@ -314,6 +314,8 @@ class CompressionPipeline:
         if not self.settings.structure_aware_requested:
             return
         try:
+            if "fields" in self.manifest and "id" not in self.manifest["fields"]:
+                raise LatticeLayoutUnavailable("particle IDs are unavailable")
             if not self.settings.structure_aware:
                 raise LatticeLayoutUnavailable(
                     "requires XnYZip positions and SZO or XnYZip velocities"
@@ -360,7 +362,7 @@ class CompressionPipeline:
             return self._compress_canonical_positions()
         if self.settings.position_codec == "xnyzip":
             return self._compress_canonical_xnyzip_positions()
-        if self.settings.sort_by_id:
+        if self.settings.sort_by_id and "id" in self.manifest["fields"]:
             return self._id_sorted_order()
         return CanonicalOrder()
 
@@ -420,6 +422,11 @@ class CompressionPipeline:
                 else "positions_and_velocities"
             ),
         }
+        if "id" not in self.manifest["fields"]:
+            self.manifest["lattice_layout"] = {
+                **common, "enabled": False, "reason": "particle IDs are unavailable",
+            }
+            return
         if not self.settings.lattice_layout:
             self.manifest["lattice_layout"] = {
                 **common,
@@ -783,7 +790,7 @@ class CompressionPipeline:
                 id_ordering["replaces_xnyzip_position_order"] = True
         self.manifest["ordering"] = {
             "reconstructed_rows": reconstructed_rows,
-            "id": id_ordering,
+            **({"id": id_ordering} if "id" in self.manifest["fields"] else {}),
         }
         self.manifest["particle_sort"] = {
             "requested": (
@@ -796,7 +803,15 @@ class CompressionPipeline:
             "stable": bool(order.field == "id"),
         }
 
+        if (
+            "id" not in self.manifest["fields"]
+            and self.manifest["particle_sort"]["requested"]
+        ):
+            self.manifest["particle_sort"]["reason"] = "particle IDs are unavailable"
+
     def _compress_id(self, order: CanonicalOrder) -> None:
+        if "id" not in self.manifest["fields"]:
+            return
         dtype = self.manifest["fields"]["id"]["dtype"]
         raw_path = self._ordered_raw_path("id", dtype, order)
         if self.structured_layout is not None:

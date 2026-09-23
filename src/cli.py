@@ -331,8 +331,8 @@ def _add_compression_arguments(
     parser.add_argument(
         "input_h5",
         help=(
-            "Input HDF5 particle file, native dat_* file with cfg_*, or a "
-            "directory containing either format."
+            "Input HDF5 particle file, native dat_* file with cfg_*, a HACC "
+            "directory of six .f32 fields, or a directory of particle files."
         ),
     )
     parser.add_argument(

@@ -265,19 +265,20 @@ def resolve_error_bounds(
         "compressor_abs": velocity_vector_abs,
         "preprocess_l2_max_abs": velocity_vector_preprocess_error,
     }
-    id_stats = statistics["id"]
-    field_bounds["id"] = {
-        "mode": "lossless",
-        "abs": id_abs,
-        "relative": None,
-        "range": (
-            float(id_stats["max"] - id_stats["min"])
-            if id_stats["min"] is not None
-            else None
-        ),
-        "range_units": "source_units",
-        "compressor_abs": 0.0,
-    }
+    if "id" in statistics:
+        id_stats = statistics["id"]
+        field_bounds["id"] = {
+            "mode": "lossless",
+            "abs": id_abs,
+            "relative": None,
+            "range": (
+                float(id_stats["max"] - id_stats["min"])
+                if id_stats["min"] is not None
+                else None
+            ),
+            "range_units": "source_units",
+            "compressor_abs": 0.0,
+        }
     return ResolvedErrorBounds(
         position=position,
         velocity=velocity,

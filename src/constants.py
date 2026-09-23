@@ -6,9 +6,9 @@ from typing import Final, Tuple
 
 FIELD_ALIASES: Final = {
     "id": ("id", "particle_id", "pid"),
-    "x": ("x", "posx", "position_x"),
-    "y": ("y", "posy", "position_y"),
-    "z": ("z", "posz", "position_z"),
+    "x": ("x", "xx", "posx", "position_x"),
+    "y": ("y", "yy", "posy", "position_y"),
+    "z": ("z", "zz", "posz", "position_z"),
     "vx": ("vx", "velx", "velocity_x"),
     "vy": ("vy", "vely", "velocity_y"),
     "vz": ("vz", "velz", "velocity_z"),

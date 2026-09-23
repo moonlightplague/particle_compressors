@@ -23,6 +23,7 @@ from src.batch import (
 from src.cli import build_parser, validate_compressor_combination
 from src.compress import compress
 from src.decompress import decompress
+from src.hacc_snapshot import is_hacc_directory
 from src.hdf5_io import resolve_fields
 from src.metrics import (
     compute_metrics,
@@ -444,6 +445,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.pos_compressor,
                 args.vel_compressor,
             )
+        if hasattr(args, "input_h5") and is_hacc_directory(Path(args.input_h5)):
+            if bool(getattr(args, "merge", False)):
+                raise RuntimeError(
+                    "--merge is not applicable to a single HACC field directory."
+                )
+            return PipelineApplication(args).run()
         if bool(getattr(args, "merge", False)):
             if not Path(args.input_h5).is_dir():
                 raise RuntimeError(

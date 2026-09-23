@@ -294,6 +294,8 @@ def _build_merge_plan(input_files: Sequence[Path]) -> MergePlan:
         try:
             with h5py.File(path, "r") as source:
                 fields = resolve_fields(source)
+                if "id" not in fields:
+                    raise RuntimeError("Merging requires particle IDs to verify disjoint inputs.")
                 count = _validate_field_lengths(source, fields, path)
                 dtypes = {
                     logical: str(source[fields[logical]].dtype)

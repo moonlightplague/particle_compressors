@@ -151,8 +151,13 @@ def export_positions_for_lcp(
         require_output_path(output, force)
 
         source = dataset[:count]
-        scaled64 = source.astype(np.float64, copy=False) / scale.value
-        scaled32 = scaled64.astype(np.float32)
+        scaled64 = source.astype(np.float64, copy=False)
+        if scale.value != 1.0:
+            scaled64 = scaled64 / scale.value
+        scaled32 = (
+            source.astype(np.float32, copy=False)
+            if scale.value == 1.0 else scaled64.astype(np.float32)
+        )
         (source if lossless else scaled32).tofile(output)
         if xnyzip_interleaved is not None:
             xnyzip_interleaved[:, axis] = scaled32
