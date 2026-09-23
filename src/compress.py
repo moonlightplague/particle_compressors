@@ -48,7 +48,9 @@ from src.lcp_codec import (
 )
 from src.manifest import update_compressed_size_metrics
 from src.models import CanonicalOrder, ToolPaths
+from src.position_ties import sort_position_ties
 from src.raw_codecs import (
+    SZO_ADAPTIVE_1D_PROFILE,
     SZO_LORENZO_1D_PROFILE,
     compress_integer_raw,
     compress_lattice_hilbert_ids,
@@ -103,6 +105,7 @@ class CompressionSettings:
     lattice_min_occupancy: float = 0.8
     lattice_axis_search: bool = True
     structure_aware_requested: bool = False
+    xnyzip_tie_sort: bool = False
     structure_aware: bool = False
     structure_velocity_cell_bits: int = 7
     field_workers: int = 1
@@ -112,6 +115,11 @@ class CompressionSettings:
         position_codec = getattr(args, "pos_compressor", "lcp")
         velocity_codec = args.vel_compressor
         validate_compressor_combination(position_codec, velocity_codec)
+        xnyzip_tie_sort = bool(getattr(args, "xnyzip_tie_sort", False))
+        if xnyzip_tie_sort and position_codec != "xnyzip":
+            raise RuntimeError("--xnyzip-tie-sort requires --pos-compressor xnyzip.")
+        if xnyzip_tie_sort and velocity_codec not in ("szo", "sz3", "pcodec"):
+            raise RuntimeError("--xnyzip-tie-sort requires fieldwise SZO, SZ3, or pcodec velocities.")
         sort_requested = bool(getattr(args, "sort", False))
         lattice_requested = bool(getattr(args, "lattice_layout", False))
         structure_aware_requested = bool(
@@ -185,6 +193,7 @@ class CompressionSettings:
                 getattr(args, "lattice_axis_search", True)
             ),
             structure_aware_requested=structure_aware_requested,
+            xnyzip_tie_sort=xnyzip_tie_sort,
             structure_aware=structure_aware,
             structure_velocity_cell_bits=structure_velocity_cell_bits,
             velocity_chunk_size=chunk_size,
@@ -717,6 +726,26 @@ class CompressionPipeline:
         self.compressed_fields["positions"]["validated_max_l2_error"] = maximum
         self.compressed_fields["positions"]["validation_l2_bound"] = validation_bound
         self.compressed_fields["positions"]["compression_attempts"] = attempt + 1
+        if getattr(self.settings, "xnyzip_tie_sort", False):
+            started = time.perf_counter()
+            decoded = {
+                key: np.memmap(self.raw_paths[f"{key}_structured_decoded"],
+                               mode="r", dtype="float32", shape=(self.count,))
+                for key in POSITION_FIELDS
+            }
+            velocities = {
+                key: np.memmap(self.raw_paths[key], mode="r",
+                               dtype=self.manifest["fields"][key]["dtype"],
+                               shape=(self.count,))
+                for key in VELOCITY_FIELDS
+            }
+            self.manifest["position_tie_sort"] = sort_position_ties(order, decoded, velocities)
+            # Metrics and every subsequent field must see the refined mapping.
+            order.astype(XNYZIP_ORDER_DTYPE, copy=False).tofile(order_path)
+            self.manifest.setdefault("timing", {})["position_tie_sort_wall_seconds"] = (
+                time.perf_counter() - started
+            )
+            del decoded, velocities
         if self.structured_layout is None:
             for key in POSITION_FIELDS:
                 decoded_path = self.raw_paths.pop(f"{key}_structured_decoded", None)
@@ -976,6 +1005,11 @@ class CompressionPipeline:
                 self.count,
                 float(self.manifest["field_error_bounds"][logical]["abs"]),
                 self.settings.force,
+                szo_profile=(
+                    SZO_ADAPTIVE_1D_PROFILE
+                    if self.settings.xnyzip_tie_sort and self.settings.velocity_codec == "szo"
+                    else None
+                ),
             ))
         for logical, field in zip(
             VELOCITY_FIELDS,

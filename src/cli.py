@@ -34,6 +34,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lattice_min_occupancy": 0.8,
     "lattice_axis_search": True,
     "xnyzip_structure_aware": False,
+    "xnyzip_tie_sort": False,
     "xnyzip_velocity_cell_bits": 7,
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
@@ -151,6 +152,7 @@ def _validated_advanced_config(
         "lattice_layout",
         "lattice_axis_search",
         "xnyzip_structure_aware",
+        "xnyzip_tie_sort",
     ):
         if not isinstance(defaults[key], bool):
             raise RuntimeError(
@@ -483,6 +485,17 @@ def _add_compression_arguments(
         help=(
             "Try all six dense-axis orders and retain the smallest field "
             "payload when using --lattice-layout (default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--xnyzip-tie-sort",
+        action=argparse.BooleanOptionalAction,
+        default=defaults["xnyzip_tie_sort"],
+        help=(
+            "Sort velocities within identical decoded XnYZip position runs "
+            "without an alignment sidecar. SZO tries its default and first-order "
+            "Lorenzo predictors and retains the smaller stream. Requires XnYZip "
+            "positions and SZO, SZ3, or pcodec velocities (default: %(default)s)."
         ),
     )
     parser.add_argument(

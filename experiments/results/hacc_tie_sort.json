@@ -1,0 +1,1482 @@
+{
+  "date": "2026-09-23",
+  "dataset": "data/EXASKY-HACC-data-medium-size",
+  "runs": [
+    {
+      "run": "baseline-full",
+      "count": 280953867,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "szo"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 13606720,
+          "compressed/vx.szo": 176519648,
+          "compressed/vy.szo": 174313038,
+          "compressed/vz.szo": 174193780,
+          "manifest.json": 12757
+        },
+        "compressed_total_bytes": 538645943,
+        "input_file_to_compressed_ratio": 12.518228152699555,
+        "input_h5_file_bytes": 0,
+        "limit": null,
+        "payload_compression_ratio": 12.518228152699555,
+        "reconstructed_h5_file_bytes": 6742896904,
+        "selected_original_payload_bytes": 6742892808,
+        "selected_particle_count": 280953867
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 6.908747802734375,
+          "effective_final_abs_bound": 6.908747802734375,
+          "mode": "relative",
+          "observed_max_absolute_error": 6.908747673034668,
+          "observed_relative_error": 0.0009999999812267417,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 6908.747802734375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 6.908747802734375,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 7.2435625,
+          "effective_final_abs_bound": 7.2435625,
+          "mode": "relative",
+          "observed_max_absolute_error": 7.243561744689941,
+          "observed_relative_error": 0.0009999998957267147,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 7243.5625,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 7.2435625,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 7.26553662109375,
+          "effective_final_abs_bound": 7.26553662109375,
+          "mode": "relative",
+          "observed_max_absolute_error": 7.265536308288574,
+          "observed_relative_error": 0.000999999956946721,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 7265.53662109375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 7.26553662109375,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.3288421630859375,
+          "observed_relative_error": 0.0008944386928345961,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.328857421875,
+          "observed_relative_error": 0.0008944801961844562,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.328857421875,
+          "observed_relative_error": 0.0008944801961844562,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.36746224101030767,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_l2_bound": 0.3676519874646664,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 37.324346374720335,
+        "compress_wall_seconds": 43.94014981016517,
+        "decompress_and_recombine_wall_seconds": 10.258857568725944,
+        "id_compress_wall_seconds": 6.016343832015991e-07,
+        "lattice_prepare_wall_seconds": 2.032145857810974e-06,
+        "lossy_fields_decompress_wall_seconds": 3.256703160703182,
+        "lossy_fields_wall_seconds": 4.674492372199893,
+        "metrics_wall_seconds": 286.9652249664068,
+        "preprocess_wall_seconds": 8.95435569062829,
+        "recombine_h5_wall_seconds": 2.5944695081561804,
+        "roundtrip_wall_seconds": 350.1328263152391
+      },
+      "components": {
+        "positions": {
+          "bytes": 13606720
+        },
+        "vx": {
+          "bytes": 176519648
+        },
+        "vy": {
+          "bytes": 174313038
+        },
+        "vz": {
+          "bytes": 174193780
+        }
+      }
+    },
+    {
+      "run": "ties-full",
+      "count": 280953867,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "szo"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 13606720,
+          "compressed/vx.szo": 121766544,
+          "compressed/vy.szo": 118630254,
+          "compressed/vz.szo": 117570483,
+          "manifest.json": 13417
+        },
+        "compressed_total_bytes": 371587418,
+        "input_file_to_compressed_ratio": 18.146181709521716,
+        "input_h5_file_bytes": 0,
+        "limit": null,
+        "payload_compression_ratio": 18.146181709521716,
+        "reconstructed_h5_file_bytes": 6742896904,
+        "selected_original_payload_bytes": 6742892808,
+        "selected_particle_count": 280953867
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 6.908747802734375,
+          "effective_final_abs_bound": 6.908747802734375,
+          "mode": "relative",
+          "observed_max_absolute_error": 6.908747673034668,
+          "observed_relative_error": 0.0009999999812267417,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 6908.747802734375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 6.908747802734375,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 7.2435625,
+          "effective_final_abs_bound": 7.2435625,
+          "mode": "relative",
+          "observed_max_absolute_error": 7.2435622215271,
+          "observed_relative_error": 0.000999999961555809,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 7243.5625,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 7.2435625,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 7.26553662109375,
+          "effective_final_abs_bound": 7.26553662109375,
+          "mode": "relative",
+          "observed_max_absolute_error": 7.265535593032837,
+          "observed_relative_error": 0.000999999858501723,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 7265.53662109375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 7.26553662109375,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.3288421630859375,
+          "observed_relative_error": 0.0008944386928345961,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.328857421875,
+          "observed_relative_error": 0.0008944801961844562,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.328857421875,
+          "observed_relative_error": 0.0008944801961844562,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.36746224101030767,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_l2_bound": 0.3676519874646664,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 71.32996000535786,
+        "compress_wall_seconds": 82.53786268644035,
+        "decompress_and_recombine_wall_seconds": 11.363040842115879,
+        "id_compress_wall_seconds": 7.618218660354614e-07,
+        "lattice_prepare_wall_seconds": 2.592802047729492e-06,
+        "lossy_fields_decompress_wall_seconds": 3.095572631806135,
+        "lossy_fields_wall_seconds": 8.783377401530743,
+        "metrics_wall_seconds": 248.1986714452505,
+        "position_tie_sort_wall_seconds": 33.08223437704146,
+        "preprocess_wall_seconds": 20.50697818212211,
+        "recombine_h5_wall_seconds": 3.8046220149844885,
+        "roundtrip_wall_seconds": 362.6221922207624
+      },
+      "components": {
+        "positions": {
+          "bytes": 13606720
+        },
+        "vx": {
+          "bytes": 121766544,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 125623400,
+            "lorenzo_1d": 121766544
+          }
+        },
+        "vy": {
+          "bytes": 118630254,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 122473490,
+            "lorenzo_1d": 118630254
+          }
+        },
+        "vz": {
+          "bytes": 117570483,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 121339049,
+            "lorenzo_1d": 117570483
+          }
+        }
+      }
+    },
+    {
+      "run": "xnyzip-full",
+      "count": 280953867,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "xnyzip"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 13606720,
+          "compressed/velocities.xnyzip": 3529407,
+          "compressed/velocity_order.pco": 601513479,
+          "manifest.json": 14207
+        },
+        "compressed_total_bytes": 618663813,
+        "input_file_to_compressed_ratio": 10.89912266486767,
+        "input_h5_file_bytes": 0,
+        "limit": null,
+        "payload_compression_ratio": 10.899122700102067,
+        "reconstructed_h5_file_bytes": 6742896904,
+        "selected_original_payload_bytes": 6742892808,
+        "selected_particle_count": 280953867
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 12.368832454425425,
+          "effective_final_abs_bound": 12.368832454425425,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 11.063720703125,
+          "observed_relative_error": 0.000894483836198018,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 12368.832454425425,
+          "range_units": "source_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 12.368832454425425,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 12.368832454425425,
+          "effective_final_abs_bound": 12.368832454425425,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 11.063720703125,
+          "observed_relative_error": 0.000894483836198018,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 12368.832454425425,
+          "range_units": "source_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 12.368832454425425,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 12.368832454425425,
+          "effective_final_abs_bound": 12.368832454425425,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 11.063720703125,
+          "observed_relative_error": 0.000894483836198018,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 12368.832454425425,
+          "range_units": "source_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 12.368832454425425,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.3288421630859375,
+          "observed_relative_error": 0.0008944386928345961,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.328857421875,
+          "observed_relative_error": 0.0008944801961844562,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.3676519874646664,
+          "effective_final_abs_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.328857421875,
+          "observed_relative_error": 0.0008944801961844562,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.3676519874646664,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.3676519874646664,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.36746224101030767,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 367.6519874646664,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_l2_bound": 0.3676519874646664,
+          "satisfied": true
+        },
+        "velocities": {
+          "compressor_l2_bound": 12.368832454425425,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 12.362430854810263,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 12368.832454425425,
+          "range_units": "source_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_l2_bound": 12.368832454425425,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 38.57483445107937,
+        "compress_wall_seconds": 88.4906992148608,
+        "decompress_and_recombine_wall_seconds": 277.7018995452672,
+        "id_compress_wall_seconds": 5.811452865600586e-07,
+        "lattice_prepare_wall_seconds": 2.4549663066864014e-06,
+        "lossy_fields_decompress_wall_seconds": 0.0,
+        "lossy_fields_wall_seconds": 0.0,
+        "metrics_wall_seconds": 233.00185978971422,
+        "preprocess_wall_seconds": 18.349345134571195,
+        "recombine_h5_wall_seconds": 267.8159631229937,
+        "roundtrip_wall_seconds": 617.5588638614863,
+        "velocity_xnyzip_compress_wall_seconds": 39.42634428292513,
+        "velocity_xnyzip_decompress_wall_seconds": 3.2446297127753496
+      },
+      "components": {
+        "positions": {
+          "bytes": 13606720
+        },
+        "velocities": {
+          "bytes": 3529407
+        },
+        "velocity_order": {
+          "bytes": 601513479
+        }
+      }
+    },
+    {
+      "run": "baseline-1m",
+      "count": 1000000,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "szo"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 441756,
+          "compressed/vx.szo": 731946,
+          "compressed/vy.szo": 726232,
+          "compressed/vz.szo": 736675,
+          "manifest.json": 12779
+        },
+        "compressed_total_bytes": 2649388,
+        "input_file_to_compressed_ratio": 2545.075620482919,
+        "input_h5_file_bytes": 0,
+        "limit": 1000000,
+        "payload_compression_ratio": 9.058695819562857,
+        "reconstructed_h5_file_bytes": 24004096,
+        "selected_original_payload_bytes": 24000000,
+        "selected_particle_count": 1000000
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 3.514647216796875,
+          "effective_final_abs_bound": 3.514647216796875,
+          "mode": "relative",
+          "observed_max_absolute_error": 3.5146255493164062,
+          "observed_relative_error": 0.0009999938350909402,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3514.647216796875,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 3.514647216796875,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 3.9885179443359378,
+          "effective_final_abs_bound": 3.9885179443359378,
+          "mode": "relative",
+          "observed_max_absolute_error": 3.9885101318359375,
+          "observed_relative_error": 0.0009999980412523878,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3988.5179443359375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 3.9885179443359378,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 3.4406114501953127,
+          "effective_final_abs_bound": 3.4406114501953127,
+          "mode": "relative",
+          "observed_max_absolute_error": 3.4405975341796875,
+          "observed_relative_error": 0.0009999959553655428,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3440.6114501953125,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 3.4406114501953127,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.07838337003530406,
+          "effective_final_abs_bound": 0.07838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.07010793685913086,
+          "observed_relative_error": 0.0008944236108699343,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.07838337003530406,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.07838337003530406,
+          "effective_final_abs_bound": 0.07838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.07010841369628906,
+          "observed_relative_error": 0.0008944296942669353,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.07838337003530406,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.07838337003530406,
+          "effective_final_abs_bound": 0.07838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.07011032104492188,
+          "observed_relative_error": 0.0008944540278549394,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.07838337003530406,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.07838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.07814417093302384,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_l2_bound": 0.07838337003530406,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 0.19740107282996178,
+        "compress_wall_seconds": 0.24688163585960865,
+        "decompress_and_recombine_wall_seconds": 0.11556203849613667,
+        "id_compress_wall_seconds": 6.109476089477539e-07,
+        "lattice_prepare_wall_seconds": 1.8123537302017212e-06,
+        "lossy_fields_decompress_wall_seconds": 0.03312125988304615,
+        "lossy_fields_wall_seconds": 0.03967601992189884,
+        "metrics_wall_seconds": 0.34507749415934086,
+        "preprocess_wall_seconds": 0.05584542825818062,
+        "recombine_h5_wall_seconds": 0.022883962839841843,
+        "roundtrip_wall_seconds": 0.7682118881493807
+      },
+      "components": {
+        "positions": {
+          "bytes": 441756
+        },
+        "vx": {
+          "bytes": 731946
+        },
+        "vy": {
+          "bytes": 726232
+        },
+        "vz": {
+          "bytes": 736675
+        }
+      }
+    },
+    {
+      "run": "ties-1m",
+      "count": 1000000,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "szo"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 441756,
+          "compressed/vx.szo": 674277,
+          "compressed/vy.szo": 667642,
+          "compressed/vz.szo": 671396,
+          "manifest.json": 13416
+        },
+        "compressed_total_bytes": 2468487,
+        "input_file_to_compressed_ratio": 2731.589353316424,
+        "input_h5_file_bytes": 0,
+        "limit": 1000000,
+        "payload_compression_ratio": 9.72255474709812,
+        "reconstructed_h5_file_bytes": 24004096,
+        "selected_original_payload_bytes": 24000000,
+        "selected_particle_count": 1000000
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 3.514647216796875,
+          "effective_final_abs_bound": 3.514647216796875,
+          "mode": "relative",
+          "observed_max_absolute_error": 3.5146331787109375,
+          "observed_relative_error": 0.0009999960058335669,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3514.647216796875,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 3.514647216796875,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 3.9885179443359378,
+          "effective_final_abs_bound": 3.9885179443359378,
+          "mode": "relative",
+          "observed_max_absolute_error": 3.9885177612304688,
+          "observed_relative_error": 0.000999999954091853,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3988.5179443359375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 3.9885179443359378,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 3.4406114501953127,
+          "effective_final_abs_bound": 3.4406114501953127,
+          "mode": "relative",
+          "observed_max_absolute_error": 3.4406051635742188,
+          "observed_relative_error": 0.0009999981728186444,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3440.6114501953125,
+          "range_units": "source_units",
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 3.4406114501953127,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.07838337003530406,
+          "effective_final_abs_bound": 0.07838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.07010793685913086,
+          "observed_relative_error": 0.0008944236108699343,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.07838337003530406,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.07838337003530406,
+          "effective_final_abs_bound": 0.07838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.07010841369628906,
+          "observed_relative_error": 0.0008944296942669353,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.07838337003530406,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.07838337003530406,
+          "effective_final_abs_bound": 0.07838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.07011032104492188,
+          "observed_relative_error": 0.0008944540278549394,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.001,
+          "requested_abs_bound": 0.07838337003530406,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.07838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.07814417093302384,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.001,
+          "requested_l2_bound": 0.07838337003530406,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 0.34536110423505306,
+        "compress_wall_seconds": 0.41975599341094494,
+        "decompress_and_recombine_wall_seconds": 0.11394457891583443,
+        "id_compress_wall_seconds": 1.521781086921692e-06,
+        "lattice_prepare_wall_seconds": 2.4959444999694824e-06,
+        "lossy_fields_decompress_wall_seconds": 0.034169379621744156,
+        "lossy_fields_wall_seconds": 0.06386362016201019,
+        "metrics_wall_seconds": 0.38699944503605366,
+        "position_tie_sort_wall_seconds": 0.14929595217108727,
+        "preprocess_wall_seconds": 0.11735847592353821,
+        "recombine_h5_wall_seconds": 0.02438139170408249,
+        "roundtrip_wall_seconds": 1.0426754876971245
+      },
+      "components": {
+        "positions": {
+          "bytes": 441756
+        },
+        "vx": {
+          "bytes": 674277,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 691342,
+            "lorenzo_1d": 674277
+          }
+        },
+        "vy": {
+          "bytes": 667642,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 685678,
+            "lorenzo_1d": 667642
+          }
+        },
+        "vz": {
+          "bytes": 671396,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 690181,
+            "lorenzo_1d": 671396
+          }
+        }
+      }
+    },
+    {
+      "run": "baseline-1m-1e-4",
+      "count": 1000000,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "szo"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 1585041,
+          "compressed/vx.szo": 1178417,
+          "compressed/vy.szo": 1164050,
+          "compressed/vz.szo": 1178821,
+          "manifest.json": 12951
+        },
+        "compressed_total_bytes": 5119280,
+        "input_file_to_compressed_ratio": 1317.1564766920349,
+        "input_h5_file_bytes": 0,
+        "limit": 1000000,
+        "payload_compression_ratio": 4.688159272397681,
+        "reconstructed_h5_file_bytes": 24004096,
+        "selected_original_payload_bytes": 24000000,
+        "selected_particle_count": 1000000
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 0.3514647216796875,
+          "effective_final_abs_bound": 0.3514647216796875,
+          "mode": "relative",
+          "observed_max_absolute_error": 0.35146331787109375,
+          "observed_relative_error": 9.999960058335669e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3514.647216796875,
+          "range_units": "source_units",
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.3514647216796875,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 0.39885179443359375,
+          "effective_final_abs_bound": 0.39885179443359375,
+          "mode": "relative",
+          "observed_max_absolute_error": 0.3988494873046875,
+          "observed_relative_error": 9.999942155734574e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3988.5179443359375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.39885179443359375,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 0.3440611450195313,
+          "effective_final_abs_bound": 0.3440611450195313,
+          "mode": "relative",
+          "observed_max_absolute_error": 0.3440589904785156,
+          "observed_relative_error": 9.999937379124413e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3440.6114501953125,
+          "range_units": "source_units",
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.3440611450195313,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.007838337003530406,
+          "effective_final_abs_bound": 0.007838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.00701141357421875,
+          "observed_relative_error": 8.945026950309476e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.007838337003530406,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.007838337003530406,
+          "effective_final_abs_bound": 0.007838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.00701141357421875,
+          "observed_relative_error": 8.945026950309476e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.007838337003530406,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.007838337003530406,
+          "effective_final_abs_bound": 0.007838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.007015228271484375,
+          "observed_relative_error": 8.949893667910298e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.007838337003530406,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.007838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.007808316790579177,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.0001,
+          "requested_l2_bound": 0.007838337003530406,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 0.24647966213524342,
+        "compress_wall_seconds": 0.30019981041550636,
+        "decompress_and_recombine_wall_seconds": 0.1598393600434065,
+        "id_compress_wall_seconds": 6.09084963798523e-07,
+        "lattice_prepare_wall_seconds": 1.1920928955078125e-06,
+        "lossy_fields_decompress_wall_seconds": 0.041029149666428566,
+        "lossy_fields_wall_seconds": 0.04170721583068371,
+        "metrics_wall_seconds": 0.36260437965393066,
+        "preprocess_wall_seconds": 0.051875337958335876,
+        "recombine_h5_wall_seconds": 0.021011771634221077,
+        "roundtrip_wall_seconds": 0.8792436309158802
+      },
+      "components": {
+        "positions": {
+          "bytes": 1585041
+        },
+        "vx": {
+          "bytes": 1178417
+        },
+        "vy": {
+          "bytes": 1164050
+        },
+        "vz": {
+          "bytes": 1178821
+        }
+      }
+    },
+    {
+      "run": "ties-1m-1e-4",
+      "count": 1000000,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "szo"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 1585041,
+          "compressed/vx.szo": 1160066,
+          "compressed/vy.szo": 1145387,
+          "compressed/vz.szo": 1159819,
+          "manifest.json": 13589
+        },
+        "compressed_total_bytes": 5063902,
+        "input_file_to_compressed_ratio": 1331.5606834413463,
+        "input_h5_file_bytes": 0,
+        "limit": 1000000,
+        "payload_compression_ratio": 4.739428211683402,
+        "reconstructed_h5_file_bytes": 24004096,
+        "selected_original_payload_bytes": 24000000,
+        "selected_particle_count": 1000000
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 0.3514647216796875,
+          "effective_final_abs_bound": 0.3514647216796875,
+          "mode": "relative",
+          "observed_max_absolute_error": 0.35146331787109375,
+          "observed_relative_error": 9.999960058335669e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3514.647216796875,
+          "range_units": "source_units",
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.3514647216796875,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 0.39885179443359375,
+          "effective_final_abs_bound": 0.39885179443359375,
+          "mode": "relative",
+          "observed_max_absolute_error": 0.3988494873046875,
+          "observed_relative_error": 9.999942155734574e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3988.5179443359375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.39885179443359375,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 0.3440611450195313,
+          "effective_final_abs_bound": 0.3440611450195313,
+          "mode": "relative",
+          "observed_max_absolute_error": 0.3440589904785156,
+          "observed_relative_error": 9.999937379124413e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3440.6114501953125,
+          "range_units": "source_units",
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.3440611450195313,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.007838337003530406,
+          "effective_final_abs_bound": 0.007838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.00701141357421875,
+          "observed_relative_error": 8.945026950309476e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.007838337003530406,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.007838337003530406,
+          "effective_final_abs_bound": 0.007838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.00701141357421875,
+          "observed_relative_error": 8.945026950309476e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.007838337003530406,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.007838337003530406,
+          "effective_final_abs_bound": 0.007838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.007015228271484375,
+          "observed_relative_error": 8.949893667910298e-05,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.0001,
+          "requested_abs_bound": 0.007838337003530406,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.007838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.007808316790579177,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.0001,
+          "requested_l2_bound": 0.007838337003530406,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 0.39363348856568336,
+        "compress_wall_seconds": 0.4675694927573204,
+        "decompress_and_recombine_wall_seconds": 0.1500714998692274,
+        "id_compress_wall_seconds": 6.016343832015991e-07,
+        "lattice_prepare_wall_seconds": 2.173706889152527e-06,
+        "lossy_fields_decompress_wall_seconds": 0.042032187804579735,
+        "lossy_fields_wall_seconds": 0.06509365886449814,
+        "metrics_wall_seconds": 0.34448179975152016,
+        "position_tie_sort_wall_seconds": 0.14797919988632202,
+        "preprocess_wall_seconds": 0.05372144095599651,
+        "recombine_h5_wall_seconds": 0.0128620695322752,
+        "roundtrip_wall_seconds": 1.0207634903490543
+      },
+      "components": {
+        "positions": {
+          "bytes": 1585041
+        },
+        "vx": {
+          "bytes": 1160066,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 1177672,
+            "lorenzo_1d": 1160066
+          }
+        },
+        "vy": {
+          "bytes": 1145387,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 1163402,
+            "lorenzo_1d": 1145387
+          }
+        },
+        "vz": {
+          "bytes": 1159819,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 1178019,
+            "lorenzo_1d": 1159819
+          }
+        }
+      }
+    },
+    {
+      "run": "baseline-1m-1e-2",
+      "count": 1000000,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "szo"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 24834,
+          "compressed/vx.szo": 305664,
+          "compressed/vy.szo": 300620,
+          "compressed/vz.szo": 312760,
+          "manifest.json": 12877
+        },
+        "compressed_total_bytes": 956755,
+        "input_file_to_compressed_ratio": 7047.66926538142,
+        "input_h5_file_bytes": 0,
+        "limit": 1000000,
+        "payload_compression_ratio": 25.084791822357865,
+        "reconstructed_h5_file_bytes": 24004096,
+        "selected_original_payload_bytes": 24000000,
+        "selected_particle_count": 1000000
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 35.14647216796875,
+          "effective_final_abs_bound": 35.14647216796875,
+          "mode": "relative",
+          "observed_max_absolute_error": 35.146453857421875,
+          "observed_relative_error": 0.009999994790217697,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3514.647216796875,
+          "range_units": "source_units",
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 35.14647216796875,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 39.88517944335938,
+          "effective_final_abs_bound": 39.88517944335938,
+          "mode": "relative",
+          "observed_max_absolute_error": 39.885009765625,
+          "observed_relative_error": 0.009999957458450295,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3988.5179443359375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 39.88517944335938,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 34.40611450195313,
+          "effective_final_abs_bound": 34.40611450195313,
+          "mode": "relative",
+          "observed_max_absolute_error": 34.406105041503906,
+          "observed_relative_error": 0.009999997250358154,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3440.6114501953125,
+          "range_units": "source_units",
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 34.40611450195313,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.7838337003530406,
+          "effective_final_abs_bound": 0.7838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.7010791301727295,
+          "observed_relative_error": 0.008944233067000842,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 0.7838337003530406,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.7838337003530406,
+          "effective_final_abs_bound": 0.7838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.701080322265625,
+          "observed_relative_error": 0.008944248275493345,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 0.7838337003530406,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.7838337003530406,
+          "effective_final_abs_bound": 0.7838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.7010765075683594,
+          "observed_relative_error": 0.008944199608317337,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 0.7838337003530406,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.7838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.781502803358581,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.01,
+          "requested_l2_bound": 0.7838337003530406,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 0.13442500680685043,
+        "compress_wall_seconds": 0.17983635887503624,
+        "decompress_and_recombine_wall_seconds": 0.07688559591770172,
+        "id_compress_wall_seconds": 7.115304470062256e-07,
+        "lattice_prepare_wall_seconds": 1.1827796697616577e-06,
+        "lossy_fields_decompress_wall_seconds": 0.03217831999063492,
+        "lossy_fields_wall_seconds": 0.03727463260293007,
+        "metrics_wall_seconds": 0.36932175047695637,
+        "preprocess_wall_seconds": 0.05019758455455303,
+        "recombine_h5_wall_seconds": 0.02894921414554119,
+        "roundtrip_wall_seconds": 0.6803061775863171
+      },
+      "components": {
+        "positions": {
+          "bytes": 24834
+        },
+        "vx": {
+          "bytes": 305664
+        },
+        "vy": {
+          "bytes": 300620
+        },
+        "vz": {
+          "bytes": 312760
+        }
+      }
+    },
+    {
+      "run": "ties-1m-1e-2",
+      "count": 1000000,
+      "compressors": {
+        "lossless": "pcodec",
+        "positions": "xnyzip",
+        "velocities": "szo"
+      },
+      "sizes": {
+        "compressed_components_bytes": {
+          "compressed/positions.xnyzip": 24834,
+          "compressed/vx.szo": 148494,
+          "compressed/vy.szo": 144973,
+          "compressed/vz.szo": 146677,
+          "manifest.json": 13516
+        },
+        "compressed_total_bytes": 478494,
+        "input_file_to_compressed_ratio": 14091.906707294136,
+        "input_h5_file_bytes": 0,
+        "limit": 1000000,
+        "payload_compression_ratio": 50.157368744435665,
+        "reconstructed_h5_file_bytes": 24004096,
+        "selected_original_payload_bytes": 24000000,
+        "selected_particle_count": 1000000
+      },
+      "error_bound_consistency": {
+        "vx": {
+          "compressor_abs_eb": 35.14647216796875,
+          "effective_final_abs_bound": 35.14647216796875,
+          "mode": "relative",
+          "observed_max_absolute_error": 35.146453857421875,
+          "observed_relative_error": 0.009999994790217697,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3514.647216796875,
+          "range_units": "source_units",
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 35.14647216796875,
+          "satisfied": true
+        },
+        "vy": {
+          "compressor_abs_eb": 39.88517944335938,
+          "effective_final_abs_bound": 39.88517944335938,
+          "mode": "relative",
+          "observed_max_absolute_error": 39.885177459567785,
+          "observed_relative_error": 0.009999999502624379,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3988.5179443359375,
+          "range_units": "source_units",
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 39.88517944335938,
+          "satisfied": true
+        },
+        "vz": {
+          "compressor_abs_eb": 34.40611450195313,
+          "effective_final_abs_bound": 34.40611450195313,
+          "mode": "relative",
+          "observed_max_absolute_error": 34.40606689453125,
+          "observed_relative_error": 0.009999986163092646,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 3440.6114501953125,
+          "range_units": "source_units",
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 34.40611450195313,
+          "satisfied": true
+        },
+        "x": {
+          "compressor_abs_eb": 0.7838337003530406,
+          "effective_final_abs_bound": 0.7838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.7010791301727295,
+          "observed_relative_error": 0.008944233067000842,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 0.7838337003530406,
+          "satisfied": true
+        },
+        "y": {
+          "compressor_abs_eb": 0.7838337003530406,
+          "effective_final_abs_bound": 0.7838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.701080322265625,
+          "observed_relative_error": 0.008944248275493345,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 0.7838337003530406,
+          "satisfied": true
+        },
+        "z": {
+          "compressor_abs_eb": 0.7838337003530406,
+          "effective_final_abs_bound": 0.7838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_absolute_error": 0.7010765075683594,
+          "observed_relative_error": 0.008944199608317337,
+          "preprocess_cast_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "recombine_rounding_allowance": 0.0,
+          "relative_error_bound": 0.01,
+          "requested_abs_bound": 0.7838337003530406,
+          "satisfied": true
+        }
+      },
+      "xnyzip_l2_error_bound_consistency": {
+        "positions": {
+          "compressor_l2_bound": 0.7838337003530406,
+          "mode": "relative",
+          "norm": "l2",
+          "observed_max_l2_error": 0.781502803358581,
+          "preprocess_l2_allowance": 0.0,
+          "range_for_relative": 78.38337003530405,
+          "range_units": "lcp_units_bbox_diagonal",
+          "relative_error_bound": 0.01,
+          "requested_l2_bound": 0.7838337003530406,
+          "satisfied": true
+        }
+      },
+      "timing": {
+        "canonical_order_wall_seconds": 0.2877176534384489,
+        "compress_wall_seconds": 0.35505462624132633,
+        "decompress_and_recombine_wall_seconds": 0.06402659229934216,
+        "id_compress_wall_seconds": 7.394701242446899e-07,
+        "lattice_prepare_wall_seconds": 2.162531018257141e-06,
+        "lossy_fields_decompress_wall_seconds": 0.03216059319674969,
+        "lossy_fields_wall_seconds": 0.05761709064245224,
+        "metrics_wall_seconds": 0.35985689237713814,
+        "position_tie_sort_wall_seconds": 0.13726823031902313,
+        "preprocess_wall_seconds": 0.051596956327557564,
+        "recombine_h5_wall_seconds": 0.01369176059961319,
+        "roundtrip_wall_seconds": 0.8351364992558956
+      },
+      "components": {
+        "positions": {
+          "bytes": 24834
+        },
+        "vx": {
+          "bytes": 148494,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 149806,
+            "lorenzo_1d": 148494
+          }
+        },
+        "vy": {
+          "bytes": 144973,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 146492,
+            "lorenzo_1d": 144973
+          }
+        },
+        "vz": {
+          "bytes": 146677,
+          "compression_profile": "lorenzo_1d",
+          "profile_candidate_bytes": {
+            "default": 148129,
+            "lorenzo_1d": 146677
+          }
+        }
+      }
+    }
+  ],
+  "standalone_full_decode": {
+    "all_fields_identical": true,
+    "particle_count": 280953867,
+    "field_sha256": {
+      "vx": "e18078c2fa07625f3722e93dd24d2dd5ee66eb7239527cf12c174c631cc55919",
+      "vy": "287aa4139908a56ed2b982a590bcd7a73a9388ca4cc33caa7247f85ba4f3fd69",
+      "vz": "027803603085dfe1993f28a29375edbb9fd89cbbdd423f4ed025043ecfd226bb",
+      "xx": "83e51a91580c85022b8fb289aa8bd7f55a040da754768291cb1146c881383347",
+      "yy": "aa2932033da2c4dcce1e34f03c0295b8bb97d3ae80c57be7760a2d41b7dbdf71",
+      "zz": "a5137e950c8d973bc2f3c3d49e73a5c38a2098e8d66488121f1d3fa486ed8bb2"
+    }
+  },
+  "position_archive_sha256": "a178a9958dc0208658d4eb35e203d6a52c673bddcf42dbfd85869e0deb990f0d",
+  "tests": {
+    "command": "python -m unittest discover -s tests",
+    "passed": 105
+  },
+  "notes": [
+    "All sizes include manifest and sidecars. Timings overlap other processes.",
+    "The two full XnYZip/SZO runs have identical error bounds and position payloads.",
+    "The full XnYZip/XnYZip run has an L2 velocity contract, unlike per-component SZO."
+  ]
+}

@@ -23,6 +23,7 @@ from src.structured_layout import (
 
 FLOAT_DTYPES = (np.dtype("float32"), np.dtype("float64"))
 SZO_LORENZO_1D_PROFILE = "lorenzo_1d"
+SZO_ADAPTIVE_1D_PROFILE = "adaptive_1d"
 
 
 def compress_pcodec_raw(
@@ -149,7 +150,7 @@ def compress_szo_raw(
     # deliberately retain their INTERP_LORENZO default.
     if getattr(config, "cmprAlgo", None) is None:
         config.cmprAlgo = algorithm.LORENZO_REG
-    if profile is not None:
+    if profile is not None and profile != SZO_ADAPTIVE_1D_PROFILE:
         if profile != SZO_LORENZO_1D_PROFILE:
             raise RuntimeError(f"Unsupported SZO compression profile: {profile}.")
         config.cmprAlgo = algorithm.LORENZO_REG
@@ -161,6 +162,25 @@ def compress_szo_raw(
         compressed, _ = szo.compress(encoded, config, copy=True)
     except Exception as exc:
         raise RuntimeError(f"SZO compression failed for {field_name}.") from exc
+
+    candidate_bytes = None
+    if profile == SZO_ADAPTIVE_1D_PROFILE:
+        default_payload = np.ascontiguousarray(compressed, dtype=np.uint8).copy()
+        config.cmprAlgo = algorithm.LORENZO_REG
+        config.lorenzo = True
+        config.lorenzo2 = False
+        config.regression = False
+        config.regression2 = False
+        try:
+            lorenzo_payload, _ = szo.compress(encoded, config, copy=True)
+        except Exception as exc:
+            raise RuntimeError(f"SZO Lorenzo compression failed for {field_name}.") from exc
+        candidate_bytes = {"default": int(default_payload.size),
+                           SZO_LORENZO_1D_PROFILE: int(lorenzo_payload.size)}
+        if lorenzo_payload.size < default_payload.size:
+            compressed, profile = lorenzo_payload, SZO_LORENZO_1D_PROFILE
+        else:
+            compressed, profile = default_payload, "default"
 
     payload = np.ascontiguousarray(compressed, dtype=np.uint8)
     payload.tofile(output)
@@ -180,6 +200,8 @@ def compress_szo_raw(
     )
     if profile is not None:
         metadata["compression_profile"] = profile
+    if candidate_bytes is not None:
+        metadata["profile_candidate_bytes"] = candidate_bytes
     return metadata
 
 

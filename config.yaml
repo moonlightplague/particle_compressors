@@ -28,6 +28,8 @@ advanced:
   # Existing methods and their defaults are unchanged.
   xnyzip_structure_aware: false
   xnyzip_velocity_cell_bits: 7
+  # Encoder-only velocity sorting within identical decoded positions; no sidecar.
+  xnyzip_tie_sort: false
 
   # Integer position conversion used before float32 triplet compression.
   position_scale: auto

@@ -63,6 +63,43 @@ once the temporary permutation is gone. `--sort` is ignored and ID-dependent
 lattice/structure-aware modes fall back with a reason in the manifest. `--merge`
 is unavailable because disjoint particle IDs cannot be verified.
 
+### Higher compression for HACC
+
+Use XnYZip positions, SZO velocities, and the encoder-only position tie sort:
+
+```bash
+python main.py roundtrip data/EXASKY-HACC-data-medium-size \
+  --work-dir particle_pipeline_runs/hacc_ties \
+  --pos-compressor xnyzip --vel-compressor szo \
+  --xnyzip-tie-sort --rel-eb 1e-3 --metrics --clean-raw
+```
+
+On all **280,953,867 particles**, packaged CR improves from **12.5182 to
+18.1462** at the same bounds: **538,645,943 → 371,587,418 bytes**, a **31.01%**
+reduction including metadata. All velocity component bounds and the position
+L2 bound pass. The position archive is byte-identical to the baseline.
+
+Many particles quantize to exactly the same decoded position. Within each
+contiguous run of identical position bits, the encoder orders complete particle
+records by a 3-D Hilbert velocity key. Velocities become smoother for SZO while
+positions remain unchanged. This adds **no permutation sidecar**. SZO also tries
+its default and first-order Lorenzo predictors per velocity field and keeps the
+smaller stream. Neither step changes the requested error bounds.
+
+This requires XnYZip positions and fieldwise SZO, SZ3, or pcodec velocities;
+the SZO predictor search applies to the flat fieldwise path. It works without
+IDs, and keeps IDs exact when present. The temporary position permutation is
+updated for metrics and field alignment; decoding needs no temporary files or
+new format support. Sorting uses fixed blocks of 1,048,576 particles to bound
+additional scratch memory, and can split large runs at block boundaries.
+
+The option is off by default (`advanced.xnyzip_tie_sort: false` in YAML);
+the HACC example in `run.sh` enables it. It trades encoding time for CR and
+does not guarantee a gain on other datasets, especially with few position ties
+or costly ID streams. See [how tie sorting works](xnyzip-tie-sort.md),
+[the full HACC measurements and validation](experiments/hacc_tie_sort.md),
+and [the ordering search](experiments/hacc_tie_search.py).
+
 ## Requirements
 
 - Python with development headers; Python 3.13 is known to work. Conda environment is recommended.

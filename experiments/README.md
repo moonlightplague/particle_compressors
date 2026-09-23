@@ -1,5 +1,19 @@
 # Payload-search experiments
 
+For the HACC optimization, see [the full-data report](hacc_tie_sort.md).
+After a baseline XnYZip/SZO roundtrip **without** `--clean-raw` or
+`--xnyzip-tie-sort`, reproduce the velocity ordering/predictor sweep with:
+
+```bash
+python -m experiments.hacc_tie_search /tmp/hacc-opt/baseline-1m \
+  --limit 1000000 --output /tmp/hacc-tie-search.json
+```
+
+This compares native order, velocity-X sorting, Morton and Hilbert keys at
+6/8/10 bits, each with default SZO and first-order Lorenzo. It decodes each
+candidate and checks its error bound. Its reported sizes are velocity-only;
+use full roundtrips to compare packaged CR, including metadata and sidecars.
+
 These drivers record the searches behind the optional periodic lattice package
 layout. They extend the ID/position displacement, occupancy, and spatial
 velocity analysis in `analysis/particle_metrics.py`. Run them from the
