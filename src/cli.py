@@ -23,6 +23,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "vel_rel_eb": None,
     "vel_chunk_size": 0,
     "vel_chunk_workers": 0,
+    "file_workers": 0,
     "id_abs_eb": 0.0,
     "position_scale": "auto",
     "position_scale_attr": "bitwidth",
@@ -148,6 +149,9 @@ def _validated_advanced_config(
         defaults["vel_chunk_workers"],
         "vel_chunk_workers",
     )
+    defaults["file_workers"] = _nonnegative_integer(
+        defaults["file_workers"], "file_workers",
+    )
     for key in (
         "lattice_layout",
         "lattice_axis_search",
@@ -225,10 +229,11 @@ def _add_pipeline_command(
     command.add_argument(
         "--file-workers",
         type=int,
-        default=0,
+        default=defaults["file_workers"],
         help=(
-            "Parallel file processes for directory input; 0 selects "
-            "automatically (default: %(default)s)."
+            "Maximum concurrent file pipelines for directory input; "
+            "0 selects automatically, 1 processes files in series "
+            "(default: %(default)s)."
         ),
     )
     command.add_argument(

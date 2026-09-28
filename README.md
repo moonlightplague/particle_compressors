@@ -268,8 +268,11 @@ python main.py roundtrip data/snapshots \
   --force
 ```
 
-Directory inputs run in parallel processes. `--file-workers 0` automatically
-selects a bounded worker count; a positive value sets an explicit cap. Each input keeps
+Directory inputs run in parallel processes. Set `advanced.file_workers` in
+`config.yaml` to cap concurrent file pipelines throughout the run: `0` (the
+default) selects automatically, `1` processes files in series, and larger
+values set an explicit maximum. `--file-workers` overrides this config value.
+Each input keeps
 the normal single-file pipeline and writes to a separate subdirectory named
 after the source file, such as `particle_pipeline_runs/snapshots/step_01.h5`.
 Per-file console metrics are printed as usual, and the batch root receives

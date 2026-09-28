@@ -1,4 +1,8 @@
 advanced:
+  # Maximum concurrent file pipelines throughout a directory run.
+  # 0 selects automatically; 1 processes all files in series.
+  file_workers: 0
+
   # Relative paths are resolved from this config file's directory.
   lcp: ./tools/LCP/build/bin/lcp
   xnyzip: ./tools/XnYZip/build/XnYZip
@@ -29,7 +33,7 @@ advanced:
   xnyzip_structure_aware: false
   xnyzip_velocity_cell_bits: 7
   # Encoder-only velocity sorting within identical decoded positions; no sidecar.
-  xnyzip_tie_sort: false
+  xnyzip_tie_sort: true
 
   # Integer position conversion used before float32 triplet compression.
   position_scale: auto

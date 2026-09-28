@@ -19,10 +19,46 @@ from src.batch import (
     print_batch_summary,
 )
 from src.merge import merge_h5_files
+from src.cli import build_parser, load_config
 from src.runtime import read_json
 
 
 class BatchPipelineTests(unittest.TestCase):
+    def test_config_file_workers_reaches_batch_scheduler(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "a.h5").touch()
+            (root / "b.h5").touch()
+            config = root / "config.yaml"
+            for configured, expected in ((0, 2), (1, 1), (2, 2), (8, 2)):
+                config.write_text(f"advanced:\n  file_workers: {configured}\n")
+                for command in ("preprocess", "compress", "roundtrip"):
+                    with self.subTest(configured=configured, command=command):
+                        argv = [command, str(root), "--config", str(config)]
+                        args = build_parser(argv).parse_args(argv)
+                        self.assertEqual(args.file_workers, configured)
+                        with patch("src.batch.os.cpu_count", return_value=4):
+                            app = particle_main.DirectoryPipelineApplication(args)
+                        self.assertEqual(app.workers, expected)
+                        argv += ["--file-workers", "1"]
+                        args = build_parser(argv).parse_args(argv)
+                        self.assertEqual(
+                            particle_main.DirectoryPipelineApplication(args).workers, 1
+                        )
+
+    def test_config_file_workers_default_and_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = Path(temp_dir) / "config.yaml"
+            config.write_text("advanced: {}\n")
+            self.assertEqual(load_config(str(config))[1]["file_workers"], 0)
+            for value in ("-1", "1.5", "true", "null", "'2'"):
+                with self.subTest(value=value):
+                    config.write_text(f"advanced:\n  file_workers: {value}\n")
+                    with self.assertRaisesRegex(
+                        RuntimeError, r"advanced\.file_workers must be a non-negative integer"
+                    ):
+                        load_config(str(config))
+
     def test_discovery_is_non_recursive_sorted_and_exact_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
