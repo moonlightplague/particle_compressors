@@ -608,3 +608,12 @@ derived `vx`/`vy`/`vz` bound is used. XnYZip accepts one L2 bound for an entire
 triplet. Do not set both absolute and relative bounds for the same field class.
 IDs are always reconstructed exactly with pcodec. `id_abs_eb` only defines the
 expected ID error used by metrics and defaults to zero.
+
+### Pcodec compression level
+
+`advanced.pcodec_level` in `config.yaml` controls every pcodec compression,
+including IDs, lossless position/velocity fields, structured IDs, lattice wrap
+offsets, and permutation/block sidecars. It defaults to **12** and accepts
+integers from **0** (fastest) to **12** (highest compression). Override it per run
+with `--pcodec-level N`. Each pcodec field records `pcodec_compression_level` in
+the manifest; decompression reads the self-describing stream without this setting.

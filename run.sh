@@ -8,4 +8,5 @@ python main.py roundtrip "${INPUT_H5}" \
   --config "config.yaml" \
   --work-dir "${WORK_DIR}" \
   --rel-eb "1e-3" \
-  --force --clean-raw --metrics
+  --force --clean-raw --metrics \
+  --xnyzip-tie-sort

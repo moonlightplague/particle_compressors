@@ -476,6 +476,7 @@ class XnYZipOrderingTests(unittest.TestCase):
                 compressed_path,
                 field_name,
                 *unused,
+                pcodec_level=12,
             ):
                 captured_integer[field_name] = np.fromfile(
                     raw_path,
@@ -594,6 +595,7 @@ class XnYZipOrderingTests(unittest.TestCase):
                 compressed_path,
                 field_name,
                 *unused,
+                pcodec_level=12,
             ):
                 captured[field_name] = np.fromfile(
                     raw_path,
@@ -721,6 +723,7 @@ class XnYZipOrderingTests(unittest.TestCase):
                 compressed_path,
                 field_name,
                 *unused,
+                pcodec_level=12,
             ):
                 captured_integer[field_name] = np.fromfile(
                     raw_path,
@@ -847,6 +850,7 @@ class XnYZipOrderingTests(unittest.TestCase):
                 compressed_path,
                 field_name,
                 *unused,
+                pcodec_level=12,
             ):
                 captured_integer[field_name] = np.fromfile(
                     raw_path,

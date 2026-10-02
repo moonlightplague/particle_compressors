@@ -230,9 +230,12 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
                        "--vel-chunk-size", str(chunk_size), "--vel-chunk-workers", "2",
                        "--xnyzip-velocity-cell-bits", "2",
                        "--pos-abs-eb", "0.0001", "--vel-abs-eb", str(velocity_bound),
-                       "--xnyzip-structure-aware",
+                       "--xnyzip-structure-aware", "--pcodec-level", "3",
                        "--field-workers", "2", "--metrics", "--clean-raw"])
             manifest = json.loads((work / "manifest.json").read_text())
+            for field in manifest["compressed_fields"].values():
+                if field["codec"] in ("pcodec", "lattice_hilbert_pcodec_v1"):
+                    self.assertEqual(field["pcodec_compression_level"], 3)
             self.assertTrue(manifest["structured_layout"]["enabled"], manifest["structured_layout"])
             self.assertEqual(manifest["structured_layout"]["id_base"], 1)
             self.assertEqual(manifest["format_version"], 9)

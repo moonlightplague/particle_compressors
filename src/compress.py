@@ -9,7 +9,7 @@ import argparse
 import math
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -109,9 +109,13 @@ class CompressionSettings:
     structure_aware: bool = False
     structure_velocity_cell_bits: int = 7
     field_workers: int = 1
+    pcodec_level: int = 12
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "CompressionSettings":
+        pcodec_level = getattr(args, "pcodec_level", 12)
+        if type(pcodec_level) is not int or not 0 <= pcodec_level <= 12:
+            raise RuntimeError("--pcodec-level must be an integer in [0, 12].")
         position_codec = getattr(args, "pos_compressor", "lcp")
         velocity_codec = args.vel_compressor
         validate_compressor_combination(position_codec, velocity_codec)
@@ -204,6 +208,7 @@ class CompressionSettings:
             blockwise_order=blockwise_order,
             force=bool(args.force),
             field_workers=field_workers,
+            pcodec_level=pcodec_level,
         )
 
 
@@ -222,6 +227,7 @@ class LossyCompressionJob:
     encoded_shape: Optional[Tuple[int, int, int]] = None
     axis_search: bool = False
     szo_profile: Optional[str] = None
+    pcodec_level: int = 12
 
 
 def _compress_lossy_job(job: LossyCompressionJob) -> Dict[str, Any]:
@@ -236,6 +242,7 @@ def _compress_lossy_job(job: LossyCompressionJob) -> Dict[str, Any]:
             job.abs_error_bound,
             job.force,
             **({"szo_profile": job.szo_profile} if job.szo_profile else {}),
+            **({"pcodec_level": job.pcodec_level} if job.codec == "pcodec" else {}),
         )
     return compress_shaped_lossy_raw(
         job.codec,
@@ -846,7 +853,9 @@ class CompressionPipeline:
         if self.structured_layout is not None:
             self.compressed_fields["id"] = compress_lattice_hilbert_ids(
                 read_raw(raw_path, np.dtype(dtype), self.count), dtype,
-                self.artifacts["id"], "id", self.structured_layout, self.settings.force)
+                self.artifacts["id"], "id", self.structured_layout, self.settings.force,
+                pcodec_level=self.settings.pcodec_level,
+            )
             return
         self.compressed_fields["id"] = compress_integer_raw(
             self.args.lossless,
@@ -856,6 +865,7 @@ class CompressionPipeline:
             "id",
             self.count,
             self.settings.force,
+            pcodec_level=self.settings.pcodec_level,
         )
 
     def _compress_positions(self, order: CanonicalOrder) -> None:
@@ -971,6 +981,7 @@ class CompressionPipeline:
                     f"{logical}_lattice_wrap",
                     self.count,
                     self.settings.force,
+                    pcodec_level=self.settings.pcodec_level,
                 )
                 updates["lattice_wrap_field"] = wrap_field
                 self.raw_paths[f"{logical}_lattice_wrap"] = str(
@@ -1107,6 +1118,7 @@ class CompressionPipeline:
         jobs: List[LossyCompressionJob],
     ) -> List[Dict[str, Any]]:
         started = time.perf_counter()
+        jobs = [replace(job, pcodec_level=self.settings.pcodec_level) for job in jobs]
         workers = min(self.field_workers, len(jobs))
         self.lossy_field_workers_used = max(
             self.lossy_field_workers_used,
@@ -1296,6 +1308,7 @@ class CompressionPipeline:
             "velocity_order",
             self.count,
             self.settings.force,
+            pcodec_level=self.settings.pcodec_level,
         )
         order_metadata = {
             "uncompressed_storage_dtype": str(XNYZIP_ORDER_DTYPE),
@@ -1429,6 +1442,7 @@ class CompressionPipeline:
             "velocity_order",
             self.count,
             self.settings.force,
+            pcodec_level=self.settings.pcodec_level,
         )
         order_field.update(
             self._velocity_order_metadata(order_field, chunk_metadata)
@@ -1494,6 +1508,7 @@ class CompressionPipeline:
             "velocity_order",
             order_word_count,
             self.settings.force,
+            pcodec_level=self.settings.pcodec_level,
         )
         order_field.update(
             {
@@ -1539,6 +1554,7 @@ class CompressionPipeline:
             "velocity_block_ids",
             huffman_path.stat().st_size,
             self.settings.force,
+            pcodec_level=self.settings.pcodec_level,
         )
         block_id_field.update(
             {

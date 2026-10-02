@@ -23,6 +23,8 @@ advanced:
   pos_compressor: xnyzip
   vel_compressor: szo
   lossless: pcodec
+  # All pcodec fields and sidecars: 0 (fastest) through 12 (highest compression).
+  pcodec_level: 12
   # Opt-in periodic ID-lattice layout. Existing codec pipelines remain the
   # default unless this is enabled here or with --lattice-layout.
   lattice_layout: false
@@ -33,7 +35,7 @@ advanced:
   xnyzip_structure_aware: false
   xnyzip_velocity_cell_bits: 7
   # Encoder-only velocity sorting within identical decoded positions; no sidecar.
-  xnyzip_tie_sort: true
+  xnyzip_tie_sort: false
 
   # Integer position conversion used before float32 triplet compression.
   position_scale: auto

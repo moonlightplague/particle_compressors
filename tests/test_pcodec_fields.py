@@ -47,7 +47,9 @@ class PcodecFieldTests(unittest.TestCase):
                         for field, values in source.items():
                             h5.create_dataset(field, data=values)
                     # Use an explicit config so local user defaults cannot affect tests.
-                    (root / "config.yaml").write_text("advanced: {}\n")
+                    level = 3 if workers == 2 else 12
+                    (root / "config.yaml").write_text(
+                        "advanced:\n  pcodec_level: 3\n" if workers == 2 else "advanced: {}\n")
                     argv = ["roundtrip", str(root / "input.h5"),
                             "--config", str(root / "config.yaml"),
                             "--work-dir", str(root / "work"),
@@ -63,6 +65,9 @@ class PcodecFieldTests(unittest.TestCase):
                         result = main.main(argv)
                     self.assertEqual(result, 0, output.getvalue())
                     manifest = json.loads((root / "work/manifest.json").read_text())
+                    for field in manifest["compressed_fields"].values():
+                        if field["codec"] == "pcodec":
+                            self.assertEqual(field["pcodec_compression_level"], level)
                     with h5py.File(manifest["artifacts"]["reconstructed_h5"], "r") as h5:
                         order = 63 - h5["id"][:].astype(np.int64)
                         for fields, codec in ((POSITION_FIELDS, pos), (VELOCITY_FIELDS, vel)):

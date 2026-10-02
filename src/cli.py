@@ -31,6 +31,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "pos_compressor": "lcp",
     "vel_compressor": "sz3",
     "lossless": "pcodec",
+    "pcodec_level": 12,
     "lattice_layout": False,
     "lattice_min_occupancy": 0.8,
     "lattice_axis_search": True,
@@ -152,6 +153,9 @@ def _validated_advanced_config(
     defaults["file_workers"] = _nonnegative_integer(
         defaults["file_workers"], "file_workers",
     )
+    defaults["pcodec_level"] = _nonnegative_integer(defaults["pcodec_level"], "pcodec_level")
+    if defaults["pcodec_level"] > 12:
+        raise RuntimeError("config value advanced.pcodec_level must be in [0, 12].")
     for key in (
         "lattice_layout",
         "lattice_axis_search",
@@ -522,6 +526,11 @@ def _add_compression_arguments(
             "Bits per Eulerian cell axis in the XnYZip structure-aware "
             "velocity order (default: %(default)s)."
         ),
+    )
+    parser.add_argument(
+        "--pcodec-level",
+        type=int, choices=range(13), default=defaults["pcodec_level"],
+        help="Compression level for every pcodec stream (0-12; default: %(default)s).",
     )
     parser.add_argument(
         "--lossless",

@@ -307,6 +307,8 @@ class BlockwiseLCPNativeRoundtripTests(unittest.TestCase):
                 "--vel-compressor",
                 "lcp",
                 "--blockwise-ord",
+                "--pcodec-level",
+                "0",
                 "--position-scale",
                 "raw",
                 "--pos-abs-eb",
@@ -328,6 +330,8 @@ class BlockwiseLCPNativeRoundtripTests(unittest.TestCase):
             metrics = json.loads(
                 (work_dir / "metrics.json").read_text(encoding="utf-8")
             )
+            for name in ("id", "velocity_order", "velocity_block_ids"):
+                self.assertEqual(manifest["compressed_fields"][name]["pcodec_compression_level"], 0)
             self.assertEqual(manifest["format_version"], 7)
             self.assertEqual(
                 manifest["compressed_fields"]["velocity_order"][

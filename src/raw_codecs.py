@@ -33,6 +33,7 @@ def compress_pcodec_raw(
     field_name: str,
     count: int,
     force: bool,
+    pcodec_level: int = 12,
 ) -> Dict[str, Any]:
     standalone, chunk_config_type = load_pcodec()
     data_type = np.dtype(dtype)
@@ -40,12 +41,12 @@ def compress_pcodec_raw(
     require_output_path(output, force)
 
     values = np.ascontiguousarray(read_raw(raw_path, data_type, count))
-    chunk_config = chunk_config_type()
+    chunk_config = chunk_config_type(compression_level=pcodec_level)
     if data_type.itemsize == 1:
         chunk_config.enable_8_bit = True
     payload = standalone.simple_compress(values, chunk_config)
     output.write_bytes(payload)
-    return _field_metadata(
+    metadata = _field_metadata(
         field_name,
         "pcodec",
         data_type,
@@ -53,6 +54,8 @@ def compress_pcodec_raw(
         output,
         len(payload),
     )
+    metadata["pcodec_compression_level"] = pcodec_level
+    return metadata
 
 
 def compress_integer_raw(
@@ -63,6 +66,7 @@ def compress_integer_raw(
     field_name: str,
     count: int,
     force: bool,
+    pcodec_level: int = 12,
 ) -> Dict[str, Any]:
     if codec != "pcodec":
         raise RuntimeError(f"Unsupported lossless compressor: {codec}.")
@@ -73,6 +77,7 @@ def compress_integer_raw(
         field_name,
         count,
         force,
+        pcodec_level=pcodec_level,
     )
 
 
@@ -83,6 +88,7 @@ def compress_lattice_hilbert_ids(
     field_name: str,
     layout: StructuredParticleLayout,
     force: bool,
+    pcodec_level: int = 12,
 ) -> Dict[str, Any]:
     """Losslessly compress IDs after a physical-axis Hilbert transform."""
 
@@ -100,10 +106,7 @@ def compress_lattice_hilbert_ids(
     require_output_path(output, force)
     encoded = np.ascontiguousarray(encode_lattice_ids(source, layout))
     standalone, chunk_config_type = load_pcodec()
-    chunk_config = chunk_config_type()
-    # Level 12 is measurably smaller for the transformed permutation while
-    # retaining pcodec's self-describing, backward-compatible payload.
-    chunk_config.compression_level = 12
+    chunk_config = chunk_config_type(compression_level=pcodec_level)
     payload = standalone.simple_compress(encoded, chunk_config)
     output.write_bytes(payload)
     metadata = _field_metadata(
@@ -119,7 +122,7 @@ def compress_lattice_hilbert_ids(
             "encoded_dtype": str(encoded.dtype),
             "transform": "physical_axis_hilbert_3d",
             "lossless_backend": "pcodec",
-            "pcodec_compression_level": 12,
+            "pcodec_compression_level": pcodec_level,
             "structured_layout": layout.metadata(),
         }
     )
@@ -261,11 +264,13 @@ def compress_lossy_raw(
     abs_error_bound: float,
     force: bool,
     szo_profile: str | None = None,
+    pcodec_level: int = 12,
 ) -> Dict[str, Any]:
     # Keep this entry point compatible with existing fieldwise callers.
     if codec == "pcodec":
         return compress_pcodec_raw(
             raw_path, dtype, compressed_path, field_name, count, force,
+            pcodec_level=pcodec_level,
         )
     compressors = {
         "sz3": compress_pysz_raw,

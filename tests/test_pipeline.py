@@ -174,6 +174,7 @@ class CompressionOrderingTests(unittest.TestCase):
                 field_name,
                 value_count,
                 force,
+                pcodec_level=12,
             ):
                 if field_name == "id":
                     captured_ids.append(
@@ -440,6 +441,7 @@ class CompressionOrderingTests(unittest.TestCase):
                 field_name,
                 value_count,
                 force,
+                pcodec_level=12,
             ):
                 captured[field_name] = np.fromfile(
                     raw_path,
@@ -632,7 +634,7 @@ class CompressionOrderingTests(unittest.TestCase):
                 Path(argv[argv.index("-z") + 1]).write_bytes(b"lcp")
                 position_order.tofile(argv[-1])
 
-            def fake_integer(codec, raw_path, dtype, compressed_path, field_name, *unused):
+            def fake_integer(codec, raw_path, dtype, compressed_path, field_name, *unused, pcodec_level=12):
                 captured[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
                 Path(compressed_path).write_bytes(b"integer")
                 return {"field": field_name, "codec": codec, "dtype": dtype, "count": count}
@@ -762,6 +764,7 @@ class CompressionOrderingTests(unittest.TestCase):
                 compressed_path,
                 field_name,
                 *unused,
+                pcodec_level=12,
             ):
                 captured[field_name] = np.fromfile(
                     raw_path,
@@ -1279,7 +1282,7 @@ class ChunkedLCPTests(unittest.TestCase):
                 compressed_path.write_bytes(f"chunk-{chunk_index}".encode())
                 local_orders[chunk_index].tofile(order_path)
 
-            def fake_integer(codec, raw_path, dtype, compressed_path, field_name, *unused):
+            def fake_integer(codec, raw_path, dtype, compressed_path, field_name, *unused, pcodec_level=12):
                 captured_integer[field_name] = np.fromfile(raw_path, dtype=np.dtype(dtype))
                 payload = b"integer"
                 Path(compressed_path).write_bytes(payload)
