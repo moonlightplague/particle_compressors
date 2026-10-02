@@ -212,8 +212,8 @@ def print_batch_summary(
     print(f"particles_total = {summary['total_particle_count']}")
     ratio = sizes["payload_compression_ratio"]
     print(
-        "payload_CR_total = "
-        f"{_format_number(ratio) if ratio is not None else 'n/a'}"
+        "\033[31mpayload_CR_total = \033[0m"
+        f"\033[31m{_format_number(ratio) if ratio is not None else 'n/a'}\033[0m"
     )
     for name in FIELD_GROUPS:
         field_ratio = sizes["field_groups"][name]["compression_ratio"]
@@ -223,8 +223,8 @@ def print_batch_summary(
             else "n/a"
         )
         print(
-            f"{name}_CR_total = "
-            f"{ratio_label}"
+            f"\033[31m{name}_CR_total = \033[0m"
+            f"\033[31m{ratio_label}\033[0m"
         )
     print(
         "original_payload_bytes_total = "
@@ -236,8 +236,8 @@ def print_batch_summary(
         f"{compressed_bytes if compressed_bytes is not None else 'n/a'}"
     )
     print(
-        "batch_wall_seconds = "
-        f"{_format_number(timing['batch_wall_seconds'])}"
+        "\033[31mbatch_wall_seconds = \033[0m"
+        f"\033[31m{_format_number(timing['batch_wall_seconds'])}\033[0m"
     )
     print(
         "file_wall_seconds_total = "

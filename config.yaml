@@ -28,7 +28,7 @@ advanced:
   # Opt-in periodic ID-lattice layout. Existing codec pipelines remain the
   # default unless this is enabled here or with --lattice-layout.
   lattice_layout: false
-  lattice_min_occupancy: 0.69
+  lattice_min_occupancy: 0.8
   lattice_axis_search: true
   # Opt-in mesh-ID + hybrid velocity layout: XnYZip positions, SZO/XnYZip velocities.
   # Existing methods and their defaults are unchanged.
