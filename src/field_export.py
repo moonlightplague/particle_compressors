@@ -130,6 +130,7 @@ def export_positions_for_lcp(
     force: bool,
     xnyzip_output: Optional[Path] = None,
     lossless: bool = False,
+    preserve_position_source: bool = False,
 ) -> Tuple[Dict[str, str], Dict[str, Dict[str, float]]]:
     paths = {}
     statistics = {}
@@ -151,6 +152,14 @@ def export_positions_for_lcp(
         require_output_path(output, force)
 
         source = dataset[:count]
+        if preserve_position_source:
+            if dataset.dtype == np.dtype("float32") and scale.value == 1.0:
+                original_path = output
+            else:
+                original_path = output_dir / f"{logical}.source.{dataset.dtype.name}.raw"
+                require_output_path(original_path, force)
+                source.tofile(original_path)
+            paths[f"{logical}_source"] = str(original_path)
         scaled64 = source.astype(np.float64, copy=False)
         if scale.value != 1.0:
             scaled64 = scaled64 / scale.value

@@ -26,6 +26,8 @@ class ResolvedErrorBounds:
 
 def validate_error_bound(value: float, label: str) -> float:
     value = float(value)
+    if not math.isfinite(value):
+        raise RuntimeError(f"{label} must be finite.")
     if value < 0.0:
         raise RuntimeError(f"{label} must be non-negative.")
     return value
@@ -162,6 +164,17 @@ def resolve_error_bounds(
             args.pos_compressor == "xnyzip"
         ),
     )
+    linf = bool(getattr(args, "xnyzip_linf_bound", False))
+    if linf:
+        from src.xnyzip_linf import estimate_linf_l2_bound, linf_axis_scales
+
+        # The final guarantee is per axis. The L2 envelope is diagnostic only;
+        # sparse corrections can repair both native and preprocessing errors.
+        vector_requested_abs = math.hypot(*base_position.abs_by_field.values())
+        position_vector_abs = estimate_linf_l2_bound(
+            base_position.abs_by_field, position_preprocess_errors, position_ranges,
+            linf_axis_scales(base_position.abs_by_field),
+        )
     if args.pos_compressor == "xnyzip" and position_vector_abs <= 0.0:
         raise RuntimeError(
             "The requested position error bound leaves no positive XnYZip "
@@ -248,6 +261,12 @@ def resolve_error_bounds(
         "compressor_abs": position_vector_abs,
         "preprocess_l2_max_abs": vector_preprocess_error,
     }
+    if linf:
+        field_bounds["positions_xnyzip"]["final_error_bound_norm"] = "linf"
+        field_bounds["positions_xnyzip"]["l2_bound_estimate"] = position_vector_abs
+        for field in POSITION_FIELDS:
+            field_bounds[field]["norm"] = "linf"
+            field_bounds[field]["compressor_abs"] = position_vector_abs
     field_bounds.update(
         serialize_error_bound_selection(
             velocity,

@@ -203,7 +203,12 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
             with self.subTest(chunk_size=chunk_size):
                 self._assert_structured_roundtrip("xnyzip", chunk_size)
 
-    def _assert_structured_roundtrip(self, velocity_codec, chunk_size=0):
+    def test_linf_positions_preserve_structured_szo_and_chunked_xnyzip_orders(self):
+        for codec, chunk_size in (("szo", 0), ("xnyzip", 257)):
+            with self.subTest(codec=codec):
+                self._assert_structured_roundtrip(codec, chunk_size, linf=True)
+
+    def _assert_structured_roundtrip(self, velocity_codec, chunk_size=0, linf=False):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source, work = root / "input.h5", root / "package"
@@ -231,18 +236,21 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
                        "--xnyzip-velocity-cell-bits", "2",
                        "--pos-abs-eb", "0.0001", "--vel-abs-eb", str(velocity_bound),
                        "--xnyzip-structure-aware", "--pcodec-level", "3",
-                       "--field-workers", "2", "--metrics", "--clean-raw"])
+                       "--field-workers", "2", "--metrics", "--clean-raw",
+                       *(["--xnyzip-Linf-bound"] if linf else [])])
             manifest = json.loads((work / "manifest.json").read_text())
             for field in manifest["compressed_fields"].values():
                 if field["codec"] in ("pcodec", "lattice_hilbert_pcodec_v1"):
                     self.assertEqual(field["pcodec_compression_level"], 3)
             self.assertTrue(manifest["structured_layout"]["enabled"], manifest["structured_layout"])
             self.assertEqual(manifest["structured_layout"]["id_base"], 1)
-            self.assertEqual(manifest["format_version"], 9)
+            self.assertEqual(manifest["format_version"], 10 if linf else 9)
             self.assertIn(manifest["compressed_fields"]["positions"]["curve"], ("-h", "-z"))
-            self.assertEqual(manifest["compressed_fields"]["positions"]["quantizer"], "cube")
+            if not linf:
+                self.assertEqual(manifest["compressed_fields"]["positions"]["quantizer"], "cube")
             self.assertEqual(len(list((work / "compressed").iterdir())),
-                             4 if velocity_codec == "xnyzip" else 5)
+                             (4 if velocity_codec == "xnyzip" else 5)
+                             + len(manifest["compressed_fields"]["positions"].get("linf_outliers", {})))
             validate_structured_package(manifest)
             if velocity_codec == "xnyzip":
                 from src.structured_layout import HYBRID_VELOCITY_LAYOUT

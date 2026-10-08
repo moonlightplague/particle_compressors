@@ -1,11 +1,12 @@
 """XnYZip command construction, chunk containers, and order validation."""
 
+import math
 import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Dict, Mapping, Tuple
+from typing import BinaryIO, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -217,6 +218,7 @@ def run_xnyzip_decompress(
     force: bool,
     *,
     quantizer: str = XNYZIP_QUANTIZER,
+    axis_scales: Optional[Mapping[str, float]] = None,
 ) -> None:
     if quantizer not in ("to", "cube"):
         raise RuntimeError(f"Unsupported XnYZip quantizer: {quantizer}.")
@@ -244,7 +246,13 @@ def run_xnyzip_decompress(
     )
     try:
         for axis, field in enumerate(fields):
-            np.ascontiguousarray(interleaved[:, axis]).tofile(
+            values = interleaved[:, axis]
+            if axis_scales is not None:
+                factor = float(axis_scales[field])
+                if not math.isfinite(factor) or factor <= 0:
+                    raise RuntimeError("Invalid XnYZip position axis scale.")
+                values = (values.astype(np.float64) / factor).astype(np.float32)
+            np.ascontiguousarray(values).tofile(
                 output_paths[field]
             )
     finally:

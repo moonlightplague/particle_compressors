@@ -49,6 +49,7 @@ from src.lcp_codec import (
 from src.manifest import update_compressed_size_metrics
 from src.models import CanonicalOrder, ToolPaths
 from src.position_ties import sort_position_ties
+from src.xnyzip_linf import linf_axis_scales, scale_native_positions, tune_linf_l2_bound, write_linf_outliers
 from src.raw_codecs import (
     SZO_ADAPTIVE_1D_PROFILE,
     SZO_LORENZO_1D_PROFILE,
@@ -106,6 +107,7 @@ class CompressionSettings:
     lattice_axis_search: bool = True
     structure_aware_requested: bool = False
     xnyzip_tie_sort: bool = False
+    xnyzip_linf_bound: bool = False
     structure_aware: bool = False
     structure_velocity_cell_bits: int = 7
     field_workers: int = 1
@@ -119,6 +121,9 @@ class CompressionSettings:
         position_codec = getattr(args, "pos_compressor", "lcp")
         velocity_codec = args.vel_compressor
         validate_compressor_combination(position_codec, velocity_codec)
+        xnyzip_linf_bound = bool(getattr(args, "xnyzip_linf_bound", False))
+        if xnyzip_linf_bound and position_codec != "xnyzip":
+            raise RuntimeError("--xnyzip-Linf-bound requires --pos-compressor xnyzip.")
         xnyzip_tie_sort = bool(getattr(args, "xnyzip_tie_sort", False))
         if xnyzip_tie_sort and position_codec != "xnyzip":
             raise RuntimeError("--xnyzip-tie-sort requires --pos-compressor xnyzip.")
@@ -198,6 +203,7 @@ class CompressionSettings:
             ),
             structure_aware_requested=structure_aware_requested,
             xnyzip_tie_sort=xnyzip_tie_sort,
+            xnyzip_linf_bound=xnyzip_linf_bound,
             structure_aware=structure_aware,
             structure_velocity_cell_bits=structure_velocity_cell_bits,
             velocity_chunk_size=chunk_size,
@@ -296,6 +302,9 @@ class CompressionPipeline:
 
     def run(self) -> Dict[str, Any]:
         started = time.perf_counter()
+        if self.settings.force and not self.settings.xnyzip_linf_bound:
+            for key in POSITION_FIELDS:
+                (self.work_dir / "compressed" / f"{key}.outliers").unlink(missing_ok=True)
         stage_started = time.perf_counter()
         self._prepare_structure_aware_layout()
         self.structure_prepare_seconds = time.perf_counter() - stage_started
@@ -666,6 +675,30 @@ class CompressionPipeline:
         l2_error_bound = validation_bound
         curve = XNYZIP_HILBERT_CURVE if self.structured_layout else XNYZIP_CURVE
         quantizer = XNYZIP_QUANTIZER
+        linf = bool(getattr(self.settings, "xnyzip_linf_bound", False))
+        if linf:
+            started = time.perf_counter()
+            axis_scales = linf_axis_scales({k: self.manifest["field_error_bounds"][k]["abs"] for k in POSITION_FIELDS})
+            if "id" not in self.manifest["fields"] and self.settings.velocity_codec == "szo":
+                quantizer, l2_error_bound, axis_scales, tuning = tune_linf_l2_bound(
+                    self.tools, self.raw_paths, self.manifest, self.preprocessed_dir,
+                    self.settings.xnyzip_tie_sort,
+                )
+                self.manifest["xnyzip_linf_tuning"] = tuning
+            scale_native_positions(self.raw_paths["positions_xnyzip"], self.count, axis_scales)
+            self._linf_axis_scales = axis_scales
+            validation_bound = l2_error_bound
+            # Native rounding is repaired by the same sidecar. Reject gross
+            # codec corruption without repeatedly tightening an otherwise useful
+            # tolerance merely to reserve a few float32 ULPs.
+            stats = self.manifest.get("preprocess", {}).get("positions", {})
+            magnitude = max(
+                max(abs(float(stats.get(k, {}).get("min_in_lcp_units", 0))),
+                    abs(float(stats.get(k, {}).get("max_in_lcp_units", 0))))
+                for k in POSITION_FIELDS
+            )
+            validation_bound += 8 * float(np.finfo(np.float32).eps) * magnitude
+            self.manifest.setdefault("timing", {})["xnyzip_linf_tuning_wall_seconds"] = time.perf_counter() - started
         max_attempts = 6
         for attempt in range(max_attempts):
             options = {"curve": curve} if self.structured_layout else {}
@@ -715,7 +748,10 @@ class CompressionPipeline:
         )
         if vector_bounds is not None:
             vector_bounds["compressor_abs"] = l2_error_bound
-            vector_bounds["codec_l2_safety_margin"] = validation_bound - l2_error_bound
+            vector_bounds["codec_l2_safety_margin"] = max(0.0, validation_bound - l2_error_bound) if not linf else 0.0
+            if linf:
+                for key in POSITION_FIELDS:
+                    self.manifest["field_error_bounds"][key]["compressor_abs"] = l2_error_bound
         if self.structured_layout is not None and quantizer != XNYZIP_QUANTIZER:
             self.manifest["structured_layout"][
                 "position_quantizer_fallback"
@@ -733,6 +769,10 @@ class CompressionPipeline:
         self.compressed_fields["positions"]["validated_max_l2_error"] = maximum
         self.compressed_fields["positions"]["validation_l2_bound"] = validation_bound
         self.compressed_fields["positions"]["compression_attempts"] = attempt + 1
+        if linf:
+            self.compressed_fields["positions"]["error_bound_norm"] = "linf"
+            self.compressed_fields["positions"]["axis_scales"] = axis_scales
+            self.compressed_fields["positions"]["outlier_correction"] = "source_dtype_signed_steps_with_exact_escapes"
         if getattr(self.settings, "xnyzip_tie_sort", False):
             started = time.perf_counter()
             decoded = {
@@ -753,6 +793,8 @@ class CompressionPipeline:
                 time.perf_counter() - started
             )
             del decoded, velocities
+        if linf:
+            self._store_xnyzip_linf_outliers(order)
         if self.structured_layout is None:
             for key in POSITION_FIELDS:
                 decoded_path = self.raw_paths.pop(f"{key}_structured_decoded", None)
@@ -765,6 +807,31 @@ class CompressionPipeline:
             artifact_dtype=str(XNYZIP_ORDER_DTYPE),
             values=order,
         )
+
+    def _store_xnyzip_linf_outliers(self, order: np.ndarray) -> None:
+        """Build corrections against the final mapping, after position tie sorting."""
+        started = time.perf_counter()
+        metadata = {}
+        statistics = {}
+        scale = float(self.manifest["position_scale"]["value"])
+        for key in POSITION_FIELDS:
+            dtype = self.manifest["fields"][key]["dtype"]
+            source = np.memmap(self.raw_paths[f"{key}_source"], mode="r", dtype=dtype, shape=(self.count,))
+            decoded = np.memmap(self.raw_paths[f"{key}_structured_decoded"], mode="r", dtype="float32", shape=(self.count,))
+            path = Path(self.artifacts["positions"]).parent / f"{key}.outliers"
+            field, stats = write_linf_outliers(
+                path, decoded, source, order,
+                float(self.manifest["field_error_bounds"][key]["abs"]),
+                scale, self.settings.force,
+            )
+            statistics[key] = stats
+            if field is not None:
+                metadata[key] = field
+                self.artifacts[f"{key}_outliers"] = str(path)
+            del source, decoded
+        self.compressed_fields["positions"]["linf_outliers"] = metadata
+        self.compressed_fields["positions"]["linf_validation"] = statistics
+        self.manifest.setdefault("timing", {})["xnyzip_linf_outliers_wall_seconds"] = time.perf_counter() - started
 
     def _measure_xnyzip_position_error(
         self, order: np.ndarray, bound: float, quantizer: str = XNYZIP_QUANTIZER,
@@ -780,7 +847,8 @@ class CompressionPipeline:
         run_xnyzip_decompress(
             self.tools, self.artifacts["positions"], decoded_paths, POSITION_FIELDS,
             self.count, bound, self.preprocessed_dir / "structured-decoded.interleaved.f32.raw", True,
-            quantizer=quantizer)
+            quantizer=quantizer,
+            **({"axis_scales": self._linf_axis_scales} if getattr(self.settings, "xnyzip_linf_bound", False) else {}))
         source = {key: np.memmap(self.raw_paths[key], mode="r", dtype="float32", shape=(self.count,))
                   for key in POSITION_FIELDS}
         decoded = {key: np.memmap(path, mode="r", dtype="float32", shape=(self.count,))
@@ -792,6 +860,8 @@ class CompressionPipeline:
             for key in POSITION_FIELDS:
                 difference = (decoded[key][start:end].astype(np.float64)
                               - source[key][order[start:end]].astype(np.float64))
+                if getattr(self.settings, "xnyzip_linf_bound", False):
+                    difference *= self._linf_axis_scales[key]
                 squared += difference * difference
             if not np.all(np.isfinite(squared)):
                 return math.inf
@@ -1775,7 +1845,9 @@ class CompressionPipeline:
                 else 1
             ),
         }
-        if self.structured_layout is not None:
+        if self.settings.xnyzip_linf_bound:
+            self.manifest["format_version"] = 10
+        elif self.structured_layout is not None:
             self.manifest["format_version"] = 9
         elif self.lattice is not None:
             self.manifest["format_version"] = 8

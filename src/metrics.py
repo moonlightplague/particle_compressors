@@ -658,7 +658,7 @@ def _evaluate_error_bounds(
             if value_range not in (None, 0.0)
             else (0.0 if observed == 0.0 else math.inf)
         )
-        tolerance = 1e-12 + 1e-6 * max(1.0, effective_bound)
+        tolerance = 0.0 if target.get("norm") == "linf" else 1e-12 + 1e-6 * max(1.0, effective_bound)
         target["observed_max_absolute_error"] = observed
         target["satisfied"] = bool(observed <= effective_bound + tolerance)
         results[logical] = target
@@ -692,6 +692,19 @@ def _position_error_target(
     manifest: Mapping[str, Any],
 ) -> Dict[str, Any]:
     if position_compressor_from_manifest(manifest) == "xnyzip":
+        if manifest.get("compressed_fields", {}).get("positions", {}).get("error_bound_norm") == "linf":
+            requested = float(field_bound["abs"])
+            return {
+                "mode": field_bound["mode"], "norm": "linf",
+                "relative_error_bound": field_bound.get("relative"),
+                "range_for_relative": field_bound.get("range"),
+                "range_units": field_bound.get("range_units", "lcp_units"),
+                "requested_abs_bound": requested,
+                "compressor_abs_eb": float(manifest["error_bounds"]["positions_xnyzip_abs"]),
+                "preprocess_cast_allowance": 0.0,
+                "recombine_rounding_allowance": 0.0,
+                "effective_final_abs_bound": requested,
+            }
         vector_bound = manifest["field_error_bounds"][
             "positions_xnyzip"
         ]

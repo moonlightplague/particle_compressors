@@ -266,6 +266,8 @@ class DecompressionPipeline:
                 self.args.force,
                 **({"quantizer": self.fields["positions"]["quantizer"]}
                    if "quantizer" in self.fields["positions"] else {}),
+                **({"axis_scales": self.fields["positions"]["axis_scales"]}
+                   if "axis_scales" in self.fields["positions"] else {}),
             )
             return
         for logical in POSITION_FIELDS:

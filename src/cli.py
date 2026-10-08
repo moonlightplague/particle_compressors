@@ -37,6 +37,7 @@ BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
     "lattice_axis_search": True,
     "xnyzip_structure_aware": False,
     "xnyzip_tie_sort": False,
+    "xnyzip_linf_bound": False,
     "xnyzip_velocity_cell_bits": 7,
 }
 AVAILABLE_COMPRESSORS: Dict[str, Tuple[str, ...]] = {
@@ -161,6 +162,7 @@ def _validated_advanced_config(
         "lattice_axis_search",
         "xnyzip_structure_aware",
         "xnyzip_tie_sort",
+        "xnyzip_linf_bound",
     ):
         if not isinstance(defaults[key], bool):
             raise RuntimeError(
@@ -494,6 +496,18 @@ def _add_compression_arguments(
         help=(
             "Try all six dense-axis orders and retain the smallest field "
             "payload when using --lattice-layout (default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--xnyzip-Linf-bound", "--xnyzip-linf-bound",
+        dest="xnyzip_linf_bound",
+        action=argparse.BooleanOptionalAction,
+        default=defaults["xnyzip_linf_bound"],
+        help=(
+            "Enforce each position axis's requested bound using compact XnYZip "
+            "outlier corrections. Relative bounds use each axis's range; tune "
+            "the native L2 tolerance for total package size on ID-free SZO inputs "
+            "(default: %(default)s)."
         ),
     )
     parser.add_argument(

@@ -17,6 +17,7 @@ from src.manifest import (
     velocity_compressor_from_manifest,
 )
 from src.runtime import read_raw
+from src.xnyzip_linf import restore_linf_outliers
 from src.structured_layout import (
     HYBRID_VELOCITY_LAYOUT,
     StructuredParticleLayout,
@@ -172,6 +173,10 @@ class HDF5Recombiner:
             limits = np.iinfo(target_dtype)
             values = np.clip(np.rint(values), limits.min, limits.max)
         converted = values.astype(target_dtype)
+        outliers = (self.manifest.get("compressed_fields", {}).get("positions", {})
+                    .get("linf_outliers", {}).get(logical))
+        if outliers is not None:
+            restore_linf_outliers(converted, outliers)
         return self._restore_order(converted, self.position_order)
 
     def _reordered_velocity(

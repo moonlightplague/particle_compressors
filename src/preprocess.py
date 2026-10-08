@@ -97,6 +97,8 @@ class PreprocessingPipeline:
         self.statistics: Dict[str, Any] = {}
 
     def run(self) -> Tuple[Dict[str, Any], Dict[str, str], ToolPaths]:
+        if getattr(self.args, "xnyzip_linf_bound", False) and self.args.pos_compressor != "xnyzip":
+            raise RuntimeError("--xnyzip-Linf-bound requires --pos-compressor xnyzip.")
         started = time.perf_counter()
         with h5py.File(self.input_h5, "r") as source:
             fields = resolve_fields(source)
@@ -161,6 +163,7 @@ class PreprocessingPipeline:
             self.args.force,
             xnyzip_output=xnyzip_position_path,
             lossless=self.args.pos_compressor == "pcodec",
+            preserve_position_source=bool(getattr(self.args, "xnyzip_linf_bound", False)),
         )
         self.raw_paths.update(position_paths)
         self.statistics["positions"] = position_stats

@@ -1,0 +1,337 @@
+{
+  "count": 280953867,
+  "cr_reduction_vs_l2_baseline_percent": 14.44207437873618,
+  "final_tuning_with_manifest_cost": {
+    "candidates": [
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 0.25,
+          "z": 0.25
+        },
+        "l2_error_bound": 0.07155417101503207,
+        "metadata_bytes": 562,
+        "outlier_bytes": 0,
+        "position_bytes": 71038,
+        "quantizer": "to",
+        "total_bytes": 485029,
+        "velocity_bytes": 413429
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 0.25,
+          "z": 0.25
+        },
+        "l2_error_bound": 0.11085124507715867,
+        "metadata_bytes": 2394,
+        "outlier_bytes": 227,
+        "position_bytes": 53893,
+        "quantizer": "cube",
+        "total_bytes": 456407,
+        "velocity_bytes": 399893
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 0.25,
+          "z": 0.25
+        },
+        "l2_error_bound": 0.083138433807869,
+        "metadata_bytes": 2419,
+        "outlier_bytes": 38838,
+        "position_bytes": 61841,
+        "quantizer": "to",
+        "total_bytes": 507186,
+        "velocity_bytes": 404088
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 0.25,
+          "z": 0.25
+        },
+        "l2_error_bound": 0.11085124507715867,
+        "metadata_bytes": 2421,
+        "outlier_bytes": 83181,
+        "position_bytes": 47082,
+        "quantizer": "to",
+        "total_bytes": 520412,
+        "velocity_bytes": 387728
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 0.25,
+          "z": 0.25
+        },
+        "l2_error_bound": 0.13856405634644833,
+        "metadata_bytes": 2421,
+        "outlier_bytes": 103155,
+        "position_bytes": 38193,
+        "quantizer": "to",
+        "total_bytes": 521079,
+        "velocity_bytes": 377310
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "l2_error_bound": 0.07155417101503207,
+        "metadata_bytes": 1171,
+        "outlier_bytes": 68,
+        "position_bytes": 149209,
+        "quantizer": "to",
+        "total_bytes": 609427,
+        "velocity_bytes": 458979
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "l2_error_bound": 0.11085124507715867,
+        "metadata_bytes": 1174,
+        "outlier_bytes": 85,
+        "position_bytes": 121572,
+        "quantizer": "cube",
+        "total_bytes": 567606,
+        "velocity_bytes": 444775
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "l2_error_bound": 0.2757389905984998,
+        "metadata_bytes": 1184,
+        "outlier_bytes": 65203,
+        "position_bytes": 51662,
+        "quantizer": "to",
+        "total_bytes": 499436,
+        "velocity_bytes": 381387
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "l2_error_bound": 0.36765198746466643,
+        "metadata_bytes": 2421,
+        "outlier_bytes": 108639,
+        "position_bytes": 38767,
+        "quantizer": "to",
+        "total_bytes": 516995,
+        "velocity_bytes": 367168
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "l2_error_bound": 0.36765198746466643,
+        "metadata_bytes": 1181,
+        "outlier_bytes": 66681,
+        "position_bytes": 43831,
+        "quantizer": "cube",
+        "total_bytes": 489417,
+        "velocity_bytes": 377724
+      },
+      {
+        "axis_scales": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "l2_error_bound": 0.45956498433083304,
+        "metadata_bytes": 2421,
+        "outlier_bytes": 133220,
+        "position_bytes": 32962,
+        "quantizer": "to",
+        "total_bytes": 526211,
+        "velocity_bytes": 357608
+      }
+    ],
+    "sample_count": 262144,
+    "selected": {
+      "axis_scales": {
+        "x": 1.0,
+        "y": 0.25,
+        "z": 0.25
+      },
+      "l2_error_bound": 0.11085124507715867,
+      "metadata_bytes": 2394,
+      "outlier_bytes": 227,
+      "position_bytes": 53893,
+      "quantizer": "cube",
+      "total_bytes": 456407,
+      "velocity_bytes": 399893
+    }
+  },
+  "input": "data/EXASKY-HACC-data-medium-size",
+  "optimized_standalone_decode": {
+    "count": 280953867,
+    "preprocessed_files_absent": true,
+    "standalone_decode_matches_every_field_bitwise": true,
+    "verification_seconds": 32.99981416389346
+  },
+  "package_reduction_vs_unscaled_linf_percent": 7.03241935041119,
+  "particle_ids": false,
+  "position_compressor": "xnyzip",
+  "relative_error_bound": 0.001,
+  "runs": {
+    "l2_baseline": {
+      "axis_scales": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "compressed_total_bytes": 371589469,
+      "linf_validation": null,
+      "native_l2_bound": 0.3676519874646664,
+      "native_position_bytes": 13606720,
+      "native_quantizer": "to",
+      "outlier_bytes": 0,
+      "package_directory": "particle_pipeline_runs/xnyzip_linf_full_baseline",
+      "position_errors": {
+        "x": {
+          "observed_max_abs_error": 0.3288421630859375,
+          "requested_abs_bound": 0.06399999618530273,
+          "strict_per_axis_bound_satisfied": false
+        },
+        "y": {
+          "observed_max_abs_error": 0.328857421875,
+          "requested_abs_bound": 0.25599998474121094,
+          "strict_per_axis_bound_satisfied": false
+        },
+        "z": {
+          "observed_max_abs_error": 0.328857421875,
+          "requested_abs_bound": 0.25599998474121094,
+          "strict_per_axis_bound_satisfied": false
+        }
+      },
+      "roundtrip_seconds": 151.07304703444242,
+      "tie_sort_moved_particles": 257354720,
+      "total_cr": 18.14608155108938
+    },
+    "optimized_linf": {
+      "axis_scales": {
+        "x": 1.0,
+        "y": 0.25,
+        "z": 0.25
+      },
+      "compressed_total_bytes": 434313322,
+      "linf_validation": {
+        "x": {
+          "exact_count": 310,
+          "outlier_count": 2674,
+          "validated_max_abs_error": 0.06399999558925629
+        },
+        "y": {
+          "exact_count": 241,
+          "outlier_count": 2567,
+          "validated_max_abs_error": 0.25599998235702515
+        },
+        "z": {
+          "exact_count": 255,
+          "outlier_count": 2706,
+          "validated_max_abs_error": 0.25599998235702515
+        }
+      },
+      "native_l2_bound": 0.11085124507715867,
+      "native_position_bytes": 30413142,
+      "native_quantizer": "cube",
+      "outlier_bytes": 82687,
+      "package_directory": "particle_pipeline_runs/xnyzip_linf_full_scaled",
+      "position_errors": {
+        "x": {
+          "observed_max_abs_error": 0.06399999558925629,
+          "requested_abs_bound": 0.06399999618530273,
+          "strict_per_axis_bound_satisfied": true
+        },
+        "y": {
+          "observed_max_abs_error": 0.25599998235702515,
+          "requested_abs_bound": 0.25599998474121094,
+          "strict_per_axis_bound_satisfied": true
+        },
+        "z": {
+          "observed_max_abs_error": 0.25599998235702515,
+          "requested_abs_bound": 0.25599998474121094,
+          "strict_per_axis_bound_satisfied": true
+        }
+      },
+      "roundtrip_seconds": 173.03339935466647,
+      "tie_sort_moved_particles": 232345698,
+      "total_cr": 15.525410956654929
+    },
+    "unscaled_linf": {
+      "axis_scales": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "compressed_total_bytes": 467166424,
+      "linf_validation": {
+        "x": {
+          "exact_count": 162,
+          "outlier_count": 196060558,
+          "validated_max_abs_error": 0.0639999508857727
+        },
+        "y": {
+          "exact_count": 0,
+          "outlier_count": 0,
+          "validated_max_abs_error": 0.2122802734375
+        },
+        "z": {
+          "exact_count": 0,
+          "outlier_count": 0,
+          "validated_max_abs_error": 0.2122802734375
+        }
+      },
+      "native_l2_bound": 0.36765198746466643,
+      "native_position_bytes": 19374124,
+      "native_quantizer": "cube",
+      "outlier_bytes": 73963565,
+      "package_directory": "particle_pipeline_runs/xnyzip_linf_full",
+      "position_errors": {
+        "x": {
+          "observed_max_abs_error": 0.0639999508857727,
+          "requested_abs_bound": 0.06399999618530273,
+          "strict_per_axis_bound_satisfied": true
+        },
+        "y": {
+          "observed_max_abs_error": 0.2122802734375,
+          "requested_abs_bound": 0.25599998474121094,
+          "strict_per_axis_bound_satisfied": true
+        },
+        "z": {
+          "observed_max_abs_error": 0.2122802734375,
+          "requested_abs_bound": 0.25599998474121094,
+          "strict_per_axis_bound_satisfied": true
+        }
+      },
+      "roundtrip_seconds": 172.04819362983108,
+      "tie_sort_moved_particles": 247281604,
+      "total_cr": 14.433598952308268
+    }
+  },
+  "tests": {
+    "passed": 119,
+    "pre_existing_failures": [
+      {
+        "reason": "Batch summary inserts ANSI color codes into strings expected without codes.",
+        "reproduced_on_unmodified_HEAD": true,
+        "test": "test_batch_summary_reports_byte_weighted_field_group_crs"
+      }
+    ],
+    "total": 120
+  },
+  "velocity_compressor": "szo",
+  "xnyzip_tie_sort": true
+}

@@ -400,6 +400,59 @@ XnYZip bound is an L2 bound. Relative bounds are therefore derived from the
 three-dimensional bounding-box diagonal. The manifest and roundtrip metrics
 record the requested and observed maximum per-particle L2 error.
 
+Use `--xnyzip-Linf-bound` to enforce the requested bound independently on every
+position coordinate, including on HACC inputs without particle IDs:
+
+```sh
+python main.py roundtrip data/EXASKY-HACC-data-medium-size \
+  --work-dir particle_pipeline_runs/hacc_linf \
+  --pos-compressor xnyzip --vel-compressor szo \
+  --rel-eb 1e-3 --xnyzip-Linf-bound --xnyzip-tie-sort \
+  --metrics --clean-raw
+```
+
+In this mode, a relative bound `r` means `abs(decoded_i - source_i) <= r *
+(max_i - min_i)` for each axis `i`, using the selected input's range. Absolute
+bounds and position-specific overrides work too. Bounds use the pipeline's
+position scale; validation includes float32 preprocessing, output dtype
+conversion, and fixed-point rounding. Zero bounds and constant axes are repaired
+exactly where necessary. Position metrics report `norm: linf` and test the bound
+strictly, without a numerical tolerance.
+
+The initial native L2 estimate is
+`sqrt(5)/2 * min_i(s_i * (E_i - preprocessing_i))`, because XnYZip's
+truncated-octahedron quantizer has maximum axis error `2/sqrt(5)` times its L2
+tolerance. Here `s_i = min_positive(E) / E_i` scales each positive-bound axis
+before compression; decoding divides by the same factor. This avoids spending
+unnecessary precision on axes with larger bounds. Zero-bound axes use factor 1,
+and a minimum lattice spacing handles bounds too small for the native codec.
+For ID-free XnYZip/SZO inputs, a deterministic sample of up to 262,144 particles
+compares scaled and unscaled coordinates, cube quantization, and coarser
+tolerances. Selection minimizes measured position, outlier, and velocity bytes
+together, plus estimated variable manifest bytes; it includes tie sorting and
+SZO's existing predictor selection when
+enabled. The sample estimates compression cost; every position in the
+complete input is still decoded and checked. The chosen tolerance and candidate
+sizes are recorded in `xnyzip_linf_tuning` in the manifest.
+
+Outlier corrections are generated **after** tie sorting, in the final canonical
+row order. Most corrections store only a signed multiple of twice the axis
+bound. If rounding prevents that correction from meeting the bound, the package
+stores the exact source value. Blocked Zstandard streams choose the smaller of
+byte symbols and packed bits; axes without outliers produce no stream. These
+`x.outliers`, `y.outliers`, and `z.outliers` files are included in position and
+total CR accounting. Decoding needs only the package and its manifest, including
+after `--clean-raw`. Structure-aware orders continue to use the native decoded
+positions, while corrections apply during final HDF5 reconstruction.
+
+The YAML setting is `advanced.xnyzip_linf_bound: true`; it defaults to `false`.
+`--no-xnyzip-Linf-bound` disables it, and lowercase `--xnyzip-linf-bound` is an
+alias. The mode requires `--pos-compressor xnyzip` and does not change velocity
+error-bound semantics.
+Linf packages use format version 10 and require this pipeline's updated decoder;
+the existing native XnYZip executable works without a rebuild.
+See [the full HACC results and validation](experiments/hacc_linf_bound.md).
+
 XnYZip positions are decoded and checked against the available L2 budget
 before their particle order is used, including when structure-aware mode is
 disabled. The native TO quantizer can corrupt boundary nodes, and both native
