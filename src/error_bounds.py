@@ -164,7 +164,7 @@ def resolve_error_bounds(
             args.pos_compressor == "xnyzip"
         ),
     )
-    linf = bool(getattr(args, "xnyzip_linf_bound", False))
+    linf = bool(getattr(args, "xnyzip_linf_bound", False)) and args.pos_compressor == "xnyzip"
     if linf:
         from src.xnyzip_linf import estimate_linf_l2_bound, linf_axis_scales
 
@@ -208,6 +208,16 @@ def resolve_error_bounds(
         },
         velocity_diagonal,
     )
+    velocity_linf = bool(getattr(args, "xnyzip_linf_bound", False)) and args.vel_compressor == "xnyzip"
+    if velocity_linf:
+        from src.xnyzip_linf import estimate_linf_l2_bound, linf_axis_scales
+
+        velocity_vector_requested_abs = math.hypot(*base_velocity.abs_by_field.values())
+        velocity_vector_abs = estimate_linf_l2_bound(
+            base_velocity.abs_by_field,
+            {field: float(velocity_stats[field]["preprocess_cast_max_abs"]) for field in VELOCITY_FIELDS},
+            velocity_ranges, linf_axis_scales(base_velocity.abs_by_field),
+        )
     if args.vel_compressor == "xnyzip" and velocity_vector_abs <= 0.0:
         raise RuntimeError(
             "The requested velocity error bound leaves no positive XnYZip "
@@ -284,6 +294,12 @@ def resolve_error_bounds(
         "compressor_abs": velocity_vector_abs,
         "preprocess_l2_max_abs": velocity_vector_preprocess_error,
     }
+    if velocity_linf:
+        field_bounds["velocities_xnyzip"]["final_error_bound_norm"] = "linf"
+        field_bounds["velocities_xnyzip"]["l2_bound_estimate"] = velocity_vector_abs
+        for field in VELOCITY_FIELDS:
+            field_bounds[field]["norm"] = "linf"
+            field_bounds[field]["compressor_abs"] = velocity_vector_abs
     if "id" in statistics:
         id_stats = statistics["id"]
         field_bounds["id"] = {

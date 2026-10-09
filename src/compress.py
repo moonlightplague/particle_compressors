@@ -43,13 +43,17 @@ from src.lcp_codec import (
     compress_lcp_triplet,
     compress_lcp_triplet_batch,
     read_lcp_permutation,
+    read_lcp_order,
     reorder_raw,
     velocity_order_bits,
 )
 from src.manifest import update_compressed_size_metrics
 from src.models import CanonicalOrder, ToolPaths
 from src.position_ties import sort_position_ties
-from src.xnyzip_linf import linf_axis_scales, scale_native_positions, tune_linf_l2_bound, write_linf_outliers
+from src.xnyzip_linf import (
+    linf_axis_scales, scale_native_positions, tune_linf_l2_bound,
+    tune_linf_velocity_bound, write_linf_outliers,
+)
 from src.raw_codecs import (
     SZO_ADAPTIVE_1D_PROFILE,
     SZO_LORENZO_1D_PROFILE,
@@ -86,6 +90,7 @@ from src.xnyzip_codec import (
     compress_xnyzip_triplet,
     read_xnyzip_permutation,
     run_xnyzip_decompress,
+    run_chunked_xnyzip_decompress,
 )
 
 
@@ -122,8 +127,8 @@ class CompressionSettings:
         velocity_codec = args.vel_compressor
         validate_compressor_combination(position_codec, velocity_codec)
         xnyzip_linf_bound = bool(getattr(args, "xnyzip_linf_bound", False))
-        if xnyzip_linf_bound and position_codec != "xnyzip":
-            raise RuntimeError("--xnyzip-Linf-bound requires --pos-compressor xnyzip.")
+        if xnyzip_linf_bound and "xnyzip" not in (position_codec, velocity_codec):
+            raise RuntimeError("--xnyzip-Linf-bound requires an XnYZip position or velocity compressor.")
         xnyzip_tie_sort = bool(getattr(args, "xnyzip_tie_sort", False))
         if xnyzip_tie_sort and position_codec != "xnyzip":
             raise RuntimeError("--xnyzip-tie-sort requires --pos-compressor xnyzip.")
@@ -302,9 +307,11 @@ class CompressionPipeline:
 
     def run(self) -> Dict[str, Any]:
         started = time.perf_counter()
-        if self.settings.force and not self.settings.xnyzip_linf_bound:
-            for key in POSITION_FIELDS:
-                (self.work_dir / "compressed" / f"{key}.outliers").unlink(missing_ok=True)
+        if self.settings.force:
+            for fields, codec in ((POSITION_FIELDS, self.settings.position_codec), (VELOCITY_FIELDS, self.settings.velocity_codec)):
+                if not self.settings.xnyzip_linf_bound or codec != "xnyzip":
+                    for key in fields:
+                        (self.work_dir / "compressed" / f"{key}.outliers").unlink(missing_ok=True)
         stage_started = time.perf_counter()
         self._prepare_structure_aware_layout()
         self.structure_prepare_seconds = time.perf_counter() - stage_started
@@ -679,10 +686,11 @@ class CompressionPipeline:
         if linf:
             started = time.perf_counter()
             axis_scales = linf_axis_scales({k: self.manifest["field_error_bounds"][k]["abs"] for k in POSITION_FIELDS})
-            if "id" not in self.manifest["fields"] and self.settings.velocity_codec == "szo":
+            if "id" not in self.manifest["fields"] and self.settings.velocity_codec in ("szo", "xnyzip"):
                 quantizer, l2_error_bound, axis_scales, tuning = tune_linf_l2_bound(
                     self.tools, self.raw_paths, self.manifest, self.preprocessed_dir,
                     self.settings.xnyzip_tie_sort,
+                    **({"pcodec_level": self.settings.pcodec_level} if self.settings.velocity_codec == "xnyzip" else {}),
                 )
                 self.manifest["xnyzip_linf_tuning"] = tuning
             scale_native_positions(self.raw_paths["positions_xnyzip"], self.count, axis_scales)
@@ -1322,7 +1330,6 @@ class CompressionPipeline:
                 self.settings.force,
             )
         )
-        del source_order
         self.raw_paths["velocities_xnyzip"] = interleaved_path
 
         order_path = self.preprocessed_dir / "velocity_order.u64.raw"
@@ -1332,27 +1339,47 @@ class CompressionPipeline:
         )
         started = time.perf_counter()
         chunk_metadata = None
-        if self.settings.velocity_chunk_size:
-            chunk_metadata = compress_chunked_xnyzip_triplet(
-                self.tools,
-                interleaved_path,
-                self.artifacts["velocities"],
-                self.count,
-                self.settings.velocity_chunk_size,
-                l2_error_bound,
-                order_path,
-                self.settings.force,
-                self.settings.effective_chunk_workers,
+        linf = self.settings.xnyzip_linf_bound
+        quantizer = XNYZIP_QUANTIZER
+        if linf:
+            tuning_started = time.perf_counter()
+            quantizer, l2_error_bound, axis_scales, tuning = tune_linf_velocity_bound(
+                self.tools, self.raw_paths, self.manifest, self.preprocessed_dir, source_order,
+                pcodec_level=self.settings.pcodec_level,
             )
-        else:
-            compress_xnyzip_triplet(
-                self.tools,
-                interleaved_path,
-                self.artifacts["velocities"],
-                self.count,
-                l2_error_bound,
-                order_path,
-                self.settings.force,
+            self.manifest["xnyzip_velocity_linf_tuning"] = tuning
+            self.manifest.setdefault("timing", {})["xnyzip_velocity_linf_tuning_wall_seconds"] = time.perf_counter() - tuning_started
+            scale_native_positions(interleaved_path, self.count, axis_scales, VELOCITY_FIELDS)
+            stats = self.manifest["preprocess"]["velocities"]
+            magnitude = max(max(abs(float(stats[k]["float_min"])), abs(float(stats[k]["float_max"]))) for k in VELOCITY_FIELDS)
+            validation_bound = l2_error_bound + 8 * float(np.finfo(np.float32).eps) * magnitude
+        for attempt in range(2 if linf else 1):
+            options = {"quantizer": quantizer} if quantizer != XNYZIP_QUANTIZER else {}
+            force = self.settings.force if attempt == 0 else True
+            if self.settings.velocity_chunk_size:
+                chunk_metadata = compress_chunked_xnyzip_triplet(
+                    self.tools, interleaved_path, self.artifacts["velocities"], self.count,
+                    self.settings.velocity_chunk_size, l2_error_bound, order_path,
+                    force, self.settings.effective_chunk_workers, **options,
+                )
+            else:
+                compress_xnyzip_triplet(
+                    self.tools, interleaved_path, self.artifacts["velocities"],
+                    self.count, l2_error_bound, order_path, force, **options,
+                )
+            if not linf:
+                break
+            maximum, velocity_order, decoded_paths = self._decode_and_measure_linf_velocities(
+                source_order, order_path, l2_error_bound, quantizer, axis_scales,
+            )
+            if math.isfinite(maximum) and maximum <= validation_bound:
+                break
+            if quantizer == XNYZIP_QUANTIZER:
+                quantizer = "cube"
+                continue
+            raise RuntimeError(
+                "XnYZip velocities failed native L2 validation: "
+                f"observed {maximum:.9g}, allowed {validation_bound:.9g}."
             )
         self.manifest.setdefault("timing", {})[
             "velocity_xnyzip_compress_wall_seconds"
@@ -1366,6 +1393,19 @@ class CompressionPipeline:
             chunk_size=self.settings.velocity_chunk_size,
         )
         velocity_field["preprocessed_interleaved"] = interleaved_metadata
+        if linf:
+            velocity_field.update({
+                "error_bound_norm": "linf", "quantizer": quantizer, "axis_scales": axis_scales,
+                "validated_max_l2_error": maximum, "validation_l2_bound": validation_bound,
+                "compression_attempts": attempt + 1,
+                "outlier_correction": "source_dtype_signed_steps_with_exact_escapes",
+            })
+            self.manifest["error_bounds"]["velocities_xnyzip_abs"] = l2_error_bound
+            self.manifest["field_error_bounds"]["velocities_xnyzip"]["compressor_abs"] = l2_error_bound
+            for key in VELOCITY_FIELDS:
+                self.manifest["field_error_bounds"][key]["compressor_abs"] = l2_error_bound
+            self._store_xnyzip_velocity_linf_outliers(velocity_field, velocity_order, source_order, decoded_paths)
+        del source_order
         if self.structured_layout is not None:
             velocity_field["spatial_layout"] = HYBRID_VELOCITY_LAYOUT
         self.compressed_fields["velocities"] = velocity_field
@@ -1416,6 +1456,57 @@ class CompressionPipeline:
         }
         if self.structured_layout is not None:
             self.manifest["ordering"]["velocities"]["reconstructed_mapping"] = order.mapping
+
+    def _decode_and_measure_linf_velocities(self, source_order, order_path, bound, quantizer, axis_scales):
+        paths = {key: str(self.preprocessed_dir / f"{key}.linf-decoded.f32.raw") for key in VELOCITY_FIELDS}
+        options = {"quantizer": quantizer, "axis_scales": axis_scales}
+        chunk_size = self.settings.velocity_chunk_size
+        if chunk_size:
+            run_chunked_xnyzip_decompress(
+                self.tools, self.artifacts["velocities"], paths, VELOCITY_FIELDS,
+                self.count, chunk_size, bound, self.settings.effective_chunk_workers, **options,
+            )
+        else:
+            run_xnyzip_decompress(
+                self.tools, self.artifacts["velocities"], paths, VELOCITY_FIELDS,
+                self.count, bound, self.preprocessed_dir / "velocities.linf-decoded.interleaved.f32.raw", True, **options,
+            )
+        order = (read_lcp_order(str(order_path), XNYZIP_ORDER_DTYPE, self.count, "XnYZip velocity order", chunk_size)
+                 if chunk_size else read_xnyzip_permutation(str(order_path), self.count))
+        source = {k: np.memmap(self.raw_paths[f"{k}_xnyzip"], mode="r", dtype="float32", shape=(self.count,)) for k in VELOCITY_FIELDS}
+        decoded = {k: np.memmap(paths[k], mode="r", dtype="float32", shape=(self.count,)) for k in VELOCITY_FIELDS}
+        maximum_squared = 0.0
+        for start in range(0, self.count, 1_048_576):
+            end = min(self.count, start + 1_048_576)
+            rows = source_order[order[start:end]]
+            squared = np.zeros(end - start, dtype=np.float64)
+            for k in VELOCITY_FIELDS:
+                difference = (decoded[k][start:end].astype(np.float64) - source[k][rows].astype(np.float64)) * axis_scales[k]
+                squared += difference * difference
+            if not np.all(np.isfinite(squared)):
+                return math.inf, order, paths
+            maximum_squared = max(maximum_squared, float(squared.max(initial=0)))
+        return math.sqrt(maximum_squared), order, paths
+
+    def _store_xnyzip_velocity_linf_outliers(self, field, order, source_order, decoded_paths):
+        started = time.perf_counter()
+        metadata, statistics = {}, {}
+        for key in VELOCITY_FIELDS:
+            source = np.memmap(self.raw_paths[key], mode="r", dtype=self.manifest["fields"][key]["dtype"], shape=(self.count,))
+            decoded = np.memmap(decoded_paths[key], mode="r", dtype="float32", shape=(self.count,))
+            path = Path(self.artifacts["velocities"]).parent / f"{key}.outliers"
+            outliers, stats = write_linf_outliers(
+                path, decoded, source, order, float(self.manifest["field_error_bounds"][key]["abs"]),
+                1., self.settings.force, source_order=source_order,
+            )
+            statistics[key] = stats
+            if outliers is not None:
+                metadata[key] = outliers
+                self.artifacts[f"{key}_outliers"] = str(path)
+            del source, decoded
+            Path(decoded_paths[key]).unlink()
+        field["linf_outliers"], field["linf_validation"] = metadata, statistics
+        self.manifest.setdefault("timing", {})["xnyzip_velocity_linf_outliers_wall_seconds"] = time.perf_counter() - started
 
     def _compress_lcp_velocities(self, order: CanonicalOrder) -> None:
         self._compress_secondary_lcp_velocities(order)

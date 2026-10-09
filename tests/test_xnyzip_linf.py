@@ -15,13 +15,14 @@ import numpy as np
 
 import main
 from src.cli import build_parser, load_config
-from src.compress import CompressionSettings
+from src.compress import CompressionPipeline, CompressionSettings
 from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
 from src.hacc_snapshot import HACC_FIELDS
+from src.metrics import component_compression_ratios
 from src.xnyzip_linf import (
     apply_outlier_codes, estimate_linf_l2_bound, make_outlier_codes,
     reconstruct_source_positions, restore_linf_outliers, write_linf_outliers,
-    linf_axis_scales,
+    linf_axis_scales, _velocity_sample_rows,
 )
 
 
@@ -40,6 +41,37 @@ class LinfCorrectionTests(unittest.TestCase):
         self.assertEqual(factors, {'x': 1., 'y': .25, 'z': .25})
         for key in POSITION_FIELDS:
             self.assertEqual(bounds[key] * factors[key], .064)
+
+    def test_velocity_geometry_and_bounded_chunk_sampling(self):
+        bounds = dict(zip(VELOCITY_FIELDS, (.5, 2., 4.)))
+        factors = linf_axis_scales(bounds)
+        self.assertEqual(factors, {'vx': 1., 'vy': .25, 'vz': .125})
+        self.assertAlmostEqual(estimate_linf_l2_bound(
+            bounds, dict.fromkeys(bounds, 0.), dict.fromkeys(bounds, 100.), factors), math.sqrt(5) / 4)
+        count, chunk = 12341, 257
+        sample = _velocity_sample_rows(count, chunk)
+        self.assertLessEqual(len(sample), 8 * chunk)
+        self.assertEqual(sample[-1], count - 1)
+        for start in range(0, len(sample), chunk):
+            block = sample[start:start + chunk]
+            self.assertEqual(block[0] % chunk, 0)
+            np.testing.assert_array_equal(block, np.arange(block[0], block[0] + len(block)))
+        self.assertEqual(len(_velocity_sample_rows(10_000_000, 1)), 8)
+
+    def test_outliers_compose_velocity_and_input_permutations(self):
+        rng = np.random.default_rng(345)
+        with tempfile.TemporaryDirectory() as tmp:
+            original = rng.normal(size=117).astype('float64')
+            source_order = rng.permutation(len(original))
+            native_order = rng.permutation(len(original))
+            decoded = original[source_order[native_order]].astype('float32')
+            with patch('src.xnyzip_linf.OUTLIER_BLOCK_VALUES', 19):
+                metadata, stats = write_linf_outliers(Path(tmp) / 'vx.outliers', decoded, original,
+                                                     native_order, 0., 1., source_order=source_order)
+                self.assertEqual(stats['exact_count'], len(original))
+                restored = decoded.astype('float64')
+                restore_linf_outliers(restored, metadata)
+                self.assertEqual(restored.tobytes(), original[source_order[native_order]].tobytes())
 
     def test_signed_steps_and_exact_escapes_for_source_dtypes(self):
         rng = np.random.default_rng(810)
@@ -109,7 +141,7 @@ class LinfCorrectionTests(unittest.TestCase):
                 args = build_parser(base + [flag]).parse_args(base + [flag])
                 self.assertFalse(CompressionSettings.from_args(args).xnyzip_linf_bound)
             args = base + ['--pos-compressor', 'szo']
-            with self.assertRaisesRegex(RuntimeError, 'requires --pos-compressor xnyzip'):
+            with self.assertRaisesRegex(RuntimeError, 'requires an XnYZip position or velocity compressor'):
                 CompressionSettings.from_args(build_parser(args).parse_args(args))
             config.write_text('advanced:\n  xnyzip_linf_bound: 1\n')
             with self.assertRaisesRegex(RuntimeError, 'must be a boolean'):
@@ -247,6 +279,200 @@ class LinfRoundtripTests(unittest.TestCase):
                     for k, a in arrays.items():
                         self.assertLessEqual(float(np.abs(h5[k][:].astype('float64') - a[order].astype('float64')).max()),
                                              m['field_error_bounds'][k]['abs'])
+
+
+class VelocityLinfRoundtripTests(unittest.TestCase):
+    setUpClass = classmethod(LinfRoundtripTests.setUpClass.__func__)
+    run_cli = LinfRoundtripTests.run_cli
+
+    def check_package(self, root, source, arrays, extra=(), native=False, position_codec='xnyzip'):
+        work, config = root / 'work', root / 'config.yaml'
+        config.write_text('advanced: {}\n')
+        self.run_cli(['roundtrip', str(source), '--config', str(config), '--work-dir', str(work),
+                      '--pos-compressor', position_codec, '--vel-compressor', 'xnyzip',
+                      '--xnyzip-linf-bound', '--metrics', *extra])
+        manifest = json.loads((work / 'manifest.json').read_text())
+        metrics = json.loads((work / 'metrics.json').read_text())
+        fields = manifest['compressed_fields']
+        self.assertEqual(fields['velocities']['error_bound_norm'], 'linf')
+        if position_codec == 'xnyzip':
+            self.assertEqual(fields['positions']['error_bound_norm'], 'linf')
+        else:
+            self.assertNotEqual(fields['positions'].get('error_bound_norm'), 'linf')
+        self.assertTrue(all(row['satisfied'] for row in metrics['error_bound_consistency'].values()), metrics)
+        self.assertTrue(metrics['xnyzip_l2_error_bound_consistency']['velocities']['satisfied'])
+        order = np.fromfile(manifest['artifacts']['preprocessed']['position_order'], dtype='uint64' if position_codec == 'xnyzip' else 'int32')
+        scale = manifest['position_scale']['value']
+        with h5py.File(work / 'reconstructed.h5') as h5:
+            expected_decode = {key: h5[key][:] for key in h5}
+            for key, original in arrays.items():
+                actual = h5[HACC_FIELDS[key] if native else key][:]
+                self.assertEqual(actual.dtype, original.dtype)
+                if key == 'id':
+                    np.testing.assert_array_equal(actual, original[order])
+                else:
+                    divisor = scale if key in POSITION_FIELDS else 1.
+                    error = np.abs(actual.astype('float64') / divisor - original[order].astype('float64') / divisor)
+                    self.assertLessEqual(float(error.max()), manifest['field_error_bounds'][key]['abs'])
+        velocity_field = fields['velocities']
+        velocity_bytes = velocity_field['bytes'] + fields['velocity_order']['bytes']
+        velocity_bytes += sum(row['bytes'] for row in velocity_field['linf_outliers'].values())
+        self.assertEqual(component_compression_ratios(manifest)['vxyz']['compressed_bytes'], velocity_bytes)
+        tuning = manifest['xnyzip_velocity_linf_tuning']
+        if tuning['candidates']:
+            self.assertEqual(tuning['selected']['total_bytes'], min(row['total_bytes'] for row in tuning['candidates']))
+            for row in tuning['candidates']:
+                self.assertGreater(row['velocity_order_bytes'], 0)
+                self.assertEqual(row['total_bytes'], sum(row[key] for key in (
+                    'velocity_bytes', 'velocity_order_bytes', 'outlier_bytes', 'metadata_bytes')))
+        source.unlink() if source.is_file() else shutil.rmtree(source)
+        for directory in ('preprocessed', 'decompressed', 'input_adapters'):
+            if (work / directory).exists():
+                shutil.rmtree(work / directory)
+        (work / 'reconstructed.h5').unlink()
+        self.run_cli(['decompress', '--config', str(config), '--work-dir', str(work)])
+        with h5py.File(work / 'reconstructed.h5') as h5:
+            for key, expected in expected_decode.items():
+                self.assertEqual(h5[key][:].tobytes(), expected.tobytes())
+        return manifest
+
+    def test_hacc_relative_bounds_single_stream_and_parallel_partial_chunks(self):
+        rng = np.random.default_rng(702)
+        for chunk in (0, 257):
+            with self.subTest(chunk=chunk), tempfile.TemporaryDirectory() as tmp:
+                root, count = Path(tmp), 4099
+                source = root / 'hacc'
+                source.mkdir()
+                cells = rng.integers(0, 12, count)
+                arrays = {k: (cells * (axis + 1) + rng.uniform(0, .02, count)).astype('float32')
+                          for axis, k in enumerate(POSITION_FIELDS)}
+                arrays.update({k: rng.normal(0, sigma, count).astype('float32')
+                               for k, sigma in zip(VELOCITY_FIELDS, (10., 1000., 7.))})
+                for k, values in arrays.items():
+                    values.tofile(source / f'{HACC_FIELDS[k]}.f32')
+                manifest = self.check_package(root, source, arrays, ['--rel-eb', '.001', '--vel-chunk-size', str(chunk),
+                                            '--vel-chunk-workers', '2', '--pcodec-level', '3'], True)
+                self.assertEqual(manifest['compressed_fields']['velocity_order']['index_scope'], 'chunk_local' if chunk else 'global')
+                self.assertEqual(manifest['compressed_fields']['velocity_order']['pcodec_compression_level'], 3)
+                self.assertLessEqual(manifest['xnyzip_velocity_linf_tuning']['sample_count'], 8 * chunk if chunk else count)
+                self.assertTrue(all('velocity_score' in row for row in manifest['xnyzip_linf_tuning']['candidates']))
+
+    def test_zero_and_tiny_float64_velocity_bounds_with_scaled_integer_positions_and_ids(self):
+        rng = np.random.default_rng(703)
+        for bound, chunk in ((0., 0), (1e-12, 97)):
+            with self.subTest(bound=bound, chunk=chunk), tempfile.TemporaryDirectory() as tmp:
+                root, count, scale = Path(tmp), 353, 1024.
+                source = root / 'input.h5'
+                arrays = {k: (rng.uniform(10, 20, count) * scale).astype('int32') for k in POSITION_FIELDS}
+                arrays.update({k: rng.normal(0, 3, count).astype('float64') for k in VELOCITY_FIELDS})
+                arrays['id'] = rng.permutation(count).astype('uint64') + 100
+                with h5py.File(source, 'w') as h5:
+                    h5.attrs['bitwidth'] = scale
+                    for k, values in arrays.items():
+                        h5[k] = values
+                # Real native codec with a coarse tolerance forces exact escapes
+                # and exercises corrections before both ordering permutations.
+                with patch('src.compress.tune_linf_velocity_bound', return_value=(
+                        'cube', .05, dict.fromkeys(VELOCITY_FIELDS, 1.), {'sample_count': count, 'candidates': []})):
+                    manifest = self.check_package(root, source, arrays, ['--pos-abs-eb', '.001', '--vel-abs-eb', str(bound),
+                                                  '--vel-chunk-size', str(chunk), '--vel-chunk-workers', '2'])
+                stats = manifest['compressed_fields']['velocities']['linf_validation']
+                self.assertEqual(sum(row['exact_count'] for row in stats.values()), 3 * count)
+
+    @unittest.skipUnless((Path(__file__).resolve().parents[1] / 'tools/LCP/build/bin/lcp').is_file(), 'Build LCP for mixed codec test')
+    def test_lcp_positions_receive_only_xnyzip_velocity_corrections(self):
+        rng = np.random.default_rng(704)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, count = Path(tmp), 257
+            source = root / 'input.h5'
+            arrays = {k: rng.uniform(1, 8, count).astype('float32') for k in POSITION_FIELDS}
+            arrays.update({k: rng.normal(0, 3, count).astype('float32') for k in VELOCITY_FIELDS})
+            with h5py.File(source, 'w') as h5:
+                for k, values in arrays.items():
+                    h5[k] = values
+            manifest = self.check_package(root, source, arrays, ['--rel-eb', '.001', '--vel-chunk-size', '97'],
+                                          position_codec='lcp')
+            self.assertNotIn('linf_outliers', manifest['compressed_fields']['positions'])
+
+    def test_zero_velocity_bounds_and_constant_axis_without_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, count = Path(tmp), 197
+            source, work = root / 'input.h5', root / 'work'
+            arrays = {k: np.linspace(1, axis + 2, count).astype('float32') for axis, k in enumerate(POSITION_FIELDS)}
+            arrays.update({k: (np.linspace(-1, axis + 1, count) if axis else np.full(count, 3.250000001)).astype('float64')
+                           for axis, k in enumerate(VELOCITY_FIELDS)})
+            arrays['id'] = np.arange(count, dtype='uint64')
+            with h5py.File(source, 'w') as h5:
+                for k, values in arrays.items():
+                    h5[k] = values
+            self.run_cli(['roundtrip', str(source), '--work-dir', str(work), '--pos-compressor', 'xnyzip',
+                          '--vel-compressor', 'xnyzip', '--xnyzip-linf-bound', '--rel-eb', '.001', '--vel-abs-eb', '0'])
+            self.assertFalse((work / 'metrics.json').exists())
+            manifest = json.loads((work / 'manifest.json').read_text())
+            order = np.fromfile(manifest['artifacts']['preprocessed']['position_order'], dtype='uint64')
+            with h5py.File(work / 'reconstructed.h5') as h5:
+                for key in VELOCITY_FIELDS:
+                    self.assertEqual(h5[key][:].tobytes(), arrays[key][order].tobytes())
+
+    def test_velocity_native_validation_retries_and_rejects_corruption(self):
+        rng = np.random.default_rng(705)
+        actual_decode = CompressionPipeline._decode_and_measure_linf_velocities
+        for recover in (True, False):
+            with self.subTest(recover=recover), tempfile.TemporaryDirectory() as tmp:
+                root, count = Path(tmp), 257
+                source, work = root / 'input.h5', root / 'work'
+                with h5py.File(source, 'w') as h5:
+                    for key in POSITION_FIELDS:
+                        h5[key] = rng.uniform(1, 8, count).astype('float32')
+                    for key in VELOCITY_FIELDS:
+                        h5[key] = rng.normal(0, 3, count).astype('float32')
+                    h5['id'] = np.arange(count, dtype='uint64')
+                calls = []
+
+                def measured(pipeline, *args):
+                    result = actual_decode(pipeline, *args)
+                    calls.append(args[3])
+                    return result if recover and len(calls) > 1 else (math.inf, *result[1:])
+
+                output = StringIO()
+                with patch('src.compress.tune_linf_velocity_bound', return_value=(
+                        'to', .05, dict.fromkeys(VELOCITY_FIELDS, 1.), {'sample_count': count, 'candidates': []})), \
+                     patch.object(CompressionPipeline, '_decode_and_measure_linf_velocities', measured), \
+                     redirect_stdout(output), redirect_stderr(output):
+                    result = main.main(['roundtrip', str(source), '--work-dir', str(work), '--pos-compressor', 'xnyzip',
+                                        '--vel-compressor', 'xnyzip', '--xnyzip-linf-bound', '--rel-eb', '.001'])
+                self.assertEqual(calls, ['to', 'cube'])
+                self.assertEqual(result, 0 if recover else 2, output.getvalue())
+                if recover:
+                    field = json.loads((work / 'manifest.json').read_text())['compressed_fields']['velocities']
+                    self.assertEqual(field['quantizer'], 'cube')
+                    self.assertEqual(field['compression_attempts'], 2)
+                else:
+                    self.assertIn('XnYZip velocities failed native L2 validation', output.getvalue())
+
+    def test_force_removes_velocity_corrections_when_disabling_mode_or_changing_codec(self):
+        rng = np.random.default_rng(706)
+        for codec, enabled in (('xnyzip', False), ('szo', True)):
+            with self.subTest(codec=codec), tempfile.TemporaryDirectory() as tmp:
+                root, count = Path(tmp), 257
+                source, work = root / 'input.h5', root / 'work'
+                with h5py.File(source, 'w') as h5:
+                    for key in POSITION_FIELDS:
+                        h5[key] = rng.uniform(1, 8, count).astype('float32')
+                    for key in VELOCITY_FIELDS:
+                        h5[key] = rng.normal(0, 3, count).astype('float32')
+                    h5['id'] = np.arange(count, dtype='uint64')
+                base = ['roundtrip', str(source), '--work-dir', str(work), '--pos-compressor', 'xnyzip',
+                        '--pos-abs-eb', '.01', '--vel-abs-eb', '.01']
+                with patch('src.compress.tune_linf_velocity_bound', return_value=(
+                        'cube', .05, dict.fromkeys(VELOCITY_FIELDS, 1.), {'sample_count': count, 'candidates': []})):
+                    self.run_cli(base + ['--vel-compressor', 'xnyzip', '--xnyzip-linf-bound'])
+                self.assertTrue(list((work / 'compressed').glob('v*.outliers')))
+                self.run_cli(base + ['--vel-compressor', codec, '--force',
+                                    '--xnyzip-linf-bound' if enabled else '--no-xnyzip-linf-bound'])
+                self.assertFalse(list((work / 'compressed').glob('v*.outliers')))
+                manifest = json.loads((work / 'manifest.json').read_text())
+                self.assertFalse(manifest['compressed_fields'].get('velocities', {}).get('linf_outliers'))
 
 
 if __name__ == '__main__':

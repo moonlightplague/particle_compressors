@@ -189,7 +189,11 @@ class HDF5Recombiner:
             np.dtype("float32"),
             self.count,
         )
+        velocity_field = self.manifest.get("compressed_fields", {}).get("velocities", {})
         converted = decoded.astype(target_dtype)
+        outliers = velocity_field.get("linf_outliers", {}).get(logical)
+        if outliers is not None:
+            restore_linf_outliers(converted, outliers)
         return self._restore_order(converted, self.velocity_order)
 
     def _position_order(self) -> Optional[np.ndarray]:

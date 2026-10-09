@@ -1,6 +1,6 @@
 """Per-axis XnYZip bounds, package-size tuning, and compact outlier streams.
 
-Corrections address final source-dtype values in canonical particle order.
+Corrections address final source-dtype values in each native decoded order.
 Keeping the native decoded floats intact also preserves structure-aware orders.
 Most outliers need only a small signed multiple of twice the requested bound;
 source bits are stored only when rounding prevents that correction from working.
@@ -19,9 +19,14 @@ import zstandard as zstd
 from src.constants import POSITION_FIELDS, VELOCITY_FIELDS
 from src.models import ToolPaths
 from src.position_ties import sort_position_ties
-from src.raw_codecs import SZO_ADAPTIVE_1D_PROFILE, compress_szo_raw
+from src.raw_codecs import SZO_ADAPTIVE_1D_PROFILE, compress_integer_raw, compress_szo_raw
+from src.lcp_codec import read_lcp_order
 from src.runtime import require_output_path
-from src.xnyzip_codec import compress_xnyzip_triplet, run_xnyzip_decompress
+from src.xnyzip_codec import (
+    XNYZIP_ORDER_DTYPE, compress_xnyzip_triplet, run_xnyzip_decompress,
+    compress_chunked_xnyzip_triplet, run_chunked_xnyzip_decompress,
+    read_xnyzip_permutation,
+)
 
 
 OUTLIER_MAGIC = b"XNYLINF1"
@@ -34,7 +39,7 @@ TUNING_VALUES = 1 << 18
 def linf_axis_scales(bounds):
     positive = [float(value) for value in bounds.values() if value > 0]
     reference = min(positive) if positive else 1.0
-    return {k: reference / float(bounds[k]) if bounds[k] > 0 else 1.0 for k in POSITION_FIELDS}
+    return {k: reference / float(bounds[k]) if bounds[k] > 0 else 1.0 for k in bounds}
 
 
 def estimate_linf_l2_bound(bounds, preprocess_errors, ranges, axis_scales=None) -> float:
@@ -43,18 +48,18 @@ def estimate_linf_l2_bound(bounds, preprocess_errors, ranges, axis_scales=None) 
     Start at sqrt(5)/2 times the smallest remaining per-axis budget. A native
     lattice floor handles zero/very small budgets, repaired with exact escapes.
     """
-    factors = axis_scales or dict.fromkeys(POSITION_FIELDS, 1.0)
-    remaining = min(max(0.0, bounds[k] - preprocess_errors[k]) * factors[k] for k in POSITION_FIELDS)
-    lattice_floor = max(ranges[k] * factors[k] for k in POSITION_FIELDS) * math.sqrt(5) / (2 * 2_097_150) * 1.001
+    factors = axis_scales or dict.fromkeys(bounds, 1.0)
+    remaining = min(max(0.0, bounds[k] - preprocess_errors[k]) * factors[k] for k in bounds)
+    lattice_floor = max(ranges[k] * factors[k] for k in bounds) * math.sqrt(5) / (2 * 2_097_150) * 1.001
     return max(math.sqrt(5) / 2 * remaining, lattice_floor, float(np.finfo(np.float32).tiny))
 
 
-def scale_native_positions(path, count, axis_scales):
+def scale_native_positions(path, count, axis_scales, fields=POSITION_FIELDS):
     """Normalize only the interleaved native input; keep source raws intact."""
     if all(value == 1.0 for value in axis_scales.values()):
         return
     values = np.memmap(path, mode="r+", dtype="float32", shape=(count, 3))
-    factors = np.array([axis_scales[k] for k in POSITION_FIELDS], dtype=np.float64)
+    factors = np.array([axis_scales[k] for k in fields], dtype=np.float64)
     for start in range(0, count, OUTLIER_BLOCK_VALUES):
         end = min(count, start + OUTLIER_BLOCK_VALUES)
         values[start:end] = values[start:end].astype(np.float64) * factors
@@ -80,9 +85,9 @@ def _errors(original, reconstructed, scale):
 def make_outlier_codes(decoded, original, bound, scale):
     """Return zero/signed-step/escape codes and verify the final strict bound."""
     if not math.isfinite(bound) or bound < 0 or not math.isfinite(scale) or scale <= 0:
-        raise RuntimeError("Invalid XnYZip Linf bound or position scale.")
+        raise RuntimeError("Invalid XnYZip Linf bound or source scale.")
     if not np.isfinite(original).all():
-        raise RuntimeError("XnYZip Linf correction requires finite source positions.")
+        raise RuntimeError("XnYZip Linf correction requires finite source values.")
     base = reconstruct_source_positions(decoded, original.dtype, scale)
     error = _errors(original, base, scale)
     outliers = ~np.isfinite(error) | (error > bound)
@@ -142,7 +147,7 @@ def _encode_block(codes, escape_symbol, exact):
             + payload + exact_payload)
 
 
-def write_linf_outliers(path, decoded, source, order, bound, scale, force=False):
+def write_linf_outliers(path, decoded, source, order, bound, scale, force=False, *, source_order=None):
     """Write bounded-memory frames; omit the entire stream when no outlier exists."""
     path = Path(path)
     require_output_path(path, force)
@@ -151,7 +156,10 @@ def write_linf_outliers(path, decoded, source, order, bound, scale, force=False)
         output.write(OUTLIER_HEADER.pack(OUTLIER_MAGIC, len(order)))
         for start in range(0, len(order), OUTLIER_BLOCK_VALUES):
             end = min(len(order), start + OUTLIER_BLOCK_VALUES)
-            original = source[order[start:end]]
+            rows = order[start:end]
+            if source_order is not None:
+                rows = source_order[rows]
+            original = source[rows]
             codes, escape_symbol, exact, block_stats = make_outlier_codes(decoded[start:end], original, bound, scale)
             stats["outlier_count"] += block_stats["outlier_count"]
             stats["exact_count"] += block_stats["exact_count"]
@@ -170,7 +178,7 @@ def write_linf_outliers(path, decoded, source, order, bound, scale, force=False)
 
 
 def restore_linf_outliers(values, metadata):
-    """Apply canonical-order corrections before any position-order restoration."""
+    """Apply native-decoded-row corrections before restoring particle order."""
     if metadata.get("container") != "xnyzip_linf_outliers_v1":
         raise RuntimeError("Unsupported XnYZip Linf outlier container.")
     if np.dtype(metadata["dtype"]) != values.dtype or int(metadata["count"]) != len(values):
@@ -220,27 +228,133 @@ def restore_linf_outliers(values, metadata):
     return values
 
 
-def tune_linf_l2_bound(tools: ToolPaths, raw_paths: Mapping, manifest: Mapping, workspace: Path, tie_sort: bool):
-    """Score native positions + actual corrections + SZO velocities on a sample.
+def _linf_candidates(bounds, estimate):
+    normalized = linf_axis_scales(bounds)
+    scalings = [normalized]
+    if any(value != 1.0 for value in normalized.values()):
+        scalings.append(dict.fromkeys(bounds, 1.0))
+    candidates = []
+    for factors in scalings:
+        envelope = max(estimate, math.hypot(*(bounds[k] * factors[k] for k in bounds)))
+        for quantizer, bound in dict.fromkeys([
+            ("to", estimate), ("cube", estimate * math.sqrt(12 / 5)),
+            ("to", max(estimate, .75 * envelope)), ("to", envelope),
+            ("cube", envelope), ("to", 1.25 * envelope),
+        ]):
+            candidates.append((quantizer, bound, factors))
+    return candidates
+
+
+def _velocity_sample_rows(count, chunk_size):
+    if not chunk_size:
+        if count <= TUNING_VALUES:
+            return np.arange(count, dtype=np.intp)
+        block = min(4096, TUNING_VALUES)
+        starts = np.linspace(0, count - block, TUNING_VALUES // block, dtype=np.intp)
+        return (starts[:, None] + np.arange(block)).reshape(-1)
+    if chunk_size > TUNING_VALUES:
+        return np.arange(min(count, TUNING_VALUES), dtype=np.intp)
+    chunks = (count + chunk_size - 1) // chunk_size
+    chosen = np.linspace(0, chunks - 1, min(chunks, 8, TUNING_VALUES // chunk_size), dtype=np.intp)
+    return np.concatenate([np.arange(index * chunk_size, min(count, (index + 1) * chunk_size), dtype=np.intp)
+                           for index in chosen])
+
+
+def _score_velocity_candidate(tools, values, originals, manifest, root, quantizer, bound, factors, pcodec_level=12):
+    """Measure velocity values, native-order sidecar, corrections, and metadata."""
+    count = len(values[VELOCITY_FIELDS[0]])
+    chunk_size = int(manifest.get("velocity_chunking", {}).get("chunk_size", 0))
+    raw, archive, order_path = root / "velocity.raw", root / "velocity.xnyzip", root / "velocity_order.raw"
+    np.column_stack([values[k].astype(np.float64) * factors[k] for k in VELOCITY_FIELDS]).astype('float32').tofile(raw)
+    options = {"quantizer": quantizer}
+    if chunk_size:
+        compress_chunked_xnyzip_triplet(tools, str(raw), str(archive), count, chunk_size, bound, order_path, True, 1, **options)
+    else:
+        compress_xnyzip_triplet(tools, str(raw), str(archive), count, bound, order_path, True, **options)
+    order = (read_lcp_order(str(order_path), XNYZIP_ORDER_DTYPE, count, "XnYZip velocity sample order", chunk_size)
+             if chunk_size else read_xnyzip_permutation(str(order_path), count))
+    paths = {k: str(root / f"{k}.decoded.raw") for k in VELOCITY_FIELDS}
+    if chunk_size:
+        run_chunked_xnyzip_decompress(tools, str(archive), paths, VELOCITY_FIELDS, count, chunk_size, bound, 1,
+                                     axis_scales=factors, **options)
+    else:
+        run_xnyzip_decompress(tools, str(archive), paths, VELOCITY_FIELDS, count, bound, root / "velocity.decoded.raw", True,
+                             axis_scales=factors, **options)
+    decoded = {k: np.fromfile(paths[k], dtype="float32") for k in VELOCITY_FIELDS}
+    squared = sum(((decoded[k].astype(np.float64) - values[k][order].astype(np.float64)) * factors[k]) ** 2 for k in VELOCITY_FIELDS)
+    rounding = 8 * float(np.finfo(np.float32).eps) * max(float(np.abs(a).max()) for a in values.values())
+    if not np.isfinite(squared).all() or math.sqrt(float(squared.max())) > bound + rounding:
+        raise RuntimeError("XnYZip velocity candidate failed native L2 validation.")
+    correction_bytes, outlier_metadata, validation_metadata = 0, {}, {}
+    for k in VELOCITY_FIELDS:
+        metadata, stats = write_linf_outliers(root / f"{k}.outliers", decoded[k], originals[k], order,
+                                            float(manifest["field_error_bounds"][k]["abs"]), 1., True)
+        validation_metadata[k] = stats
+        if metadata:
+            correction_bytes += metadata["bytes"]
+            metadata["path"] = str(Path(manifest["artifacts"]["compressed"]["velocities"]).parent / f"{k}.outliers")
+            metadata["count"] = int(manifest["count"])
+            outlier_metadata[k] = metadata
+    order_field = compress_integer_raw("pcodec", str(order_path), str(XNYZIP_ORDER_DTYPE), str(root / "velocity_order.pco"),
+                                       "velocity_order", count, True,
+                                       pcodec_level=pcodec_level)
+    metadata_bytes = len(json.dumps({
+        "linf_outliers": outlier_metadata, "linf_validation": validation_metadata,
+        "axis_scales": factors, "quantizer": quantizer, "l2_error_bound": bound,
+        "artifacts": {f"{k}_outliers": field["path"] for k, field in outlier_metadata.items()},
+    }, indent=2, sort_keys=True).encode("utf-8"))
+    velocity_bytes = archive.stat().st_size
+    return {"quantizer": quantizer, "l2_error_bound": bound, "axis_scales": factors,
+            "velocity_bytes": velocity_bytes, "velocity_order_bytes": order_field["bytes"],
+            "outlier_bytes": correction_bytes, "metadata_bytes": metadata_bytes,
+            "total_bytes": velocity_bytes + order_field["bytes"] + correction_bytes + metadata_bytes}
+
+
+def tune_linf_velocity_bound(tools, raw_paths, manifest, workspace, source_order, pcodec_level=12):
+    """Tune velocities in their canonical/hybrid input order, retaining chunk boundaries."""
+    count = int(manifest["count"])
+    sample = _velocity_sample_rows(count, int(manifest.get("velocity_chunking", {}).get("chunk_size", 0)))
+    source_rows = source_order[sample]
+    originals = {k: np.memmap(raw_paths[k], mode="r", dtype=manifest["fields"][k]["dtype"], shape=(count,))[source_rows]
+                 for k in VELOCITY_FIELDS}
+    values = {k: np.memmap(raw_paths[f"{k}_xnyzip"], mode="r", dtype="float32", shape=(count,))[source_rows]
+              for k in VELOCITY_FIELDS}
+    bounds = {k: float(manifest["field_error_bounds"][k]["abs"]) for k in VELOCITY_FIELDS}
+    estimate = float(manifest["error_bounds"]["velocities_xnyzip_abs"])
+    rows, rejected = [], []
+    with tempfile.TemporaryDirectory(prefix="xnyzip-velocity-linf-tune-", dir=workspace) as temp:
+        for quantizer, bound, factors in _linf_candidates(bounds, estimate):
+            try:
+                rows.append(_score_velocity_candidate(tools, values, originals, manifest, Path(temp), quantizer, bound, factors, pcodec_level))
+            except RuntimeError as exc:
+                rejected.append({"quantizer": quantizer, "l2_error_bound": bound, "reason": str(exc)})
+    tuning = {"sample_count": len(sample), "candidates": rows, "rejected_candidates": rejected}
+    if not rows:
+        tuning["fallback"] = "no_valid_candidate"
+        return "to", estimate, linf_axis_scales(bounds), tuning
+    best = min(rows, key=lambda row: row["total_bytes"])
+    tuning["selected"] = best
+    return best["quantizer"], best["l2_error_bound"], best["axis_scales"], tuning
+
+
+def tune_linf_l2_bound(tools: ToolPaths, raw_paths: Mapping, manifest: Mapping, workspace: Path, tie_sort: bool, pcodec_level=12):
+    """Score positions + corrections + velocities (including their order) on a sample.
 
     Contiguous blocks spread through the input retain local particle clustering.
     This is an estimate of total bytes, not a claim of a global optimum.
     """
     count = int(manifest["count"])
-    sample_count = min(count, TUNING_VALUES)
-    if count <= TUNING_VALUES:
-        sample = np.arange(count, dtype=np.intp)
-    else:
-        block = 4096
-        starts = np.linspace(0, count - block, TUNING_VALUES // block, dtype=np.intp)
-        sample = (starts[:, None] + np.arange(block)).reshape(-1)
+    velocity_chunk_size = (
+        int(manifest.get("velocity_chunking", {}).get("chunk_size", 0))
+        if manifest.get("compressors", {}).get("velocities") == "xnyzip" else 0
+    )
+    # Bound subprocess work as well as sample size for tiny velocity chunks.
+    sample = _velocity_sample_rows(count, velocity_chunk_size)
+    sample_count = len(sample)
     bounds = {k: float(manifest["field_error_bounds"][k]["abs"]) for k in POSITION_FIELDS}
     scale = float(manifest["position_scale"]["value"])
     estimate = float(manifest["error_bounds"]["positions_xnyzip_abs"])
     normalized = linf_axis_scales(bounds)
-    scalings = [normalized]
-    if any(value != 1.0 for value in normalized.values()):
-        scalings.append(dict.fromkeys(POSITION_FIELDS, 1.0))
     sources = {k: np.memmap(raw_paths[f"{k}_source"], mode="r", dtype=manifest["fields"][k]["dtype"], shape=(count,))[sample]
                for k in POSITION_FIELDS}
     positions = {k: np.memmap(raw_paths[k], mode="r", dtype="float32", shape=(count,))[sample]
@@ -251,16 +365,7 @@ def tune_linf_l2_bound(tools: ToolPaths, raw_paths: Mapping, manifest: Mapping, 
     with tempfile.TemporaryDirectory(prefix="xnyzip-linf-tune-", dir=workspace) as temp:
         root = Path(temp)
         raw = root / "positions.raw"
-        candidates = []
-        for factors in scalings:
-            envelope = max(estimate, math.hypot(*(bounds[k] * factors[k] for k in POSITION_FIELDS)))
-            for quantizer, bound in dict.fromkeys([
-                ("to", estimate), ("cube", estimate * math.sqrt(12 / 5)),
-                ("to", max(estimate, .75 * envelope)), ("to", envelope),
-                ("cube", envelope), ("to", 1.25 * envelope),
-            ]):
-                candidates.append((quantizer, bound, factors))
-        for quantizer, bound, factors in candidates:
+        for quantizer, bound, factors in _linf_candidates(bounds, estimate):
             try:
                 np.column_stack([positions[k].astype(np.float64) * factors[k] for k in POSITION_FIELDS]).astype('float32').tofile(raw)
                 archive = root / "positions.xnyzip"
@@ -287,12 +392,28 @@ def tune_linf_l2_bound(tools: ToolPaths, raw_paths: Mapping, manifest: Mapping, 
                         metadata["count"] = count
                         outlier_metadata[k] = metadata
                 velocity_bytes = 0
-                for k in VELOCITY_FIELDS:
-                    velocities[k][order].tofile(root / "velocity.raw")
-                    field = compress_szo_raw(str(root / "velocity.raw"), str(velocities[k].dtype), str(root / "velocity.szo"), k, sample_count,
-                                             float(manifest["field_error_bounds"][k]["abs"]), True,
-                                             profile=SZO_ADAPTIVE_1D_PROFILE if tie_sort else None)
-                    velocity_bytes += field["bytes"]
+                velocity_score = None
+                if manifest.get("compressors", {}).get("velocities") == "xnyzip":
+                    # Use a fixed geometry-based velocity candidate to compare
+                    # position orders. The velocity stage then searches its own
+                    # candidates using the chosen complete position order.
+                    velocity_originals = {k: velocities[k][order] for k in VELOCITY_FIELDS}
+                    velocity_values = {k: velocity_originals[k].astype('float32') for k in VELOCITY_FIELDS}
+                    velocity_bounds = {k: float(manifest["field_error_bounds"][k]["abs"]) for k in VELOCITY_FIELDS}
+                    velocity_estimate = float(manifest["error_bounds"]["velocities_xnyzip_abs"])
+                    velocity_score = _score_velocity_candidate(
+                        tools, velocity_values, velocity_originals, manifest, root, "cube",
+                        velocity_estimate * math.sqrt(12 / 5), linf_axis_scales(velocity_bounds),
+                        pcodec_level,
+                    )
+                    velocity_bytes = velocity_score["total_bytes"]
+                else:
+                    for k in VELOCITY_FIELDS:
+                        velocities[k][order].tofile(root / "velocity.raw")
+                        field = compress_szo_raw(str(root / "velocity.raw"), str(velocities[k].dtype), str(root / "velocity.szo"), k, sample_count,
+                                                 float(manifest["field_error_bounds"][k]["abs"]), True,
+                                                 profile=SZO_ADAPTIVE_1D_PROFILE if tie_sort else None)
+                        velocity_bytes += field["bytes"]
                 position_bytes = archive.stat().st_size
                 # Sidecars also add manifest entries. This matters on small
                 # inputs where a tiny stream saving can cost more metadata.
@@ -305,6 +426,8 @@ def tune_linf_l2_bound(tools: ToolPaths, raw_paths: Mapping, manifest: Mapping, 
                              "position_bytes": position_bytes, "outlier_bytes": correction_bytes,
                              "velocity_bytes": velocity_bytes, "metadata_bytes": metadata_bytes,
                              "total_bytes": position_bytes + correction_bytes + velocity_bytes + metadata_bytes})
+                if velocity_score is not None:
+                    rows[-1]["velocity_score"] = velocity_score
             except RuntimeError:
                 # A candidate can hit a native lattice limit. The full encoder
                 # still validates the selected stream and reports codec failures.

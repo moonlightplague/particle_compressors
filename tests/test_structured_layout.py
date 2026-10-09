@@ -203,8 +203,8 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
             with self.subTest(chunk_size=chunk_size):
                 self._assert_structured_roundtrip("xnyzip", chunk_size)
 
-    def test_linf_positions_preserve_structured_szo_and_chunked_xnyzip_orders(self):
-        for codec, chunk_size in (("szo", 0), ("xnyzip", 257)):
+    def test_linf_bounds_preserve_structured_szo_and_xnyzip_orders(self):
+        for codec, chunk_size in (("szo", 0), ("xnyzip", 0), ("xnyzip", 257)):
             with self.subTest(codec=codec):
                 self._assert_structured_roundtrip(codec, chunk_size, linf=True)
 
@@ -212,7 +212,7 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source, work = root / "input.h5", root / "package"
-            velocity_bound = .05 if velocity_codec == "xnyzip" else .0001
+            velocity_bound = (1e-9 if linf else .05) if velocity_codec == "xnyzip" else .0001
             side = 16
             ids = np.random.default_rng(19).permutation(side**3).astype(np.uint64) + 1
             linear = ids - 1
@@ -250,7 +250,8 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
                 self.assertEqual(manifest["compressed_fields"]["positions"]["quantizer"], "cube")
             self.assertEqual(len(list((work / "compressed").iterdir())),
                              (4 if velocity_codec == "xnyzip" else 5)
-                             + len(manifest["compressed_fields"]["positions"].get("linf_outliers", {})))
+                             + sum(len(manifest["compressed_fields"].get(group, {}).get("linf_outliers", {}))
+                                   for group in ("positions", "velocities")))
             validate_structured_package(manifest)
             if velocity_codec == "xnyzip":
                 from src.structured_layout import HYBRID_VELOCITY_LAYOUT
@@ -261,6 +262,10 @@ class StructuredNativeRoundtripTests(unittest.TestCase):
                 self.assertEqual(fields["velocity_order"]["index_scope"],
                                  "chunk_local" if chunk_size else "global")
                 self.assertIn(HYBRID_VELOCITY_LAYOUT, fields["velocity_order"]["order_mapping"])
+                if linf:
+                    self.assertEqual(fields["velocities"]["error_bound_norm"], "linf")
+                    self.assertGreater(sum(row["outlier_count"] for row in fields["velocities"]["linf_validation"].values()), 0)
+                    self.assertGreater(sum(row["exact_count"] for row in fields["velocities"]["linf_validation"].values()), 0)
             metrics = json.loads((work / "metrics.json").read_text())
             self.assertTrue(metrics["fields"]["id"]["exact_match"])
             self.assertTrue(all(check["satisfied"]

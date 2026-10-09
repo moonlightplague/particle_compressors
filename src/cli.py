@@ -504,9 +504,9 @@ def _add_compression_arguments(
         action=argparse.BooleanOptionalAction,
         default=defaults["xnyzip_linf_bound"],
         help=(
-            "Enforce each position axis's requested bound using compact XnYZip "
-            "outlier corrections. Relative bounds use each axis's range; tune "
-            "the native L2 tolerance for total package size on ID-free SZO inputs "
+            "Enforce per-axis bounds on XnYZip positions and velocities using "
+            "compact outlier corrections. Relative bounds use each axis's "
+            "range; tune native L2 tolerances including correction and order costs "
             "(default: %(default)s)."
         ),
     )

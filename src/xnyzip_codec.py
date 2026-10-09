@@ -112,6 +112,8 @@ def compress_chunked_xnyzip_triplet(
     order_path: Path,
     force: bool,
     workers: int = 1,
+    *,
+    quantizer: str = XNYZIP_QUANTIZER,
 ) -> Dict[str, int]:
     """Compress independent interleaved chunks into a deterministic container."""
 
@@ -163,6 +165,7 @@ def compress_chunked_xnyzip_triplet(
                     bound,
                     chunk_order,
                     True,
+                    **({"quantizer": quantizer} if quantizer != XNYZIP_QUANTIZER else {}),
                 )
             finally:
                 chunk_input.unlink(missing_ok=True)
@@ -250,7 +253,7 @@ def run_xnyzip_decompress(
             if axis_scales is not None:
                 factor = float(axis_scales[field])
                 if not math.isfinite(factor) or factor <= 0:
-                    raise RuntimeError("Invalid XnYZip position axis scale.")
+                    raise RuntimeError("Invalid XnYZip axis scale.")
                 values = (values.astype(np.float64) / factor).astype(np.float32)
             np.ascontiguousarray(values).tofile(
                 output_paths[field]
@@ -269,6 +272,9 @@ def run_chunked_xnyzip_decompress(
     chunk_size: int,
     l2_error_bound: float,
     workers: int = 1,
+    *,
+    quantizer: str = XNYZIP_QUANTIZER,
+    axis_scales: Optional[Mapping[str, float]] = None,
 ) -> None:
     """Decompress a framed set of independent XnYZip velocity chunks."""
 
@@ -310,6 +316,8 @@ def run_chunked_xnyzip_decompress(
                     bound,
                     interleaved,
                     True,
+                    **({"quantizer": quantizer} if quantizer != XNYZIP_QUANTIZER else {}),
+                    **({"axis_scales": axis_scales} if axis_scales is not None else {}),
                 )
                 for field in fields:
                     sinks[field][chunk.start:end] = read_raw(

@@ -295,6 +295,11 @@ class DecompressionPipeline:
             started = time.perf_counter()
             velocity_field = self.fields["velocities"]
             chunk_size = int(velocity_field.get("chunk_size", 0))
+            options = {}
+            if velocity_field.get("quantizer", "to") != "to":
+                options["quantizer"] = velocity_field["quantizer"]
+            if "axis_scales" in velocity_field:
+                options["axis_scales"] = velocity_field["axis_scales"]
             if chunk_size:
                 run_chunked_xnyzip_decompress(
                     self.tools,
@@ -311,6 +316,7 @@ class DecompressionPipeline:
                     resolve_velocity_chunk_workers(
                         int(getattr(self.args, "vel_chunk_workers", 0))
                     ),
+                    **options,
                 )
             else:
                 run_xnyzip_decompress(
@@ -326,6 +332,7 @@ class DecompressionPipeline:
                     ),
                     self.decompressed_dir / "velocities.xnyzip.f32.raw",
                     self.args.force,
+                    **options,
                 )
             self.manifest.setdefault("timing", {})[
                 "velocity_xnyzip_decompress_wall_seconds"

@@ -401,7 +401,7 @@ three-dimensional bounding-box diagonal. The manifest and roundtrip metrics
 record the requested and observed maximum per-particle L2 error.
 
 Use `--xnyzip-Linf-bound` to enforce the requested bound independently on every
-position coordinate, including on HACC inputs without particle IDs:
+coordinate compressed by XnYZip, including on HACC inputs without particle IDs:
 
 ```sh
 python main.py roundtrip data/EXASKY-HACC-data-medium-size \
@@ -411,12 +411,27 @@ python main.py roundtrip data/EXASKY-HACC-data-medium-size \
   --metrics --clean-raw
 ```
 
+With `--pos-compressor xnyzip --vel-compressor xnyzip`, the same flag bounds
+all six position and velocity coordinates. For example:
+
+```sh
+python main.py roundtrip data/EXASKY-HACC-data-medium-size \
+  --work-dir particle_pipeline_runs/hacc_both_linf \
+  --pos-compressor xnyzip --vel-compressor xnyzip \
+  --rel-eb 1e-3 --xnyzip-linf-bound --metrics --clean-raw
+```
+
+Velocity chunking with `--vel-chunk-size` and `--vel-chunk-workers` also works.
+`--xnyzip-tie-sort` retains its existing support for SZO, SZ3, and pcodec
+velocities; that option does not support XnYZip velocities.
+
 In this mode, a relative bound `r` means `abs(decoded_i - source_i) <= r *
 (max_i - min_i)` for each axis `i`, using the selected input's range. Absolute
-bounds and position-specific overrides work too. Bounds use the pipeline's
-position scale; validation includes float32 preprocessing, output dtype
+bounds and position/velocity-specific overrides work too. Position bounds use
+the pipeline's position scale; velocity bounds use source velocity units.
+Validation includes float32 preprocessing, output dtype
 conversion, and fixed-point rounding. Zero bounds and constant axes are repaired
-exactly where necessary. Position metrics report `norm: linf` and test the bound
+exactly where necessary. Affected metrics report `norm: linf` and test the bound
 strictly, without a numerical tolerance.
 
 The initial native L2 estimate is
@@ -426,14 +441,21 @@ tolerance. Here `s_i = min_positive(E) / E_i` scales each positive-bound axis
 before compression; decoding divides by the same factor. This avoids spending
 unnecessary precision on axes with larger bounds. Zero-bound axes use factor 1,
 and a minimum lattice spacing handles bounds too small for the native codec.
-For ID-free XnYZip/SZO inputs, a deterministic sample of up to 262,144 particles
+For ID-free XnYZip/SZO and XnYZip/XnYZip inputs, a deterministic sample of up to
+262,144 particles
 compares scaled and unscaled coordinates, cube quantization, and coarser
 tolerances. Selection minimizes measured position, outlier, and velocity bytes
 together, plus estimated variable manifest bytes; it includes tie sorting and
-SZO's existing predictor selection when
-enabled. The sample estimates compression cost; every position in the
-complete input is still decoded and checked. The chosen tolerance and candidate
-sizes are recorded in `xnyzip_linf_tuning` in the manifest.
+SZO's existing predictor selection when enabled. With XnYZip velocities, the
+position search uses a fixed geometry-based velocity candidate to compare
+orders, including its lossless permutation and correction costs. A second
+search tunes velocity quantization in the selected complete position order,
+minimizing velocity payload, permutation, corrections, and variable metadata.
+Chunked searches sample at most eight chunks to bound native subprocess work.
+These samples estimate compression cost; every affected coordinate in the
+complete input is still decoded and checked. Candidate sizes are recorded in
+`xnyzip_linf_tuning` and `xnyzip_velocity_linf_tuning` in the manifest. Velocity
+tuning also runs on inputs with IDs and structure-aware layouts.
 
 Outlier corrections are generated **after** tie sorting, in the final canonical
 row order. Most corrections store only a signed multiple of twice the axis
@@ -445,13 +467,21 @@ total CR accounting. Decoding needs only the package and its manifest, including
 after `--clean-raw`. Structure-aware orders continue to use the native decoded
 positions, while corrections apply during final HDF5 reconstruction.
 
+Velocity corrections use the same compact encoding in `vx.outliers`,
+`vy.outliers`, and `vz.outliers`. They address native decoded velocity rows,
+including chunk-local permutations and structure-aware input ordering. The
+decoder applies them before restoring particle alignment. Velocity and total
+CR include these streams and the existing lossless velocity-order sidecar.
+
 The YAML setting is `advanced.xnyzip_linf_bound: true`; it defaults to `false`.
 `--no-xnyzip-Linf-bound` disables it, and lowercase `--xnyzip-linf-bound` is an
-alias. The mode requires `--pos-compressor xnyzip` and does not change velocity
-error-bound semantics.
+alias. The mode requires an XnYZip position or velocity compressor and applies
+only to the selected XnYZip triplets. It also supports LCP positions with
+XnYZip velocities. The default mode retains existing L2 semantics.
 Linf packages use format version 10 and require this pipeline's updated decoder;
 the existing native XnYZip executable works without a rebuild.
 See [the full HACC results and validation](experiments/hacc_linf_bound.md).
+See also [XnYZip velocity validation](experiments/hacc_xnyzip_velocity_linf.md).
 
 XnYZip positions are decoded and checked against the available L2 budget
 before their particle order is used, including when structure-aware mode is

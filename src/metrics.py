@@ -161,7 +161,9 @@ def component_compression_ratios(
     )
     velocity_lcp_bytes = int(
         components.get("compressed/velocities.lcp", 0)
-    ) + int(components.get("compressed/velocities.xnyzip", 0))
+    ) + int(components.get("compressed/velocities.xnyzip", 0)) + compressed_bytes_with_prefixes(
+        components, ("compressed/vx.outliers", "compressed/vy.outliers", "compressed/vz.outliers"),
+    )
     velocity_order_bytes = compressed_bytes_with_prefixes(
         components,
         (
@@ -762,6 +764,18 @@ def _velocity_error_target(
     manifest: Mapping[str, Any],
 ) -> Dict[str, Any]:
     if velocity_compressor_from_manifest(manifest) == "xnyzip":
+        if manifest.get("compressed_fields", {}).get("velocities", {}).get("error_bound_norm") == "linf":
+            requested = float(field_bound["abs"])
+            return {
+                "mode": field_bound["mode"], "norm": "linf",
+                "relative_error_bound": field_bound.get("relative"),
+                "range_for_relative": field_bound.get("range"),
+                "range_units": field_bound.get("range_units", "source_units"),
+                "requested_abs_bound": requested,
+                "compressor_abs_eb": float(manifest["error_bounds"]["velocities_xnyzip_abs"]),
+                "preprocess_cast_allowance": 0.0,
+                "effective_final_abs_bound": requested,
+            }
         vector_bound = manifest["field_error_bounds"][
             "velocities_xnyzip"
         ]

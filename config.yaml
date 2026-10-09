@@ -36,7 +36,7 @@ advanced:
   xnyzip_velocity_cell_bits: 7
   # Encoder-only velocity sorting within identical decoded positions; no sidecar.
   xnyzip_tie_sort: false
-  # Enforce per-axis position bounds with compact packaged outlier corrections.
+  # Enforce per-axis XnYZip position/velocity bounds with packaged corrections.
   xnyzip_linf_bound: false
 
   # Integer position conversion used before float32 triplet compression.

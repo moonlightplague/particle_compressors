@@ -1,0 +1,1382 @@
+{
+  "cases": {
+    "chunked_linf": {
+      "compressed_components_bytes": {
+        "compressed/positions.xnyzip": 565225,
+        "compressed/velocities.xnyzip": 757281,
+        "compressed/velocity_order.pco": 1984824,
+        "compressed/vx.outliers": 155,
+        "compressed/vy.outliers": 157,
+        "compressed/vz.outliers": 141,
+        "compressed/x.outliers": 181,
+        "compressed/y.outliers": 190,
+        "compressed/z.outliers": 197,
+        "manifest.json": 37557
+      },
+      "compressed_total_bytes": 3345908,
+      "coordinate_bounds": {
+        "vx": {
+          "max_absolute_error": 3.63385009765625,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 3.6338582763671874,
+          "strict_axis_satisfied": true
+        },
+        "vy": {
+          "max_absolute_error": 4.272979736328125,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 4.272990234375,
+          "strict_axis_satisfied": true
+        },
+        "vz": {
+          "max_absolute_error": 3.71478271484375,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 3.7147861328125003,
+          "strict_axis_satisfied": true
+        },
+        "x": {
+          "max_absolute_error": 0.03199942409992218,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 0.031999425888061525,
+          "strict_axis_satisfied": true
+        },
+        "y": {
+          "max_absolute_error": 0.031999826431274414,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 0.03199992275238037,
+          "strict_axis_satisfied": true
+        },
+        "z": {
+          "max_absolute_error": 0.0639999508857727,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 0.06399995613098144,
+          "strict_axis_satisfied": true
+        }
+      },
+      "count": 1048593,
+      "native_triplets": {
+        "positions": {
+          "axis_scales": {
+            "x": 1.0,
+            "y": 0.9999844729525539,
+            "z": 0.4999913722217548
+          },
+          "l2_error_bound": 0.055424631451157405,
+          "linf_validation": {
+            "x": {
+              "exact_count": 1,
+              "outlier_count": 16,
+              "validated_max_abs_error": 0.03199942409992218
+            },
+            "y": {
+              "exact_count": 1,
+              "outlier_count": 18,
+              "validated_max_abs_error": 0.031999826431274414
+            },
+            "z": {
+              "exact_count": 3,
+              "outlier_count": 18,
+              "validated_max_abs_error": 0.0639999508857727
+            }
+          },
+          "quantizer": "cube"
+        },
+        "velocities": {
+          "axis_scales": {
+            "vx": 1.0,
+            "vy": 0.8504251301895855,
+            "vz": 0.9782146660529172
+          },
+          "l2_error_bound": 6.294027162172636,
+          "linf_validation": {
+            "vx": {
+              "exact_count": 0,
+              "outlier_count": 13,
+              "validated_max_abs_error": 3.63385009765625
+            },
+            "vy": {
+              "exact_count": 0,
+              "outlier_count": 13,
+              "validated_max_abs_error": 4.272979736328125
+            },
+            "vz": {
+              "exact_count": 0,
+              "outlier_count": 10,
+              "validated_max_abs_error": 3.71478271484375
+            }
+          },
+          "quantizer": "cube"
+        }
+      },
+      "outlier_bytes": {
+        "positions": 568,
+        "velocities": 453
+      },
+      "payload_compression_ratio": 7.5214955103368055,
+      "position_tuning": {
+        "candidates": [
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.9999844729525539,
+              "z": 0.4999913722217548
+            },
+            "l2_error_bound": 0.03577644576333607,
+            "metadata_bytes": 590,
+            "outlier_bytes": 0,
+            "position_bytes": 175637,
+            "quantizer": "to",
+            "total_bytes": 694666,
+            "velocity_bytes": 518439,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 188,
+              "quantizer": "cube",
+              "total_bytes": 518439,
+              "velocity_bytes": 140419,
+              "velocity_order_bytes": 375424
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.9999844729525539,
+              "z": 0.4999913722217548
+            },
+            "l2_error_bound": 0.055424631451157405,
+            "metadata_bytes": 2423,
+            "outlier_bytes": 243,
+            "position_bytes": 153860,
+            "quantizer": "cube",
+            "total_bytes": 675361,
+            "velocity_bytes": 518835,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 188,
+              "quantizer": "cube",
+              "total_bytes": 518835,
+              "velocity_bytes": 141389,
+              "velocity_order_bytes": 374850
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.9999844729525539,
+              "z": 0.4999913722217548
+            },
+            "l2_error_bound": 0.04156847358836806,
+            "metadata_bytes": 2451,
+            "outlier_bytes": 32258,
+            "position_bytes": 163677,
+            "quantizer": "to",
+            "total_bytes": 716903,
+            "velocity_bytes": 518517,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 194,
+              "quantizer": "cube",
+              "total_bytes": 518517,
+              "velocity_bytes": 142038,
+              "velocity_order_bytes": 373877
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.9999844729525539,
+              "z": 0.4999913722217548
+            },
+            "l2_error_bound": 0.055424631451157405,
+            "metadata_bytes": 2456,
+            "outlier_bytes": 70877,
+            "position_bytes": 137837,
+            "quantizer": "to",
+            "total_bytes": 731221,
+            "velocity_bytes": 520051,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 205,
+              "quantizer": "cube",
+              "total_bytes": 520051,
+              "velocity_bytes": 141912,
+              "velocity_order_bytes": 375526
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.9999844729525539,
+              "z": 0.4999913722217548
+            },
+            "l2_error_bound": 0.06928078931394675,
+            "metadata_bytes": 2455,
+            "outlier_bytes": 89837,
+            "position_bytes": 121151,
+            "quantizer": "to",
+            "total_bytes": 732975,
+            "velocity_bytes": 519532,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 191,
+              "quantizer": "cube",
+              "total_bytes": 519532,
+              "velocity_bytes": 141418,
+              "velocity_order_bytes": 375515
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.03577644576333607,
+            "metadata_bytes": 1175,
+            "outlier_bytes": 55,
+            "position_bytes": 201392,
+            "quantizer": "to",
+            "total_bytes": 722555,
+            "velocity_bytes": 519933,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 191,
+              "quantizer": "cube",
+              "total_bytes": 519933,
+              "velocity_bytes": 140071,
+              "velocity_order_bytes": 377263
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.055424631451157405,
+            "metadata_bytes": 1787,
+            "outlier_bytes": 142,
+            "position_bytes": 175505,
+            "quantizer": "cube",
+            "total_bytes": 695774,
+            "velocity_bytes": 518340,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 188,
+              "quantizer": "cube",
+              "total_bytes": 518340,
+              "velocity_bytes": 140313,
+              "velocity_order_bytes": 375431
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.05878752752647805,
+            "metadata_bytes": 1806,
+            "outlier_bytes": 51750,
+            "position_bytes": 154138,
+            "quantizer": "to",
+            "total_bytes": 727237,
+            "velocity_bytes": 519543,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 193,
+              "quantizer": "cube",
+              "total_bytes": 519543,
+              "velocity_bytes": 140003,
+              "velocity_order_bytes": 376939
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.07838337003530406,
+            "metadata_bytes": 2422,
+            "outlier_bytes": 72197,
+            "position_bytes": 131285,
+            "quantizer": "to",
+            "total_bytes": 725426,
+            "velocity_bytes": 519522,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 193,
+              "quantizer": "cube",
+              "total_bytes": 519522,
+              "velocity_bytes": 140016,
+              "velocity_order_bytes": 376905
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.07838337003530406,
+            "metadata_bytes": 1809,
+            "outlier_bytes": 62268,
+            "position_bytes": 145057,
+            "quantizer": "cube",
+            "total_bytes": 729026,
+            "velocity_bytes": 519892,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 186,
+              "quantizer": "cube",
+              "total_bytes": 519892,
+              "velocity_bytes": 140962,
+              "velocity_order_bytes": 376336
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.09797921254413007,
+            "metadata_bytes": 2425,
+            "outlier_bytes": 88623,
+            "position_bytes": 114482,
+            "quantizer": "to",
+            "total_bytes": 726529,
+            "velocity_bytes": 520999,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.8504251301895855,
+                "vz": 0.9782146660529172
+              },
+              "l2_error_bound": 6.294027162172636,
+              "metadata_bytes": 2408,
+              "outlier_bytes": 193,
+              "quantizer": "cube",
+              "total_bytes": 520999,
+              "velocity_bytes": 140707,
+              "velocity_order_bytes": 377691
+            }
+          }
+        ],
+        "sample_count": 196625,
+        "selected": {
+          "axis_scales": {
+            "x": 1.0,
+            "y": 0.9999844729525539,
+            "z": 0.4999913722217548
+          },
+          "l2_error_bound": 0.055424631451157405,
+          "metadata_bytes": 2423,
+          "outlier_bytes": 243,
+          "position_bytes": 153860,
+          "quantizer": "cube",
+          "total_bytes": 675361,
+          "velocity_bytes": 518835,
+          "velocity_score": {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.8504251301895855,
+              "vz": 0.9782146660529172
+            },
+            "l2_error_bound": 6.294027162172636,
+            "metadata_bytes": 2408,
+            "outlier_bytes": 188,
+            "quantizer": "cube",
+            "total_bytes": 518835,
+            "velocity_bytes": 141389,
+            "velocity_order_bytes": 374850
+          }
+        }
+      },
+      "relative_error_bound": 0.001,
+      "velocity_chunk_size": 65536,
+      "velocity_tuning": {
+        "candidates": [
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.8504251301895855,
+              "vz": 0.9782146660529172
+            },
+            "l2_error_bound": 4.062777063278625,
+            "metadata_bytes": 1202,
+            "outlier_bytes": 56,
+            "quantizer": "to",
+            "total_bytes": 556176,
+            "velocity_bytes": 182132,
+            "velocity_order_bytes": 372786
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.8504251301895855,
+              "vz": 0.9782146660529172
+            },
+            "l2_error_bound": 6.294027162172636,
+            "metadata_bytes": 2408,
+            "outlier_bytes": 191,
+            "quantizer": "cube",
+            "total_bytes": 527751,
+            "velocity_bytes": 156168,
+            "velocity_order_bytes": 368984
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.8504251301895855,
+              "vz": 0.9782146660529172
+            },
+            "l2_error_bound": 4.720520371629476,
+            "metadata_bytes": 2437,
+            "outlier_bytes": 32779,
+            "quantizer": "to",
+            "total_bytes": 572282,
+            "velocity_bytes": 166115,
+            "velocity_order_bytes": 370951
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.8504251301895855,
+              "vz": 0.9782146660529172
+            },
+            "l2_error_bound": 6.294027162172635,
+            "metadata_bytes": 2439,
+            "outlier_bytes": 72176,
+            "quantizer": "to",
+            "total_bytes": 576952,
+            "velocity_bytes": 137221,
+            "velocity_order_bytes": 365116
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.8504251301895855,
+              "vz": 0.9782146660529172
+            },
+            "l2_error_bound": 6.294027162172635,
+            "metadata_bytes": 2408,
+            "outlier_bytes": 191,
+            "quantizer": "cube",
+            "total_bytes": 527751,
+            "velocity_bytes": 156168,
+            "velocity_order_bytes": 368984
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.8504251301895855,
+              "vz": 0.9782146660529172
+            },
+            "l2_error_bound": 7.867533952715794,
+            "metadata_bytes": 2431,
+            "outlier_bytes": 91512,
+            "quantizer": "to",
+            "total_bytes": 567633,
+            "velocity_bytes": 116721,
+            "velocity_order_bytes": 356969
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 4.062777063278625,
+            "metadata_bytes": 556,
+            "outlier_bytes": 0,
+            "quantizer": "to",
+            "total_bytes": 562197,
+            "velocity_bytes": 188421,
+            "velocity_order_bytes": 373220
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 6.294027162172636,
+            "metadata_bytes": 1170,
+            "outlier_bytes": 60,
+            "quantizer": "cube",
+            "total_bytes": 534308,
+            "velocity_bytes": 163199,
+            "velocity_order_bytes": 369879
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 5.045834097023147,
+            "metadata_bytes": 2410,
+            "outlier_bytes": 32711,
+            "quantizer": "to",
+            "total_bytes": 571086,
+            "velocity_bytes": 165095,
+            "velocity_order_bytes": 370870
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 6.727778796030862,
+            "metadata_bytes": 2419,
+            "outlier_bytes": 72073,
+            "quantizer": "to",
+            "total_bytes": 576149,
+            "velocity_bytes": 136831,
+            "velocity_order_bytes": 364826
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 6.727778796030862,
+            "metadata_bytes": 1801,
+            "outlier_bytes": 24142,
+            "quantizer": "cube",
+            "total_bytes": 550529,
+            "velocity_bytes": 155865,
+            "velocity_order_bytes": 368721
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 8.409723495038579,
+            "metadata_bytes": 2411,
+            "outlier_bytes": 91464,
+            "quantizer": "to",
+            "total_bytes": 566262,
+            "velocity_bytes": 115501,
+            "velocity_order_bytes": 356886
+          }
+        ],
+        "rejected_candidates": [],
+        "sample_count": 196625,
+        "selected": {
+          "axis_scales": {
+            "vx": 1.0,
+            "vy": 0.8504251301895855,
+            "vz": 0.9782146660529172
+          },
+          "l2_error_bound": 6.294027162172636,
+          "metadata_bytes": 2408,
+          "outlier_bytes": 191,
+          "quantizer": "cube",
+          "total_bytes": 527751,
+          "velocity_bytes": 156168,
+          "velocity_order_bytes": 368984
+        }
+      },
+      "work_dir": "particle_pipeline_runs/xnyzip_both_chunked_linf"
+    },
+    "full_l2": {
+      "compressed_components_bytes": {
+        "compressed/positions.xnyzip": 13606720,
+        "compressed/velocities.xnyzip": 3529407,
+        "compressed/velocity_order.pco": 599144245,
+        "manifest.json": 16317
+      },
+      "compressed_total_bytes": 616296689,
+      "coordinate_bounds": {
+        "vx": {
+          "max_absolute_error": 11.063720703125,
+          "metric_norm": "l2",
+          "requested_axis_abs_bound": 6.908747802734375,
+          "strict_axis_satisfied": false
+        },
+        "vy": {
+          "max_absolute_error": 11.063720703125,
+          "metric_norm": "l2",
+          "requested_axis_abs_bound": 7.2435625,
+          "strict_axis_satisfied": false
+        },
+        "vz": {
+          "max_absolute_error": 11.063720703125,
+          "metric_norm": "l2",
+          "requested_axis_abs_bound": 7.26553662109375,
+          "strict_axis_satisfied": false
+        },
+        "x": {
+          "max_absolute_error": 0.3288421630859375,
+          "metric_norm": "l2",
+          "requested_axis_abs_bound": 0.06399999618530273,
+          "strict_axis_satisfied": false
+        },
+        "y": {
+          "max_absolute_error": 0.328857421875,
+          "metric_norm": "l2",
+          "requested_axis_abs_bound": 0.25599998474121094,
+          "strict_axis_satisfied": false
+        },
+        "z": {
+          "max_absolute_error": 0.328857421875,
+          "metric_norm": "l2",
+          "requested_axis_abs_bound": 0.25599998474121094,
+          "strict_axis_satisfied": false
+        }
+      },
+      "count": 280953867,
+      "native_triplets": {
+        "positions": {
+          "l2_error_bound": 0.3676519874646664,
+          "quantizer": "to"
+        },
+        "velocities": {
+          "l2_error_bound": 12.368832454425425,
+          "quantizer": "to"
+        }
+      },
+      "outlier_bytes": {
+        "positions": 0,
+        "velocities": 0
+      },
+      "payload_compression_ratio": 10.940984964467333,
+      "position_tuning": null,
+      "relative_error_bound": 0.001,
+      "velocity_chunk_size": 0,
+      "velocity_tuning": null,
+      "work_dir": "particle_pipeline_runs/xnyzip_both_full_baseline"
+    },
+    "full_linf": {
+      "compressed_components_bytes": {
+        "compressed/positions.xnyzip": 30413142,
+        "compressed/velocities.xnyzip": 4998336,
+        "compressed/velocity_order.pco": 643495736,
+        "compressed/vx.outliers": 36696,
+        "compressed/vy.outliers": 29282,
+        "compressed/vz.outliers": 36198,
+        "compressed/x.outliers": 28096,
+        "compressed/y.outliers": 26948,
+        "compressed/z.outliers": 27604,
+        "manifest.json": 36827
+      },
+      "compressed_total_bytes": 679128865,
+      "coordinate_bounds": {
+        "vx": {
+          "max_absolute_error": 6.908747673034668,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 6.908747802734375,
+          "strict_axis_satisfied": true
+        },
+        "vy": {
+          "max_absolute_error": 7.2435622215271,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 7.2435625,
+          "strict_axis_satisfied": true
+        },
+        "vz": {
+          "max_absolute_error": 7.2655364871025085,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 7.26553662109375,
+          "strict_axis_satisfied": true
+        },
+        "x": {
+          "max_absolute_error": 0.06399999558925629,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 0.06399999618530273,
+          "strict_axis_satisfied": true
+        },
+        "y": {
+          "max_absolute_error": 0.25599998235702515,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 0.25599998474121094,
+          "strict_axis_satisfied": true
+        },
+        "z": {
+          "max_absolute_error": 0.25599998235702515,
+          "metric_norm": "linf",
+          "requested_axis_abs_bound": 0.25599998474121094,
+          "strict_axis_satisfied": true
+        }
+      },
+      "count": 280953867,
+      "native_triplets": {
+        "positions": {
+          "axis_scales": {
+            "x": 1.0,
+            "y": 0.25,
+            "z": 0.25
+          },
+          "l2_error_bound": 0.11085124507715867,
+          "linf_validation": {
+            "x": {
+              "exact_count": 310,
+              "outlier_count": 2674,
+              "validated_max_abs_error": 0.06399999558925629
+            },
+            "y": {
+              "exact_count": 241,
+              "outlier_count": 2567,
+              "validated_max_abs_error": 0.25599998235702515
+            },
+            "z": {
+              "exact_count": 255,
+              "outlier_count": 2706,
+              "validated_max_abs_error": 0.25599998235702515
+            }
+          },
+          "quantizer": "cube"
+        },
+        "velocities": {
+          "axis_scales": {
+            "vx": 1.0,
+            "vy": 0.9537776201605735,
+            "vz": 0.9508929846525687
+          },
+          "l2_error_bound": 11.966302211015782,
+          "linf_validation": {
+            "vx": {
+              "exact_count": 307,
+              "outlier_count": 4511,
+              "validated_max_abs_error": 6.908747673034668
+            },
+            "vy": {
+              "exact_count": 5,
+              "outlier_count": 3344,
+              "validated_max_abs_error": 7.2435622215271
+            },
+            "vz": {
+              "exact_count": 7,
+              "outlier_count": 4920,
+              "validated_max_abs_error": 7.2655364871025085
+            }
+          },
+          "quantizer": "cube"
+        }
+      },
+      "outlier_bytes": {
+        "positions": 82648,
+        "velocities": 102176
+      },
+      "payload_compression_ratio": 9.928738352182984,
+      "position_tuning": {
+        "candidates": [
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.25,
+              "z": 0.25
+            },
+            "l2_error_bound": 0.07155417101503207,
+            "metadata_bytes": 562,
+            "outlier_bytes": 0,
+            "position_bytes": 71038,
+            "quantizer": "to",
+            "total_bytes": 704734,
+            "velocity_bytes": 633134,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 633134,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 508795
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.25,
+              "z": 0.25
+            },
+            "l2_error_bound": 0.11085124507715867,
+            "metadata_bytes": 2382,
+            "outlier_bytes": 227,
+            "position_bytes": 53893,
+            "quantizer": "cube",
+            "total_bytes": 689928,
+            "velocity_bytes": 633426,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 633426,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 509087
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.25,
+              "z": 0.25
+            },
+            "l2_error_bound": 0.083138433807869,
+            "metadata_bytes": 2407,
+            "outlier_bytes": 38042,
+            "position_bytes": 61841,
+            "quantizer": "to",
+            "total_bytes": 734459,
+            "velocity_bytes": 632169,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 632169,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 507830
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.25,
+              "z": 0.25
+            },
+            "l2_error_bound": 0.11085124507715867,
+            "metadata_bytes": 2409,
+            "outlier_bytes": 79013,
+            "position_bytes": 47082,
+            "quantizer": "to",
+            "total_bytes": 760103,
+            "velocity_bytes": 631599,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 631599,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 507260
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 0.25,
+              "z": 0.25
+            },
+            "l2_error_bound": 0.13856405634644833,
+            "metadata_bytes": 2409,
+            "outlier_bytes": 96025,
+            "position_bytes": 38193,
+            "quantizer": "to",
+            "total_bytes": 770033,
+            "velocity_bytes": 633406,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 633406,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 509067
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.07155417101503207,
+            "metadata_bytes": 1167,
+            "outlier_bytes": 68,
+            "position_bytes": 149209,
+            "quantizer": "to",
+            "total_bytes": 784287,
+            "velocity_bytes": 633843,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 633843,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 509504
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.11085124507715867,
+            "metadata_bytes": 1170,
+            "outlier_bytes": 85,
+            "position_bytes": 121572,
+            "quantizer": "cube",
+            "total_bytes": 755235,
+            "velocity_bytes": 632408,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 632408,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 508069
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.2757389905984998,
+            "metadata_bytes": 1180,
+            "outlier_bytes": 61533,
+            "position_bytes": 51662,
+            "quantizer": "to",
+            "total_bytes": 745759,
+            "velocity_bytes": 631384,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 631384,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 507045
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.36765198746466643,
+            "metadata_bytes": 2409,
+            "outlier_bytes": 100406,
+            "position_bytes": 38767,
+            "quantizer": "to",
+            "total_bytes": 773438,
+            "velocity_bytes": 631856,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 631856,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 507517
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.36765198746466643,
+            "metadata_bytes": 1177,
+            "outlier_bytes": 62612,
+            "position_bytes": 43831,
+            "quantizer": "cube",
+            "total_bytes": 739456,
+            "velocity_bytes": 631836,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 631836,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 507497
+            }
+          },
+          {
+            "axis_scales": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "l2_error_bound": 0.45956498433083304,
+            "metadata_bytes": 2409,
+            "outlier_bytes": 119929,
+            "position_bytes": 32962,
+            "quantizer": "to",
+            "total_bytes": 785944,
+            "velocity_bytes": 630644,
+            "velocity_score": {
+              "axis_scales": {
+                "vx": 1.0,
+                "vy": 0.9537776201605735,
+                "vz": 0.9508929846525687
+              },
+              "l2_error_bound": 11.966302211015782,
+              "metadata_bytes": 2379,
+              "outlier_bytes": 182,
+              "quantizer": "cube",
+              "total_bytes": 630644,
+              "velocity_bytes": 121778,
+              "velocity_order_bytes": 506305
+            }
+          }
+        ],
+        "sample_count": 262144,
+        "selected": {
+          "axis_scales": {
+            "x": 1.0,
+            "y": 0.25,
+            "z": 0.25
+          },
+          "l2_error_bound": 0.11085124507715867,
+          "metadata_bytes": 2382,
+          "outlier_bytes": 227,
+          "position_bytes": 53893,
+          "quantizer": "cube",
+          "total_bytes": 689928,
+          "velocity_bytes": 633426,
+          "velocity_score": {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.9537776201605735,
+              "vz": 0.9508929846525687
+            },
+            "l2_error_bound": 11.966302211015782,
+            "metadata_bytes": 2379,
+            "outlier_bytes": 182,
+            "quantizer": "cube",
+            "total_bytes": 633426,
+            "velocity_bytes": 121778,
+            "velocity_order_bytes": 509087
+          }
+        }
+      },
+      "relative_error_bound": 0.001,
+      "velocity_chunk_size": 0,
+      "velocity_tuning": {
+        "candidates": [
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.9537776201605735,
+              "vz": 0.9508929846525687
+            },
+            "l2_error_bound": 7.724214863158185,
+            "metadata_bytes": 1192,
+            "outlier_bytes": 55,
+            "quantizer": "to",
+            "total_bytes": 686710,
+            "velocity_bytes": 157121,
+            "velocity_order_bytes": 528342
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.9537776201605735,
+              "vz": 0.9508929846525687
+            },
+            "l2_error_bound": 11.966302211015782,
+            "metadata_bytes": 1795,
+            "outlier_bytes": 139,
+            "quantizer": "cube",
+            "total_bytes": 648544,
+            "velocity_bytes": 127798,
+            "velocity_order_bytes": 518812
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.9537776201605735,
+              "vz": 0.9508929846525687
+            },
+            "l2_error_bound": 8.974726658261837,
+            "metadata_bytes": 2415,
+            "outlier_bytes": 43563,
+            "quantizer": "to",
+            "total_bytes": 707152,
+            "velocity_bytes": 137902,
+            "velocity_order_bytes": 523272
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.9537776201605735,
+              "vz": 0.9508929846525687
+            },
+            "l2_error_bound": 11.966302211015782,
+            "metadata_bytes": 2414,
+            "outlier_bytes": 96204,
+            "quantizer": "to",
+            "total_bytes": 714687,
+            "velocity_bytes": 107541,
+            "velocity_order_bytes": 508528
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 0.9537776201605735,
+              "vz": 0.9508929846525687
+            },
+            "l2_error_bound": 14.957877763769726,
+            "metadata_bytes": 2414,
+            "outlier_bytes": 122361,
+            "quantizer": "to",
+            "total_bytes": 700037,
+            "velocity_bytes": 84015,
+            "velocity_order_bytes": 491247
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 7.724214863158185,
+            "metadata_bytes": 558,
+            "outlier_bytes": 0,
+            "quantizer": "to",
+            "total_bytes": 691293,
+            "velocity_bytes": 161530,
+            "velocity_order_bytes": 529205
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 11.966302211015782,
+            "metadata_bytes": 1158,
+            "outlier_bytes": 74,
+            "quantizer": "cube",
+            "total_bytes": 652565,
+            "velocity_bytes": 131368,
+            "velocity_order_bytes": 519965
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 9.276624340819069,
+            "metadata_bytes": 2387,
+            "outlier_bytes": 43390,
+            "quantizer": "to",
+            "total_bytes": 707399,
+            "velocity_bytes": 138117,
+            "velocity_order_bytes": 523505
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 12.368832454425425,
+            "metadata_bytes": 2392,
+            "outlier_bytes": 96182,
+            "quantizer": "to",
+            "total_bytes": 714542,
+            "velocity_bytes": 107628,
+            "velocity_order_bytes": 508340
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 12.368832454425425,
+            "metadata_bytes": 1180,
+            "outlier_bytes": 11637,
+            "quantizer": "cube",
+            "total_bytes": 659111,
+            "velocity_bytes": 127800,
+            "velocity_order_bytes": 518494
+          },
+          {
+            "axis_scales": {
+              "vx": 1.0,
+              "vy": 1.0,
+              "vz": 1.0
+            },
+            "l2_error_bound": 15.46104056803178,
+            "metadata_bytes": 2391,
+            "outlier_bytes": 122310,
+            "quantizer": "to",
+            "total_bytes": 700256,
+            "velocity_bytes": 84151,
+            "velocity_order_bytes": 491404
+          }
+        ],
+        "rejected_candidates": [],
+        "sample_count": 262144,
+        "selected": {
+          "axis_scales": {
+            "vx": 1.0,
+            "vy": 0.9537776201605735,
+            "vz": 0.9508929846525687
+          },
+          "l2_error_bound": 11.966302211015782,
+          "metadata_bytes": 1795,
+          "outlier_bytes": 139,
+          "quantizer": "cube",
+          "total_bytes": 648544,
+          "velocity_bytes": 127798,
+          "velocity_order_bytes": 518812
+        }
+      },
+      "work_dir": "particle_pipeline_runs/xnyzip_both_full_linf"
+    }
+  },
+  "chunked_standalone_decode": {
+    "after_sha256": {
+      "vx": "d42505b38037590de2f8a298d04e5e93164b28c57240074a8d04b0c6f51c8759",
+      "vy": "5223f6720ff64aec0dc84537e0a3229445c0c153e03aded0d188e2e5f9e3337c",
+      "vz": "45f02f008b19845c9bc6b96aadc74f29fb609f0c64b99aa76ef898cf1c030ab0",
+      "xx": "32180980f521ac8253a895599aef5d37375a747098ead73a9f263cb1d8190a6f",
+      "yy": "817be904039162dcf7e66af4397beedd7100a42da42277f324a9687c7960d9b6",
+      "zz": "8d7e55b4c263e06c5ba0cf14e6f89d7e3315d3c435518d257505cfd24d77abd4"
+    },
+    "before_sha256": {
+      "vx": "d42505b38037590de2f8a298d04e5e93164b28c57240074a8d04b0c6f51c8759",
+      "vy": "5223f6720ff64aec0dc84537e0a3229445c0c153e03aded0d188e2e5f9e3337c",
+      "vz": "45f02f008b19845c9bc6b96aadc74f29fb609f0c64b99aa76ef898cf1c030ab0",
+      "xx": "32180980f521ac8253a895599aef5d37375a747098ead73a9f263cb1d8190a6f",
+      "yy": "817be904039162dcf7e66af4397beedd7100a42da42277f324a9687c7960d9b6",
+      "zz": "8d7e55b4c263e06c5ba0cf14e6f89d7e3315d3c435518d257505cfd24d77abd4"
+    },
+    "bitwise_equal": true,
+    "particle_count": 1048593
+  },
+  "dtype": "float32",
+  "full_cr_loss_percent": 9.251878286751946,
+  "full_package_byte_increase_percent": 10.195118215214038,
+  "has_id": false,
+  "input": "data/EXASKY-HACC-data-medium-size",
+  "position_compressor": "xnyzip",
+  "regression_tests": {
+    "passed": 127,
+    "preexisting_failures": [
+      "test_batch_summary_reports_byte_weighted_field_group_crs: ANSI color codes; reproduced on unmodified HEAD"
+    ],
+    "total": 128
+  },
+  "velocity_compressor": "xnyzip"
+}
