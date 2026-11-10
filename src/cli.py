@@ -6,6 +6,8 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import yaml
 
+from src.qoi import QOI_CHOICES, QOI_DEFAULTS
+
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 BUILTIN_ADVANCED_DEFAULTS: Dict[str, Any] = {
@@ -90,11 +92,32 @@ def load_config(path: str) -> Tuple[Path, Dict[str, Any]]:
         raise RuntimeError(
             f"Config file {config_path} must contain a mapping."
         )
-    _reject_unknown_keys(payload, {"advanced"}, "config section")
+    _reject_unknown_keys(payload, {"advanced", "qoi"}, "config section")
     advanced = payload.get("advanced", {})
     if not isinstance(advanced, Mapping):
         raise RuntimeError("Config section advanced must be a mapping.")
-    return config_path, _validated_advanced_config(advanced, config_path)
+    qoi = payload.get("qoi", {})
+    if not isinstance(qoi, Mapping):
+        raise RuntimeError("Config section qoi must be a mapping.")
+    _reject_unknown_keys(qoi, set(QOI_DEFAULTS), "qoi config key")
+    qoi = {**QOI_DEFAULTS, **qoi}
+    if qoi["quantity"] not in (None, "none", *QOI_CHOICES):
+        raise RuntimeError("config value qoi.quantity must be a supported QoI name or null.")
+    for key in ("abs_eb", "rel_eb", "mass"):
+        value = qoi[key]
+        if value is not None:
+            if isinstance(value, bool):
+                raise RuntimeError(f"config value qoi.{key} must be numeric.")
+            try:
+                qoi[key] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"config value qoi.{key} must be numeric.") from exc
+    if qoi["mass"] is None:
+        raise RuntimeError("config value qoi.mass cannot be null.")
+    defaults = _validated_advanced_config(advanced, config_path)
+    defaults["qoi"] = qoi["quantity"]
+    defaults.update({f"qoi_{key}": qoi[key] for key in ("abs_eb", "rel_eb", "mass")})
+    return config_path, defaults
 
 
 def build_parser(
@@ -232,6 +255,7 @@ def _add_pipeline_command(
     _add_config_argument(command, argparse.SUPPRESS)
     _add_runtime_arguments(command, defaults)
     _add_compression_arguments(command, defaults)
+    _add_qoi_arguments(command, defaults)
     command.add_argument(
         "--file-workers",
         type=int,
@@ -552,6 +576,30 @@ def _add_compression_arguments(
         default=defaults["lossless"],
         help="ID and integer-sidecar compressor (default: %(default)s).",
     )
+
+
+class _QoiToleranceAction(argparse.Action):
+    """An explicit CLI tolerance replaces either YAML tolerance mode."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        other = "qoi_rel_eb" if self.dest == "qoi_abs_eb" else "qoi_abs_eb"
+        setattr(namespace, other, None)
+
+
+def _add_qoi_arguments(parser: argparse.ArgumentParser, defaults: Mapping[str, Any]) -> None:
+    group = parser.add_argument_group("QoI frontend (XnYZip + SZO; see QOI.md)")
+    group.add_argument("--qoi", choices=("none", *QOI_CHOICES), default=defaults["qoi"],
+                       help="Quantity to preserve for every particle; none disables QoI processing.")
+    bounds = group.add_mutually_exclusive_group()
+    bounds.add_argument("--qoi-abs-eb", type=float, action=_QoiToleranceAction,
+                        default=defaults["qoi_abs_eb"], metavar="TOLERANCE",
+                        help="Maximum absolute QoI error for every particle.")
+    bounds.add_argument("--qoi-rel-eb", type=float, action=_QoiToleranceAction,
+                        default=defaults["qoi_rel_eb"], metavar="FRACTION",
+                        help="QoI tolerance as a fraction of the original QoI range (not per-value relative error).")
+    group.add_argument("--qoi-mass", type=float, default=defaults["qoi_mass"], metavar="MASS",
+                       help="Constant positive particle mass for kinetic-energy (default: %(default)s).")
 
 
 def _reject_unknown_keys(

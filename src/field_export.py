@@ -312,6 +312,7 @@ def export_float_field(
     output: Path,
     count: int,
     force: bool,
+    require_finite: bool = False,
 ) -> Tuple[str, Dict[str, float]]:
     require_output_path(output, force)
     dtype = np.dtype(h5[dataset_path].dtype)
@@ -321,6 +322,8 @@ def export_float_field(
             f"got {dtype} for {dataset_path}."
         )
     source = h5[dataset_path][:count].astype(dtype, copy=False)
+    if require_finite and not np.isfinite(source).all():
+        raise RuntimeError(f"The QoI frontend requires finite velocity values in {dataset_path}.")
     source.tofile(output)
     range_stats = {"float_min": math.inf, "float_max": -math.inf}
     update_numeric_stats(range_stats, source)

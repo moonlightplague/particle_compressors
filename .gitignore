@@ -4,3 +4,4 @@ analysis
 *__pycache__/
 docs/
 paper/
+*.pdf

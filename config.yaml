@@ -1,3 +1,11 @@
+# Optional per-particle QoI preservation for the XnYZip + SZO pipeline.
+# See QOI.md for formulas, examples, tolerance units, and output reports.
+qoi:
+  quantity: null  # speed, kinetic-energy, vx-square, vy-square, or vz-square
+  abs_eb: null
+  rel_eb: null    # Fraction of the selected original QoI range; choose one bound.
+  mass: 1.0      # Constant particle mass used only by kinetic-energy.
+
 advanced:
   # Maximum concurrent file pipelines throughout a directory run.
   # 0 selects automatically; 1 processes all files in series.

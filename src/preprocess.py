@@ -45,6 +45,7 @@ from src.hdf5_io import (
 from src.models import ErrorBoundSelection, PositionScale, ToolPaths
 from src.native_snapshot import AdaptedParticleInput, adapt_particle_input
 from src.runtime import write_json
+from src.qoi import prepare_qoi, validate_qoi_args
 
 
 @dataclass(frozen=True)
@@ -218,6 +219,7 @@ class PreprocessingPipeline:
                 self.workspace.raw / f"{logical}.{dtype.name}.raw",
                 count,
                 self.args.force,
+                require_finite=getattr(self.args, "qoi", None) not in (None, "none"),
             )
             self.raw_paths[logical] = raw_path
             stats["preprocess_cast_max_abs"] = 0.0
@@ -308,6 +310,7 @@ class PreprocessingPipeline:
         manifest["sizes"] = {
             "selected_original_payload_bytes": selected_payload_bytes
         }
+        prepare_qoi(self.args, manifest, self.raw_paths)
         merge_metadata = getattr(self.args, "merge_metadata", None)
         if merge_metadata is not None:
             manifest["merge"] = dict(merge_metadata)
@@ -523,6 +526,7 @@ def preprocess(
 
 
 def _validate_preprocess_args(args: argparse.Namespace) -> None:
+    validate_qoi_args(args)
     validate_compressor_combination(
         args.pos_compressor,
         args.vel_compressor,

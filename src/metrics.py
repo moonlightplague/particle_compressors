@@ -17,6 +17,7 @@ from src.manifest import (
     velocity_compressor_from_manifest,
 )
 from src.runtime import read_raw
+from src.qoi import measure_reconstructed_qoi
 
 
 @dataclass
@@ -253,6 +254,7 @@ def field_group_compression_ratios(
             "compressed/velocities.xnyzip",
             "compressed/velocity_order.",
             "compressed/velocity_block_ids.",
+            "compressed/qoi.",
             "compressed/vx.",
             "compressed/vy.",
             "compressed/vz.",
@@ -412,6 +414,8 @@ def compute_metrics(
         "timing": dict(manifest.get("timing", {})),
         "order_dtype": str(order_dtype_from_manifest(manifest)),
     }
+    if "qoi" in manifest:
+        metrics["qoi"] = dict(manifest["qoi"])
 
     with h5py.File(original_h5, "r") as original, h5py.File(
         reconstructed_h5,
@@ -442,6 +446,10 @@ def compute_metrics(
         )
         if vector_metrics:
             metrics["xnyzip_l2"] = vector_metrics
+        if "qoi" in manifest:
+            metrics["qoi"]["reconstruction_validation"] = measure_reconstructed_qoi(
+                original, reconstructed, manifest, comparison_order,
+            )
 
     metrics["error_bound_consistency"] = _evaluate_error_bounds(
         metrics["fields"],

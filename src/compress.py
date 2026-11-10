@@ -50,6 +50,7 @@ from src.lcp_codec import (
 from src.manifest import update_compressed_size_metrics
 from src.models import CanonicalOrder, ToolPaths
 from src.position_ties import sort_position_ties
+from src.qoi import validate_and_store_qoi
 from src.xnyzip_linf import (
     linf_axis_scales, scale_native_positions, tune_linf_l2_bound,
     tune_linf_velocity_bound, write_linf_outliers,
@@ -339,6 +340,10 @@ class CompressionPipeline:
         else:
             self._compress_positions(canonical_order)
             self._compress_velocities(canonical_order)
+        validate_and_store_qoi(
+            self.manifest, self.raw_paths, canonical_order,
+            self.work_dir, self.settings.force,
+        )
         self._finalize(started)
         return self.manifest
 
@@ -1092,7 +1097,9 @@ class CompressionPipeline:
                 self.artifacts[logical],
                 logical,
                 self.count,
-                float(self.manifest["field_error_bounds"][logical]["abs"]),
+                float(self.manifest["field_error_bounds"][logical][
+                    "compressor_abs" if "qoi" in self.manifest else "abs"
+                ]),
                 self.settings.force,
                 szo_profile=(
                     SZO_ADAPTIVE_1D_PROFILE
@@ -1936,7 +1943,9 @@ class CompressionPipeline:
                 else 1
             ),
         }
-        if self.settings.xnyzip_linf_bound:
+        if "qoi" in self.manifest:
+            self.manifest["format_version"] = 11
+        elif self.settings.xnyzip_linf_bound:
             self.manifest["format_version"] = 10
         elif self.structured_layout is not None:
             self.manifest["format_version"] = 9

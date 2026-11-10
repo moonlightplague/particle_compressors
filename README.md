@@ -55,6 +55,10 @@ permutation sidecars (including blockwise order metadata). Reconstruction writes
 `reconstructed.h5` with the six original field names and float32 dtypes. Payload
 ratios count 24 source bytes per particle.
 
+For per-particle speed, kinetic-energy, or squared-velocity error control with
+XnYZip positions and SZO velocities, see the [QoI user manual](QOI.md).
+For example, add `--qoi speed --qoi-rel-eb 1e-4` to a roundtrip command.
+
 LCP/XnYZip positions establish canonical row order as usual, with velocities
 following the same particles. Roundtrip metrics use the temporary position
 permutation; compute them before deleting raw files (`--metrics --clean-raw`

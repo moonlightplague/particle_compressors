@@ -36,6 +36,7 @@ from src.manifest import (
     velocity_compressor_from_manifest,
 )
 from src.models import ToolPaths
+from src.qoi import apply_qoi_corrections
 from src.raw_codecs import (
     decompress_integer_raw,
     decompress_lossy_raw,
@@ -179,6 +180,7 @@ class DecompressionPipeline:
 
         recombine_started = time.perf_counter()
         recombine_h5(self.manifest, self.output_paths, self.output_h5)
+        apply_qoi_corrections(self.manifest, self.output_h5)
         recombine_seconds = time.perf_counter() - recombine_started
         self._finalize(started, recombine_seconds)
         return self.manifest

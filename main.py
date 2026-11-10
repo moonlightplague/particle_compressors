@@ -36,6 +36,7 @@ from src.models import ToolPaths
 from src.native_snapshot import AdaptedParticleInput, adapt_particle_inputs
 from src.preprocess import preprocess
 from src.runtime import read_json, resolve_field_workers, write_json
+from src.qoi import print_qoi_summary, validate_qoi_args
 
 
 class PipelineApplication:
@@ -62,8 +63,9 @@ class PipelineApplication:
         return 0
 
     def _preprocess(self) -> None:
-        preprocess(self.args)
+        manifest, _, _ = preprocess(self.args)
         self._print_package_paths()
+        print_qoi_summary(manifest)
 
     def _compress(self) -> None:
         manifest, raw_paths, tools = preprocess(self.args)
@@ -74,6 +76,7 @@ class PipelineApplication:
             f"{manifest['sizes']['payload_compression_ratio']:.6g}"
         )
         print_component_summary(manifest)
+        print_qoi_summary(manifest)
 
     def _decompress(self) -> None:
         manifest = decompress(
@@ -88,6 +91,7 @@ class PipelineApplication:
             "reconstructed_h5 = "
             f"{manifest['artifacts']['reconstructed_h5']}"
         )
+        print_qoi_summary(manifest)
 
     def _roundtrip(self) -> None:
         inherited_start = getattr(self.args, "roundtrip_started", None)
@@ -123,6 +127,7 @@ class PipelineApplication:
         )
         write_json(metrics_path, metrics, force=True)
         print_summary(metrics, metrics_path)
+        print_qoi_summary(metrics)
         self._print_runtime_summary(metrics)
 
     def _print_roundtrip_summary(self, manifest: Dict[str, Any]) -> None:
@@ -136,6 +141,7 @@ class PipelineApplication:
             f"{manifest['sizes']['payload_compression_ratio']:.6g}"
         )
         print_component_summary(manifest)
+        print_qoi_summary(manifest)
         self._print_runtime_summary(manifest)
 
     @staticmethod
@@ -147,6 +153,7 @@ class PipelineApplication:
         entries = (
             ("merge", "merge_wall_seconds", False),
             ("preprocess", "preprocess_wall_seconds", False),
+            ("qoi_prepare", "qoi_prepare_wall_seconds", True),
             ("compress", "compress_wall_seconds", False),
             ("canonical_order", "canonical_order_wall_seconds", True),
             ("structure_prepare", "structure_prepare_wall_seconds", True),
@@ -159,6 +166,7 @@ class PipelineApplication:
                 True,
             ),
             ("lossy_fields_compress", "lossy_fields_wall_seconds", True),
+            ("qoi_validate", "qoi_validate_wall_seconds", True),
             (
                 "decompress_and_recombine",
                 "decompress_and_recombine_wall_seconds",
@@ -441,6 +449,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     try:
         if hasattr(args, "pos_compressor"):
+            validate_qoi_args(args)
             validate_compressor_combination(
                 args.pos_compressor,
                 args.vel_compressor,
